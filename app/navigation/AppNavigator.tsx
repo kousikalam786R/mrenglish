@@ -214,12 +214,10 @@ const RootNavigator = () => {
 
 // Configure Google Sign In
 GoogleSignin.configure({
-  // TODO: Replace with your actual Web Client ID from Firebase console
-  // This can be obtained from:
-  // 1. Go to Firebase Console -> Authentication -> Sign-in method
-  // 2. Enable Google Sign-In
-  // 3. Configure the Web SDK configuration to get the Web Client ID
-  webClientId: '515525112654-hfm5anbsjqc59q9jvjnrqfj7rgvk5q8h.apps.googleusercontent.com', 
+  // Web Client ID from Firebase console
+  webClientId: '515525112654-hm8r60obc7l4epm3vcikq77vqr2ju9ur.apps.googleusercontent.com',
+  offlineAccess: true,
+  forceCodeForRefreshToken: true,
 });
 
 // App navigator with auth context

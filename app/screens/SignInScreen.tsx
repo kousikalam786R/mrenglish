@@ -58,11 +58,20 @@ const SignInScreen = () => {
       // Check if your device supports Google Play
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       // Get the users ID token
-      const userInfo = await GoogleSignin.signIn();
+      const response = await GoogleSignin.signIn();
       
+      console.log('response', response);
+      
+      // Access the idToken from the data property based on the console output structure
+      const idToken = (response as any)?.data?.idToken;
+      console.log('idToken', idToken);
+      
+      if (!idToken) {
+        throw new Error('Failed to get ID token from Google Sign In');
+      }
+
       // Create a Google credential with the token
-      // Note: idToken may be undefined in the type, but it should be present in the actual response
-      const googleCredential = auth.GoogleAuthProvider.credential(userInfo.idToken as string);
+      const googleCredential = auth.GoogleAuthProvider.credential(idToken);
 
       // Sign-in the user with the credential
       await auth().signInWithCredential(googleCredential);
