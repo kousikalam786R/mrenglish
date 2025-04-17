@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "515525112654",
+    "project_id": "mrenglish-82151",
+    "storage_bucket": "mrenglish-82151.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:515525112654:android:998c8d95e766d5918ce41f",
+        "android_client_info": {
+          "package_name": "com.mrenglish"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBZHCX1CttHQ60wgQZ0cIXM0w5lpG0FRSA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+} 
