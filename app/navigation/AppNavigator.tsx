@@ -7,7 +7,7 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { Text, View, StyleSheet, Platform } from 'react-native';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { AuthContext, AuthContextType, useAuth } from './index';
-import auth from '@react-native-firebase/auth';
+import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 // Screens
@@ -228,7 +228,7 @@ const AppNavigator = () => {
   const [isNavigationReady, setIsNavigationReady] = useState(false);
   
   // Handle user state changes
-  function onAuthStateChanged(user) {
+  function onAuthStateChanged(user: FirebaseAuthTypes.User | null) {
     setIsSignedIn(!!user);
     if (initializing) setInitializing(false);
   }
@@ -260,10 +260,16 @@ const AppNavigator = () => {
     signOut: async () => {
       console.log("Signing out");
       try {
+        // Sign out from Firebase
         await auth().signOut();
-        // Also sign out from Google if signed in with Google
-        if (await GoogleSignin.isSignedIn()) {
+        
+        // Try to sign out from Google regardless of sign-in state
+        try {
           await GoogleSignin.signOut();
+          console.log("Successfully signed out from Google");
+        } catch (googleError) {
+          // This is expected if user wasn't signed in with Google
+          console.log("Google sign out not needed or failed:", googleError);
         }
       } catch (error) {
         console.error('Error signing out: ', error);

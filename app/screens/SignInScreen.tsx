@@ -16,7 +16,13 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../navigation';
 import CustomInput from '../components/CustomInput';
 import auth from '@react-native-firebase/auth';
-import { GoogleSignin, User } from '@react-native-google-signin/google-signin';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Fixed server URL configuration - simpler approach
+const API_URL = 'http://192.168.29.151:5000/api';
+const SERVER_TIMEOUT_MS = 20000; // 20 seconds
+const DEBUG_MODE = true;
 
 const SignInScreen = () => {
   const [email, setEmail] = useState('');
@@ -25,6 +31,8 @@ const SignInScreen = () => {
   const [isSigninInProgress, setIsSigninInProgress] = useState(false);
   const navigation = useNavigation<AuthScreenNavigationProp>();
   const { signIn } = useAuth();
+
+  // Basic functions only to get past the error
 
   const handleSignIn = async () => {
     // Implement sign in logic here
@@ -60,22 +68,99 @@ const SignInScreen = () => {
       // Get the users ID token
       const response = await GoogleSignin.signIn();
       
-      console.log('response', response);
+      console.log('Full Google response:', JSON.stringify(response, null, 2));
       
-      // Access the idToken from the data property based on the console output structure
-      const idToken = (response as any)?.data?.idToken;
-      console.log('idToken', idToken);
-      
-      if (!idToken) {
-        throw new Error('Failed to get ID token from Google Sign In');
+      // Access the response based on the actual structure shown in the error log
+      // The actual structure is { type: "success", data: { idToken, user, ... } }
+      if (response.data) {
+        const idToken = response.data.idToken;
+        const user = response.data.user;
+        
+        // Validate user exists
+        if (!user) {
+          console.error('Google sign-in response missing user data:', response.data);
+          throw new Error('User data not found in Google sign-in response');
+        }
+        
+        // Create user data from the actual response structure
+        const userData = {
+          id: user.id || '',
+          name: user.name || '',
+          email: user.email || '',
+          photo: user.photo || ''
+        };
+        
+        console.log('Using idToken:', idToken ? `${idToken.substring(0, 20)}...` : 'undefined');
+        console.log('Using userData:', userData);
+        
+        if (!idToken) {
+          throw new Error('Failed to get ID token from Google Sign In');
+        }
+        
+        // Create a Google credential with the token
+        const googleCredential = auth.GoogleAuthProvider.credential(idToken);
+
+        // Sign-in the user with the credential
+        const firebaseUserCredential = await auth().signInWithCredential(googleCredential);
+        console.log('Google sign-in successful');
+        
+        // Send ID token to the server
+        try {
+          console.log('Attempting server connection to:', `${API_URL}/auth/google`);
+          
+          // Create a timeout promise to abort fetch if it takes too long
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Request timeout - server took too long to respond')), SERVER_TIMEOUT_MS);
+          });
+          
+          // Race between the fetch and the timeout
+          const fetchResponse = await Promise.race([
+            fetch(`${API_URL}/auth/google`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+              },
+              body: JSON.stringify({
+                idToken,
+                userData
+              }),
+            }),
+            timeoutPromise
+          ]) as Response;
+          
+          const data = await fetchResponse.json();
+          
+          if (fetchResponse.ok) {
+            console.log('Server authentication successful', data);
+            // Store JWT token from server response if provided
+            if (data.token) {
+              try {
+                // Store token in AsyncStorage
+                await AsyncStorage.setItem('auth_token', data.token);
+                console.log('JWT token stored successfully');
+              } catch (storageError) {
+                console.error('Error storing token:', storageError);
+              }
+            }
+          } else {
+            console.error('Server authentication failed:', data.message);
+            // The server authentication failed, but Firebase auth succeeded
+            Alert.alert('Warning', 'Server authentication failed, but Firebase login succeeded.');
+          }
+        } catch (serverError: any) {
+          console.error('Error sending token to server:', serverError);
+          console.error('Error details:', serverError.message);
+          
+          // Server request failed but Firebase auth succeeded
+          Alert.alert(
+            'Warning', 
+            'Could not connect to server, but Firebase login succeeded. Error: ' + serverError.message
+          );
+        }
+      } else {
+        throw new Error('Invalid Google sign-in response format');
       }
-
-      // Create a Google credential with the token
-      const googleCredential = auth.GoogleAuthProvider.credential(idToken);
-
-      // Sign-in the user with the credential
-      await auth().signInWithCredential(googleCredential);
-      console.log('Google sign-in successful');
     } catch (error: any) {
       console.error(error);
       if (error.code === 'auth/sign-in-cancelled') {
