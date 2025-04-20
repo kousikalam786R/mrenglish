@@ -12,12 +12,15 @@ import 'react-native-gesture-handler';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AppNavigator from './app/navigation/AppNavigator';
 import { StyleSheet } from 'react-native';
+import SocketProvider from './app/utils/SocketProvider';
 
 function App(): React.JSX.Element {
   return (
     <GestureHandlerRootView style={styles.container}>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-        <AppNavigator />
+        <SocketProvider>
+          <AppNavigator />
+        </SocketProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

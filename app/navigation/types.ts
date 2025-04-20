@@ -1,5 +1,6 @@
 import { RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { ChatUser } from '../types/Message';
 
 // Auth stack parameter list
 export type AuthStackParamList = {
@@ -21,13 +22,13 @@ export type AppStackParamList = {
 // Stack parameter lists for nested navigators
 export type ChatsStackParamList = {
   ChatsMain: undefined;
-  ChatDetail: { id: string; name: string };
+  ChatDetail: { id: string; name: string; user?: ChatUser };
   Call: { id: string; name: string; isVideoCall?: boolean };
 };
 
 export type ContactsStackParamList = {
   ContactsMain: undefined;
-  ChatDetail: { id: string; name: string };
+  ChatDetail: { id: string; name: string; user?: ChatUser };
   Call: { id: string; name: string; isVideoCall?: boolean };
 };
 

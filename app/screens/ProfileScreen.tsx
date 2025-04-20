@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,28 +9,98 @@ import {
   Alert,
   Platform,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../navigation';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Mock user data
-const USER = {
-  id: '1',
-  name: 'Alex Johnson',
-  avatar: 'https://randomuser.me/api/portraits/men/32.jpg',
-  level: 'Intermediate',
-  points: 3750,
-  streak: 12,
-  calls: 28,
-  minutes: 342,
-  interests: ['Travel', 'Movies', 'Technology', 'Sports', 'Food'],
-  bio: 'Hello! I\'m learning English to improve my career options. I love discussing technology and travel experiences. I\'m looking for conversation partners who can help me practice business English.',
-  country: '🇧🇷 Brazil',
-};
+// Define types for better type checking
+interface Activity {
+  text: string;
+  time: string;
+}
+
+// Extend AuthContextType to include user
+interface ExtendedAuthContext {
+  signOut: () => void;
+  user?: {
+    _id?: string;
+    name?: string;
+    email?: string;
+    profilePic?: string;
+  };
+}
+
+// Define user data structure
+interface UserData {
+  _id?: string;
+  name?: string;
+  email?: string;
+  profilePic?: string;
+  level?: string;
+  points?: number;
+  streak?: number;
+  calls?: number;
+  minutes?: number;
+  interests?: string[];
+  bio?: string;
+  country?: string;
+  recentActivity?: Activity[];
+}
+
+// Default interests to use if user doesn't have any
+const DEFAULT_INTERESTS = ['Travel', 'Movies', 'Technology', 'Sports', 'Food'];
 
 const ProfileScreen = () => {
   const [activeTab, setActiveTab] = useState<'stats' | 'about'>('stats');
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth() as ExtendedAuthContext;
+  const [loading, setLoading] = useState(false);
+  const [userData, setUserData] = useState<UserData | null>(null);
+  
+  // Fetch full user profile when screen loads
+  useEffect(() => {
+    const fetchUserProfile = async () => {
+      try {
+        setLoading(true);
+        
+        // Try to get cached user data first
+        const userId = await AsyncStorage.getItem('userId');
+        const cachedUser = await AsyncStorage.getItem('user');
+        
+        if (cachedUser) {
+          setUserData(JSON.parse(cachedUser));
+        } else if (user) {
+          // If no cached data but we have user from auth context
+          setUserData(user);
+        }
+        
+        // Set default values if needed
+        if (!userData) {
+          setUserData({
+            _id: userId || undefined,
+            name: user?.name || 'User',
+            email: user?.email || '',
+            profilePic: user?.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg',
+            level: 'Beginner',
+            points: 0,
+            streak: 0,
+            calls: 0,
+            minutes: 0,
+            interests: DEFAULT_INTERESTS,
+            bio: 'No bio yet',
+            country: 'Unknown'
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching user profile:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchUserProfile();
+  }, [user]);
   
   const handleLogout = () => {
     Alert.alert(
@@ -50,14 +120,21 @@ const ProfileScreen = () => {
   };
   
   const renderProfileHeader = () => {
+    if (!userData) return null;
+    
     return (
       <View style={styles.profileHeader}>
-        <Image source={{ uri: USER.avatar }} style={styles.avatar} />
-        <Text style={styles.userName}>{USER.name}</Text>
+        <Image 
+          source={{ 
+            uri: userData.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg' 
+          }} 
+          style={styles.avatar} 
+        />
+        <Text style={styles.userName}>{userData.name || 'User'}</Text>
         <View style={styles.levelContainer}>
-          <Text style={styles.levelText}>{USER.level}</Text>
+          <Text style={styles.levelText}>{userData.level || 'Beginner'}</Text>
         </View>
-        <Text style={styles.countryText}>{USER.country}</Text>
+        <Text style={styles.countryText}>{userData.country || 'Unknown'}</Text>
         
         <TouchableOpacity style={styles.editButton}>
           <Text style={styles.editButtonText}>Edit Profile</Text>
@@ -87,66 +164,74 @@ const ProfileScreen = () => {
   };
   
   const renderStatsContent = () => {
+    if (!userData) return null;
+    
     return (
       <View style={styles.statsContainer}>
         <View style={styles.statsRow}>
           <View style={styles.statBox}>
-            <Text style={styles.statValue}>{USER.points}</Text>
+            <Text style={styles.statValue}>{userData.points || 0}</Text>
             <Text style={styles.statLabel}>Total Points</Text>
           </View>
           
           <View style={styles.statBox}>
-            <Text style={styles.statValue}>{USER.streak}</Text>
+            <Text style={styles.statValue}>{userData.streak || 0}</Text>
             <Text style={styles.statLabel}>Day Streak</Text>
           </View>
         </View>
         
         <View style={styles.statsRow}>
           <View style={styles.statBox}>
-            <Text style={styles.statValue}>{USER.calls}</Text>
+            <Text style={styles.statValue}>{userData.calls || 0}</Text>
             <Text style={styles.statLabel}>Calls Made</Text>
           </View>
           
           <View style={styles.statBox}>
-            <Text style={styles.statValue}>{USER.minutes}</Text>
+            <Text style={styles.statValue}>{userData.minutes || 0}</Text>
             <Text style={styles.statLabel}>Minutes</Text>
           </View>
         </View>
         
         <View style={styles.activityContainer}>
           <Text style={styles.sectionTitle}>Recent Activity</Text>
-          <View style={styles.activityItem}>
-            <View style={styles.activityDot} />
-            <Text style={styles.activityText}>Call with Sarah J. (15 min)</Text>
-            <Text style={styles.activityTime}>2h ago</Text>
-          </View>
-          <View style={styles.activityItem}>
-            <View style={styles.activityDot} />
-            <Text style={styles.activityText}>Call with Michael C. (28 min)</Text>
-            <Text style={styles.activityTime}>Yesterday</Text>
-          </View>
-          <View style={styles.activityItem}>
-            <View style={styles.activityDot} />
-            <Text style={styles.activityText}>Call with Emma W. (10 min)</Text>
-            <Text style={styles.activityTime}>2 days ago</Text>
-          </View>
+          {userData.recentActivity && userData.recentActivity.length > 0 ? (
+            userData.recentActivity.map((activity: Activity, index: number) => (
+              <View key={index} style={styles.activityItem}>
+                <View style={styles.activityDot} />
+                <Text style={styles.activityText}>{activity.text}</Text>
+                <Text style={styles.activityTime}>{activity.time}</Text>
+              </View>
+            ))
+          ) : (
+            <>
+              <View style={styles.activityItem}>
+                <View style={styles.activityDot} />
+                <Text style={styles.activityText}>No recent activity</Text>
+                <Text style={styles.activityTime}></Text>
+              </View>
+            </>
+          )}
         </View>
       </View>
     );
   };
   
   const renderAboutContent = () => {
+    if (!userData) return null;
+    
+    const interests = userData.interests || DEFAULT_INTERESTS;
+    
     return (
       <View style={styles.aboutContainer}>
         <View style={styles.bioContainer}>
           <Text style={styles.sectionTitle}>Bio</Text>
-          <Text style={styles.bioText}>{USER.bio}</Text>
+          <Text style={styles.bioText}>{userData.bio || 'No bio yet.'}</Text>
         </View>
         
         <View style={styles.interestsContainer}>
           <Text style={styles.sectionTitle}>Interests</Text>
           <View style={styles.interestsWrapper}>
-            {USER.interests.map((interest, index) => (
+            {interests.map((interest: string, index: number) => (
               <View key={index} style={styles.interestItem}>
                 <Text style={styles.interestText}>{interest}</Text>
               </View>
@@ -172,6 +257,14 @@ const ProfileScreen = () => {
       </View>
     );
   };
+  
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4A90E2" />
+      </View>
+    );
+  }
   
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -456,6 +549,11 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '600',
     fontSize: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 

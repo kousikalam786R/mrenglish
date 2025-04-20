@@ -18,10 +18,11 @@ import CustomInput from '../components/CustomInput';
 import auth from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { saveAuthData } from '../utils/authUtils';
+import { API_URL, API_ENDPOINTS, BASE_URL } from '../utils/config';
 
-// Fixed server URL configuration - simpler approach
-const API_URL = 'http://192.168.29.151:5000/api';
-const SERVER_TIMEOUT_MS = 20000; // 20 seconds
+// Server request timeout
+const SERVER_TIMEOUT_MS = 30000; // 30 seconds (increased from 20 seconds)
 const DEBUG_MODE = true;
 
 const SignInScreen = () => {
@@ -32,7 +33,161 @@ const SignInScreen = () => {
   const navigation = useNavigation<AuthScreenNavigationProp>();
   const { signIn } = useAuth();
 
-  // Basic functions only to get past the error
+  // Test server connectivity focusing on working methods
+  const testServerConnection = async () => {
+    try {
+      // Show testing in progress
+      Alert.alert('Testing Server Connection', 'Running connection tests, please wait...');
+      
+      // Check network connectivity
+      console.log('Checking network connectivity...');
+      console.log('API_URL:', API_URL);
+      
+      // Test only the endpoints that are known to work
+      const testUrls = [
+        { name: 'LAN IP Root', url: 'http://192.168.29.151:5000' },
+        { name: 'LAN IP Test Endpoint', url: 'http://192.168.29.151:5000/test' },
+        { name: 'LAN IP API Root', url: 'http://192.168.29.151:5000/api' },
+        { name: 'LAN IP Google Auth', url: 'http://192.168.29.151:5000/api/auth/google' },
+      ];
+      
+      let results = '';
+      
+      // Add platform info to results
+      results += `Device Platform: ${Platform.OS}\n`;
+      results += `API URL configured as: ${API_URL}\n`;
+      results += `Using LAN IP: 192.168.29.151\n\n`;
+      
+      for (const endpoint of testUrls) {
+        try {
+          console.log(`Testing ${endpoint.name}: ${endpoint.url}`);
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          
+          const response = await fetch(endpoint.url, {
+            method: endpoint.url.includes('/auth/google') ? 'OPTIONS' : 'GET', // Use OPTIONS for auth endpoint
+            signal: controller.signal,
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+              'Cache-Control': 'no-cache'
+            },
+          });
+          
+          clearTimeout(timeoutId);
+          let responseText = '';
+          
+          try {
+            // Only try to read text for GET responses
+            if (endpoint.url.includes('/auth/google')) {
+              responseText = `Status: ${response.status}`;
+            } else {
+              responseText = await response.text();
+            }
+          } catch (e) {
+            responseText = `Status: ${response.status}`;
+          }
+          
+          console.log(`${endpoint.name} response:`, responseText);
+          results += `✅ ${endpoint.name}: Success\n`;
+        } catch (endpointError: any) {
+          console.error(`${endpoint.name} test failed:`, endpointError.message);
+          results += `❌ ${endpoint.name}: ${endpointError.message}\n`;
+        }
+      }
+      
+      Alert.alert('Server Connection Tests', results, [
+        {
+          text: 'OK',
+          onPress: () => {
+            // After testing connections, also try to ping google.com to verify internet
+            testInternetConnection();
+          }
+        }
+      ]);
+    } catch (error: any) {
+      console.error('Server connection tests failed:', error.message);
+      Alert.alert('Server Error', `Tests failed: ${error.message}`);
+    }
+  };
+
+  // Test basic internet connectivity
+  const testInternetConnection = async () => {
+    try {
+      console.log('Testing internet connectivity to google.com...');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch('https://www.google.com', {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      console.log('Internet connection successful! Google responded with status:', response.status);
+      Alert.alert('Internet Connection', 'Successfully connected to google.com. Internet is working.');
+    } catch (error: any) {
+      console.error('Internet connection test failed:', error.message);
+      Alert.alert('Internet Connection Error', `Failed to connect to google.com: ${error.message}`);
+    }
+  };
+
+  const testGoogleAuthEndpoint = async () => {
+    try {
+      console.log('Testing Google Auth endpoint directly...');
+      
+      // Create test data
+      const testData = {
+        idToken: 'test_token',
+        userData: {
+          id: 'test_id',
+          email: 'test@example.com',
+          name: 'Test User',
+          photo: 'https://example.com/photo.jpg'
+        }
+      };
+      
+      // Create a timeout promise to abort fetch if it takes too long
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      // Use direct LAN IP since that's what our tests showed works
+      const directLanIpEndpoint = 'http://192.168.29.151:5000/api/auth/google';
+      
+      // Try POST to the Google Auth endpoint
+      console.log('Sending test POST to:', directLanIpEndpoint);
+      
+      try {
+        const response = await fetch(directLanIpEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          signal: controller.signal,
+          body: JSON.stringify(testData)
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Google Auth test POST successful:', data);
+          Alert.alert('Success', 'Google Auth endpoint is working!');
+        } else {
+          const errorText = await response.text();
+          console.error('Google Auth test POST failed:', response.status, errorText);
+          Alert.alert('Error', `Response status: ${response.status}\n${errorText}`);
+        }
+      } catch (error: any) {
+        console.error('Google Auth test POST error:', error.message);
+        Alert.alert('Error', `Could not connect to Google Auth endpoint: ${error.message}`);
+      }
+    } catch (error: any) {
+      console.error('Google Auth test error:', error.message);
+      Alert.alert('Error', `Test failed: ${error.message}`);
+    }
+  };
 
   const handleSignIn = async () => {
     // Implement sign in logic here
@@ -44,8 +199,15 @@ const SignInScreen = () => {
     try {
       setIsSigninInProgress(true);
       // Sign in with email and password
-      await auth().signInWithEmailAndPassword(email, password);
+      const userCredential = await auth().signInWithEmailAndPassword(email, password);
       console.log('User signed in!');
+      
+      // Get user token
+      const idToken = await userCredential.user.getIdToken();
+      
+      // Store the token and user ID
+      await saveAuthData(idToken, userCredential.user.uid);
+      
     } catch (error: any) {
       console.error(error);
       if (error.code === 'auth/invalid-email') {
@@ -106,7 +268,9 @@ const SignInScreen = () => {
         
         // Send ID token to the server
         try {
-          console.log('Attempting server connection to:', `${API_URL}/auth/google`);
+          // Use direct LAN IP since that's what works
+          const googleAuthEndpoint = 'http://192.168.29.151:5000/api/auth/google';
+          console.log('Attempting server connection to:', googleAuthEndpoint);
           
           // Create a timeout promise to abort fetch if it takes too long
           const timeoutPromise = new Promise((_, reject) => {
@@ -115,7 +279,7 @@ const SignInScreen = () => {
           
           // Race between the fetch and the timeout
           const fetchResponse = await Promise.race([
-            fetch(`${API_URL}/auth/google`, {
+            fetch(googleAuthEndpoint, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -136,9 +300,9 @@ const SignInScreen = () => {
             // Store JWT token from server response if provided
             if (data.token) {
               try {
-                // Store token in AsyncStorage
-                await AsyncStorage.setItem('auth_token', data.token);
-                console.log('JWT token stored successfully');
+                // Use the new auth utilities to store token
+                await saveAuthData(data.token, data.userId || firebaseUserCredential.user.uid);
+                console.log('Authentication data stored successfully');
               } catch (storageError) {
                 console.error('Error storing token:', storageError);
               }
@@ -146,17 +310,37 @@ const SignInScreen = () => {
           } else {
             console.error('Server authentication failed:', data.message);
             // The server authentication failed, but Firebase auth succeeded
-            Alert.alert('Warning', 'Server authentication failed, but Firebase login succeeded.');
+            // Fall back to using Firebase credentials
+            console.log('Falling back to Firebase authentication...');
+            const firebaseToken = await firebaseUserCredential.user.getIdToken();
+            await saveAuthData(firebaseToken, firebaseUserCredential.user.uid);
+            console.log('Saved Firebase credentials as fallback');
+            
+            Alert.alert('Warning', 'Server authentication failed, but Firebase login succeeded. Using Firebase authentication as fallback.');
           }
         } catch (serverError: any) {
           console.error('Error sending token to server:', serverError);
           console.error('Error details:', serverError.message);
           
           // Server request failed but Firebase auth succeeded
-          Alert.alert(
-            'Warning', 
-            'Could not connect to server, but Firebase login succeeded. Error: ' + serverError.message
-          );
+          // Fall back to using Firebase credentials
+          try {
+            console.log('Falling back to Firebase authentication after server error...');
+            const firebaseToken = await firebaseUserCredential.user.getIdToken();
+            await saveAuthData(firebaseToken, firebaseUserCredential.user.uid);
+            console.log('Saved Firebase credentials as fallback after server error');
+            
+            Alert.alert(
+              'Warning', 
+              'Server connection failed, but Firebase login succeeded. Using Firebase authentication as fallback.'
+            );
+          } catch (fallbackError) {
+            console.error('Error in Firebase fallback:', fallbackError);
+            Alert.alert(
+              'Error',
+              'Failed to save authentication data. Please try again.'
+            );
+          }
         }
       } else {
         throw new Error('Invalid Google sign-in response format');
@@ -182,6 +366,25 @@ const SignInScreen = () => {
         <ScrollView contentContainerStyle={styles.scrollContainer}>
           <Text style={styles.title}>Welcome Back</Text>
           <Text style={styles.subtitle}>Sign in to continue</Text>
+
+          {/* Add test buttons for debugging */}
+          {DEBUG_MODE && (
+            <View style={styles.debugButtonsContainer}>
+              <TouchableOpacity
+                style={[styles.debugButton, { backgroundColor: '#888' }]}
+                onPress={testServerConnection}
+              >
+                <Text style={styles.buttonText}>Test Server</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[styles.debugButton, { backgroundColor: '#5a5' }]}
+                onPress={testGoogleAuthEndpoint}
+              >
+                <Text style={styles.buttonText}>Test Google Auth</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           <View style={styles.form}>
             <CustomInput
@@ -279,6 +482,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 30,
     color: '#666',
+  },
+  debugButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+    gap: 10,
+  },
+  debugButton: {
+    flex: 1,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+    paddingHorizontal: 10,
   },
   form: {
     marginBottom: 30,
