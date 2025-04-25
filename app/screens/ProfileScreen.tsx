@@ -14,6 +14,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../navigation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getUserProfile, UserProfile, testApiConnection } from '../utils/profileService';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/types';
 
 // Define types for better type checking
 interface Activity {
@@ -53,54 +57,164 @@ interface UserData {
 const DEFAULT_INTERESTS = ['Travel', 'Movies', 'Technology', 'Sports', 'Food'];
 
 const ProfileScreen = () => {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [activeTab, setActiveTab] = useState<'stats' | 'about'>('stats');
   const { signOut, user } = useAuth() as ExtendedAuthContext;
-  const [loading, setLoading] = useState(false);
-  const [userData, setUserData] = useState<UserData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [userData, setUserData] = useState<UserProfile | null>(null);
   
   // Fetch full user profile when screen loads
   useEffect(() => {
-    const fetchUserProfile = async () => {
-      try {
-        setLoading(true);
-        
-        // Try to get cached user data first
-        const userId = await AsyncStorage.getItem('userId');
-        const cachedUser = await AsyncStorage.getItem('user');
-        
-        if (cachedUser) {
-          setUserData(JSON.parse(cachedUser));
-        } else if (user) {
-          // If no cached data but we have user from auth context
-          setUserData(user);
-        }
-        
-        // Set default values if needed
-        if (!userData) {
-          setUserData({
-            _id: userId || undefined,
-            name: user?.name || 'User',
-            email: user?.email || '',
-            profilePic: user?.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg',
-            level: 'Beginner',
-            points: 0,
-            streak: 0,
-            calls: 0,
-            minutes: 0,
-            interests: DEFAULT_INTERESTS,
-            bio: 'No bio yet',
-            country: 'Unknown'
-          });
-        }
-      } catch (error) {
-        console.error('Error fetching user profile:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
     fetchUserProfile();
-  }, [user]);
+  }, []);
+  
+  // Function to fetch the user profile
+  const fetchUserProfile = async () => {
+    try {
+      setLoading(true);
+      
+      console.log('Attempting to fetch user profile from API...');
+      
+      // First test if API is reachable
+      const isApiReachable = await testApiConnection();
+      
+      if (!isApiReachable) {
+        console.log('⚠️ API server is not reachable, skipping profile fetch');
+        // Proceed directly to fallback methods
+        await loadFromCachedData();
+        return;
+      }
+      
+      // Try to get profile from API
+      const profile = await getUserProfile();
+      
+      if (profile) {
+        console.log('✅ Successfully received profile from API:', JSON.stringify(profile).substring(0, 200));
+        
+        // Set the user data with profile information
+        setUserData({
+          ...profile,
+          // Set defaults for missing fields
+          level: profile.level || 'Beginner',
+          points: profile.points || 0,
+          streak: profile.streak || 0,
+          calls: profile.calls || 0,
+          minutes: profile.minutes || 0,
+          interests: profile.interests || DEFAULT_INTERESTS,
+          bio: profile.bio || 'No bio yet',
+          country: profile.country || 'Unknown',
+          recentActivity: profile.recentActivity || []
+        });
+      } else {
+        console.log('❌ Failed to get profile from API, falling back to cached data');
+        await loadFromCachedData();
+      }
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+      await loadFromCachedData();
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Helper function to load from cached data
+  const loadFromCachedData = async () => {
+    // Fallback to cached user data
+    const cachedUser = await AsyncStorage.getItem('user');
+    const userId = await AsyncStorage.getItem('userId') || '';
+    
+    if (cachedUser) {
+      try {
+        console.log('Found cached user data, parsing...');
+        const parsedUser = JSON.parse(cachedUser);
+        console.log('Cached user ID:', parsedUser._id);
+        
+        setUserData({
+          _id: parsedUser._id || userId,
+          name: parsedUser.name || 'User',
+          email: parsedUser.email || '',
+          profilePic: parsedUser.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg',
+          level: 'Beginner',
+          points: 0,
+          streak: 0,
+          calls: 0,
+          minutes: 0,
+          interests: DEFAULT_INTERESTS,
+          bio: 'No bio yet',
+          country: 'Unknown'
+        });
+      } catch (parseError) {
+        console.error('Error parsing cached user:', parseError);
+        fallbackToAuthUser();
+      }
+    } else {
+      console.log('No cached user data found, falling back to auth user');
+      fallbackToAuthUser();
+    }
+  };
+  
+  // Helper function to use auth user as fallback
+  const fallbackToAuthUser = () => {
+    if (user) {
+      setUserData({
+        _id: user._id,
+        name: user.name || 'User',
+        email: user.email || '',
+        profilePic: user.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg',
+        level: 'Beginner',
+        points: 0,
+        streak: 0,
+        calls: 0,
+        minutes: 0,
+        interests: DEFAULT_INTERESTS,
+        bio: 'No bio yet',
+        country: 'Unknown'
+      });
+    } else {
+      // Create minimal profile
+      setUserData({
+        name: 'Guest User',
+        email: '',
+        profilePic: 'https://randomuser.me/api/portraits/men/32.jpg',
+        level: 'Beginner',
+        interests: DEFAULT_INTERESTS,
+        bio: 'No bio yet',
+        country: 'Unknown'
+      });
+    }
+  };
+  
+  const handleEditProfile = () => {
+    // Navigate to edit profile screen
+    if (userData) {
+      navigation.navigate('EditProfile', { userData });
+    } else {
+      Alert.alert('Error', 'Unable to edit profile. Please try again later.');
+    }
+  };
+  
+  // Function to manually test API connection and retry profile fetch
+  const handleRetryConnection = async () => {
+    try {
+      setLoading(true);
+      
+      Alert.alert('Testing Server Connection', 'Attempting to connect to the server...');
+      
+      const isConnected = await testApiConnection();
+      
+      if (isConnected) {
+        Alert.alert('Connection Successful', 'Successfully connected to the server. Fetching profile data...');
+        await fetchUserProfile();
+      } else {
+        Alert.alert('Connection Failed', 'Could not connect to the server. Please check your network connection and server status.');
+      }
+    } catch (error) {
+      console.error('Error testing connection:', error);
+      Alert.alert('Error', 'An error occurred while testing the connection.');
+    } finally {
+      setLoading(false);
+    }
+  };
   
   const handleLogout = () => {
     Alert.alert(
@@ -136,7 +250,10 @@ const ProfileScreen = () => {
         </View>
         <Text style={styles.countryText}>{userData.country || 'Unknown'}</Text>
         
-        <TouchableOpacity style={styles.editButton}>
+        <TouchableOpacity 
+          style={styles.editButton}
+          onPress={handleEditProfile}
+        >
           <Text style={styles.editButtonText}>Edit Profile</Text>
         </TouchableOpacity>
       </View>
@@ -287,6 +404,14 @@ const ProfileScreen = () => {
             <Text style={styles.settingsButtonText}>Settings</Text>
           </TouchableOpacity>
         </View>
+        
+        {/* Add connection retry button */}
+        <TouchableOpacity 
+          style={styles.retryButton}
+          onPress={handleRetryConnection}
+        >
+          <Text style={styles.retryButtonText}>Test Server Connection</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -554,6 +679,19 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#4A90E2',
+    paddingVertical: 12,
+    borderRadius: 50,
+    margin: 20,
+    marginTop: 0,
+    alignItems: 'center',
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });
 

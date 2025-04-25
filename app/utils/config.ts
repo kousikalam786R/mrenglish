@@ -12,12 +12,33 @@ let BASE_HOST = LOCAL_IP;
 
 // Special handling for Android emulators - directly use 10.0.2.2
 if (Platform.OS === 'android' && __DEV__) {
-  if (Platform.constants.uiMode?.includes('emulator')) {
-    console.log('Detected Android emulator - using 10.0.2.2 to connect to host');
-    BASE_HOST = '10.0.2.2';
-  } else {
-    console.log('Detected Android physical device - using LOCAL_IP:', LOCAL_IP);
-    BASE_HOST = LOCAL_IP;
+  try {
+    // More reliable emulator detection
+    const isEmulator = !!(
+      Platform.constants.Brand?.includes('google') ||
+      Platform.constants.Manufacturer?.includes('Genymotion') ||
+      Platform.constants.Fingerprint?.startsWith('google/sdk_gphone') ||
+      Platform.constants.Fingerprint?.includes('generic') ||
+      Platform.constants.uiMode?.includes('emulator')
+    );
+    
+    if (isEmulator) {
+      console.log('Detected Android emulator - using 10.0.2.2 to connect to host');
+      BASE_HOST = '10.0.2.2';
+    } else {
+      console.log('Detected Android physical device - using LOCAL_IP:', LOCAL_IP);
+      BASE_HOST = LOCAL_IP;
+    }
+  } catch (e) {
+    // Fallback detection method
+    console.log('Error in emulator detection, using alternative method');
+    if (Platform.constants.uiMode?.includes('emulator')) {
+      console.log('Fallback detected Android emulator - using 10.0.2.2');
+      BASE_HOST = '10.0.2.2';
+    } else {
+      console.log('Assuming physical device - using LOCAL_IP:', LOCAL_IP);
+      BASE_HOST = LOCAL_IP;
+    }
   }
 } else if (Platform.OS === 'ios' && __DEV__) {
   if (Platform.isPad || Platform.isTV) {
@@ -46,7 +67,7 @@ export const API_ENDPOINTS = {
   LOGIN: `${API_URL}/auth/login`,
   REGISTER: `${API_URL}/auth/register`,
   MESSAGES: `${API_URL}/messages`,
-  USER: `${API_URL}/auth/user`,
+  USER: `${API_URL}/auth/me`,
   GOOGLE_AUTH: `${API_URL}/auth/google`,
 };
 

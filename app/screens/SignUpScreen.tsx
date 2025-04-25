@@ -15,7 +15,12 @@ import { useNavigation } from '@react-navigation/native';
 import { AuthScreenNavigationProp } from '../navigation/types';
 import { useAuth } from '../navigation';
 import CustomInput from '../components/CustomInput';
+import { saveAuthData } from '../utils/authUtils';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import auth from '@react-native-firebase/auth';
+
+// Server request timeout
+const SERVER_TIMEOUT_MS = 30000; // 30 seconds
 
 const SignUpScreen = () => {
   const [name, setName] = useState('');
@@ -28,7 +33,7 @@ const SignUpScreen = () => {
   const { signIn } = useAuth();
 
   const handleSignUp = async () => {
-    // Implement sign up logic here
+    // Validate inputs
     if (!name || !email || !password || !confirmPassword) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
@@ -46,29 +51,78 @@ const SignUpScreen = () => {
     
     try {
       setLoading(true);
-      // Create user with email and password
-      const userCredential = await auth().createUserWithEmailAndPassword(email, password);
       
-      // Update user profile with name
-      await userCredential.user.updateProfile({
-        displayName: name
+      // Use direct server API for manual signup
+      const signupEndpoint = 'http://192.168.29.151:5000/api/auth/signup';
+      console.log('Attempting manual signup with server:', signupEndpoint);
+      
+      // Create a timeout promise
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Request timeout - server took too long to respond')), SERVER_TIMEOUT_MS);
       });
       
-      console.log('User account created!');
-    } catch (error: any) {
-      console.error(error);
-      if (error.code === 'auth/email-already-in-use') {
-        Alert.alert('Error', 'Email address is already in use!');
-      } else if (error.code === 'auth/invalid-email') {
-        Alert.alert('Error', 'Email address is invalid!');
-      } else if (error.code === 'auth/weak-password') {
-        Alert.alert('Error', 'Password is too weak!');
+      // Race between the fetch and the timeout
+      const response = await Promise.race([
+        fetch(signupEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            name,
+            email,
+            password
+          }),
+        }),
+        timeoutPromise
+      ]) as Response;
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        console.log('Server signup successful', data);
+        
+        // Store JWT token from server response
+        if (data.token) {
+          try {
+            // Use the auth utilities to store token
+            await saveAuthData(data.token, data.user.id);
+            console.log('Authentication data stored successfully');
+            console.log('Manually updating auth state...');
+            signIn();
+            console.log('Auth state updated, navigation should occur automatically');
+          } catch (storageError) {
+            console.error('Error storing token:', storageError);
+            Alert.alert('Error', 'Account created, but failed to save authentication data');
+          }
+        } else {
+          Alert.alert('Success', 'Account created successfully! Please sign in.');
+          navigation.navigate('SignIn');
+        }
       } else {
-        Alert.alert('Error', error.message);
+        // Handle server error responses
+        console.error('Server signup failed:', data.message);
+        Alert.alert('Signup Failed', data.message || 'Failed to create account');
       }
+    } catch (error: any) {
+      console.error('Signup error:', error);
+      Alert.alert('Error', error.message || 'An error occurred during sign up');
     } finally {
       setLoading(false);
     }
+  };
+
+  // Add Google Sign-in handler
+  const handleGoogleSignUp = async () => {
+    // Navigate to SignIn and use its Google sign-in functionality
+    navigation.navigate('SignIn');
+    
+    // You can also show a message explaining
+    Alert.alert(
+      'Google Sign Up',
+      'Redirecting to sign in with Google. After signing in, your account will be created automatically.'
+    );
   };
 
   return (
@@ -137,7 +191,10 @@ const SignUpScreen = () => {
           </View>
 
           <View style={styles.socialButtons}>
-            <TouchableOpacity style={[styles.socialButton, styles.googleButton]}>
+            <TouchableOpacity 
+              style={[styles.socialButton, styles.googleButton]}
+              onPress={handleGoogleSignUp}
+            >
               <Ionicons name="logo-google" size={20} color="#fff" />
               <Text style={styles.socialButtonText}>Sign up with Google</Text>
             </TouchableOpacity>

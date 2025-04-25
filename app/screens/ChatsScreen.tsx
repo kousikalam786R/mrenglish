@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -31,6 +31,20 @@ const ChatItem = ({
   onPress: () => void 
 }) => {
   const lastMessageTime = chat.lastMessage ? new Date(chat.lastMessage.createdAt) : null;
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  
+  // Get current user ID for message formatting
+  useEffect(() => {
+    const getUserId = async () => {
+      try {
+        const userId = await AsyncStorage.getItem('userId');
+        setCurrentUserId(userId);
+      } catch (error) {
+        console.error('Error getting user ID:', error);
+      }
+    };
+    getUserId();
+  }, []);
   
   // Format time
   const formatTime = (date: Date): string => {
@@ -55,6 +69,23 @@ const ChatItem = ({
   
   // Whether to show profile pic or avatar circle with initial
   const hasProfilePic = chat.profilePic && chat.profilePic !== '';
+  
+  // Format the last message with sender info
+  const getFormattedLastMessage = () => {
+    if (!chat.lastMessage) return 'No messages yet';
+    
+    // Check if the last message was sent by current user
+    const isMyMessage = chat.lastMessage.sender === currentUserId ||
+                       (typeof chat.lastMessage.sender === 'object' && 
+                        chat.lastMessage.sender?._id === currentUserId);
+    
+    // Format based on who sent it
+    const prefix = isMyMessage ? 'You: ' : '';
+    return `${prefix}${chat.lastMessage.content}`;
+  };
+  
+  // Dynamic last message content
+  const lastMessageContent = getFormattedLastMessage();
 
   return (
     <TouchableOpacity 
@@ -81,10 +112,13 @@ const ChatItem = ({
         
         <View style={styles.chatFooter}>
           <Text 
-            style={styles.lastMessage} 
+            style={[
+              styles.lastMessage, 
+              chat.unreadCount > 0 ? styles.unreadMessage : null
+            ]} 
             numberOfLines={1}
           >
-            {chat.lastMessage ? chat.lastMessage.content : 'No messages yet'}
+            {lastMessageContent}
           </Text>
           
           {chat.unreadCount > 0 && (
@@ -102,69 +136,12 @@ const ChatItem = ({
 const ChatsScreen = () => {
   const navigation = useNavigation<ChatsStackNavigationProp>();
   const { signOut } = useAuth();
+  
   const [chats, setChats] = useState<ChatUser[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [authError, setAuthError] = useState<boolean>(false);
-  const [showReal, setShowReal] = useState<boolean>(true);
   
-  // Load dummy data for testing when no chats are available
-  const loadDummyChats = () => {
-    const dummyChats: ChatUser[] = [
-      {
-        _id: 'dummy1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        profilePic: '',
-        isOnline: true,
-        lastMessage: {
-          _id: 'msg1',
-          content: 'Hey, how are you doing?',
-          sender: 'dummy1',
-          receiver: 'currentUser',
-          createdAt: new Date(Date.now() - 1000 * 60 * 5).toISOString(), // 5 minutes ago
-          read: false
-        },
-        unreadCount: 1
-      },
-      {
-        _id: 'dummy2',
-        name: 'Jane Smith',
-        email: 'jane@example.com',
-        profilePic: '',
-        isOnline: false,
-        lastMessage: {
-          _id: 'msg2',
-          content: 'Let me know when you are free to talk',
-          sender: 'currentUser',
-          receiver: 'dummy2',
-          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), // 2 hours ago
-          read: true
-        },
-        unreadCount: 0
-      },
-      {
-        _id: 'dummy3',
-        name: 'Alex Johnson',
-        email: 'alex@example.com',
-        profilePic: '',
-        isOnline: true,
-        lastMessage: {
-          _id: 'msg3',
-          content: 'The meeting is scheduled for tomorrow at 10am',
-          sender: 'dummy3',
-          receiver: 'currentUser',
-          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), // 1 day ago
-          read: true
-        },
-        unreadCount: 0
-      }
-    ];
-    
-    return dummyChats;
-  };
-  
-  // New function to load real users
   const loadRealUsers = async () => {
     try {
       console.log('Loading real users...');
@@ -177,17 +154,26 @@ const ChatsScreen = () => {
       if (users && users.length > 0) {
         // Log all users' IDs and info for debugging
         users.forEach((user, index) => {
-          console.log(`User ${index}: ID=${user._id}, name=${user.name}, isValid=${/^[0-9a-fA-F]{24}$/.test(user._id)}`);
+          console.log(`User ${index}: ID=${user._id}, name=${user.name}`);
         });
         
-        // Convert users to ChatUser format
+        // Convert users to ChatUser format with necessary defaults
         const chatUsers: ChatUser[] = users.map(user => ({
           _id: user._id,
           name: user.name || 'Unknown User',
           email: user.email || '',
           profilePic: user.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg',
           unreadCount: 0,
-          isOnline: false
+          isOnline: false,
+          // Add dummy last message to make the UI look better
+          lastMessage: {
+            _id: `dummy_${user._id}`,
+            content: 'Start a conversation',
+            sender: user._id,
+            receiver: 'you',
+            createdAt: new Date().toISOString(),
+            read: true
+          }
         }));
         
         setChats(chatUsers);
@@ -195,43 +181,67 @@ const ChatsScreen = () => {
         return true;
       } else {
         console.log('No real users found');
+        
+        // Show message to user
+        Alert.alert(
+          'No Users Found',
+          'Could not find any users to chat with. Please try again later.',
+          [{ text: 'OK' }]
+        );
+        
         return false;
       }
     } catch (error: any) {
       console.error('Error loading real users:', error.message);
+      
+      // Show error to user
+      Alert.alert(
+        'Error',
+        'Could not load users. ' + (error.message || 'Please try again later.'),
+        [{ text: 'OK' }]
+      );
+      
       return false;
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
   
   const fetchChats = async () => {
     try {
       setAuthError(false);
+      setLoading(true);
       
       // First try to get real chats
       const recentChats = await getRecentChats();
       
       if (recentChats && recentChats.length > 0) {
         console.log('Found real chats:', recentChats.length);
-        setChats(recentChats);
-        setShowReal(true);
+        
+        // Ensure each chat has required information
+        const validatedChats = recentChats.map(chat => {
+          // Create a fully validated chat object with default values for missing fields
+          return {
+            ...chat,
+            name: chat.name || 'Unknown User',
+            email: chat.email || '',
+            profilePic: chat.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg'
+          };
+        });
+        
+        setChats(validatedChats);
+        console.log('Set validated chats:', validatedChats.length);
       } else {
-        console.log('No real chats found, trying to load real users instead');
+        console.log('No real chats found, loading real users instead');
         
-        // If no real chats, try to load real users
-        const hasRealUsers = await loadRealUsers();
-        
-        if (!hasRealUsers) {
-          console.log('No real users found, loading dummy data for testing');
-          setChats(loadDummyChats());
-          setShowReal(false);
-        }
+        // If no real chats, load real users
+        await loadRealUsers();
       }
     } catch (error: any) {
       console.error('Error fetching chats:', error);
       
-      if (error.message === 'No authentication token found') {
+      if (error.message && error.message.includes('authentication')) {
         setAuthError(true);
         // Alert with login again option
         Alert.alert(
@@ -245,19 +255,9 @@ const ChatsScreen = () => {
           ]
         );
       } else {
-        // If server connection fails, try to load real users first
+        // If server connection fails, try to load real users
         console.log('Server connection error, trying to load real users');
-        const hasRealUsers = await loadRealUsers();
-        
-        if (!hasRealUsers) {
-          // If that fails too, load dummy data
-          console.log('Loading dummy data as fallback');
-          setChats(loadDummyChats());
-          setShowReal(false);
-          
-          // Show an alert about the error
-          Alert.alert('Connection Error', 'Could not connect to the server. Showing sample data for testing.');
-        }
+        await loadRealUsers();
       }
     } finally {
       setLoading(false);
@@ -325,8 +325,23 @@ const ChatsScreen = () => {
   
   // Simple navigation to chat detail
   const handleChatPress = (chat: ChatUser) => {
+    console.log('Chat pressed:', chat);
+    
+    // Create a properly structured chat object that works with both formats
+    // (flat structure or nested user object)
+    const finalChat: ChatUser = {
+      _id: chat._id || (chat.user?._id || ''),
+      name: chat.name || (chat.user?.name || 'Unknown User'),
+      email: chat.email || (chat.user?.email || ''),
+      profilePic: chat.profilePic || (chat.user?.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg'),
+      unreadCount: chat.unreadCount || 0,
+      isOnline: chat.isOnline || false,
+      lastMessage: chat.lastMessage
+    };
+    
     // Make sure we have a chat ID
-    if (!chat || !chat._id) {
+    if (!finalChat._id) {
+      console.error('Missing chat ID:', chat);
       Alert.alert(
         'Invalid Chat',
         'This chat is missing required information.',
@@ -335,65 +350,31 @@ const ChatsScreen = () => {
       return;
     }
     
-    // Debug chat info
-    console.log('Navigating to chat:', {
-      id: chat._id,
-      name: chat.name,
-      valid: /^[0-9a-fA-F]{24}$/.test(chat._id),
-      isDummy: chat._id.startsWith('dummy')
-    });
+    console.log('Navigating with fixed chat object:', finalChat);
     
-    // For dummy chats or test chats, allow any ID format
-    // For real users, we expect MongoDB ObjectIDs (24-char hex strings)
-    const isDummyChat = chat._id.startsWith('dummy');
-    const isValidMongoId = /^[0-9a-fA-F]{24}$/.test(chat._id);
-    
-    // Only check MongoDB ID format for non-dummy IDs
-    if (!isDummyChat && !isValidMongoId) {
-      console.log('Invalid chat ID format:', chat._id);
+    // Check MongoDB ID format for consistency
+    const isValidMongoId = /^[0-9a-fA-F]{24}$/.test(finalChat._id);
+    if (!isValidMongoId) {
+      console.warn('Invalid chat ID format:', finalChat._id);
       
-      // Instead of blocking navigation, treat it as a new conversation
+      // Show warning but allow conversation
       Alert.alert(
-        'New Conversation',
-        'Starting a new conversation with this user.',
-        [{ text: 'OK' }]
+        'Warning',
+        'This contact has an unusual ID format. Some features might not work correctly.',
+        [{ text: 'Continue Anyway' }]
       );
     }
     
-    // Make sure user object is properly formatted
-    const userForNavigation = {
-      ...chat,
-      _id: chat._id, // Ensure ID is passed
-      name: chat.name || 'Unknown User',
-      email: chat.email || '',
-      profilePic: chat.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg'
-    };
-    
     navigation.navigate('ChatDetail', { 
-      id: chat._id,
-      name: chat.name || 'Unknown User',
-      user: userForNavigation
+      id: finalChat._id,
+      name: finalChat.name,
+      user: finalChat
     });
   };
   
   const handleRefresh = () => {
     setRefreshing(true);
     fetchChats();
-  };
-
-  // Toggle between real and dummy users/chats
-  const toggleDataSource = () => {
-    if (showReal) {
-      setChats(loadDummyChats());
-      setShowReal(false);
-    } else {
-      loadRealUsers().then(success => {
-        if (!success) {
-          Alert.alert('No Real Users', 'Could not load real users. Check your connection and try again.');
-        }
-      });
-      setShowReal(true);
-    }
   };
 
   if (authError) {
@@ -426,14 +407,11 @@ const ChatsScreen = () => {
       <View style={styles.header}>
         <Text style={styles.title}>Messages</Text>
         
-        {/* Toggle Data Source Button */}
         <TouchableOpacity 
-          style={styles.toggleButton}
-          onPress={toggleDataSource}
+          style={styles.refreshButton} 
+          onPress={() => loadRealUsers()}
         >
-          <Text style={styles.toggleButtonText}>
-            {showReal ? 'Show Dummy Data' : 'Show Real Users'}
-          </Text>
+          <Text style={styles.refreshButtonText}>Find Users</Text>
         </TouchableOpacity>
       </View>
       
@@ -459,13 +437,13 @@ const ChatsScreen = () => {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>
-              No messages yet. Start a conversation with someone from your contacts.
+              No messages or contacts found. Pull down to refresh or tap the button below to find users.
             </Text>
             <TouchableOpacity 
               style={styles.refreshButton}
               onPress={() => loadRealUsers()}
             >
-              <Text style={styles.refreshButtonText}>Load Users</Text>
+              <Text style={styles.refreshButtonText}>Find Users</Text>
             </TouchableOpacity>
           </View>
         }
@@ -527,17 +505,6 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: '#333333',
-  },
-  toggleButton: {
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  toggleButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: 'bold',
   },
   refreshButton: {
     backgroundColor: '#4A90E2',
@@ -604,6 +571,10 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: '#666666',
+  },
+  unreadMessage: {
+    fontWeight: 'bold',
+    color: '#333333',
   },
   unreadBadge: {
     backgroundColor: '#4A90E2',

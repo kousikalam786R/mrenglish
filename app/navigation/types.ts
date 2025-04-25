@@ -17,6 +17,7 @@ export type AppStackParamList = {
   Ranking: undefined;
   Contacts: undefined;
   Profile: undefined;
+  EditProfile: { userData: any };
 };
 
 // Stack parameter lists for nested navigators

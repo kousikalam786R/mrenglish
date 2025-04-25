@@ -190,7 +190,7 @@ const SignInScreen = () => {
   };
 
   const handleSignIn = async () => {
-    // Implement sign in logic here
+    // Validate inputs
     if (!email || !password) {
       Alert.alert('Error', 'Please enter both email and password');
       return;
@@ -198,25 +198,63 @@ const SignInScreen = () => {
     
     try {
       setIsSigninInProgress(true);
-      // Sign in with email and password
-      const userCredential = await auth().signInWithEmailAndPassword(email, password);
-      console.log('User signed in!');
       
-      // Get user token
-      const idToken = await userCredential.user.getIdToken();
+      // Use direct server API for manual login
+      const loginEndpoint = 'http://192.168.29.151:5000/api/auth/login';
+      console.log('Attempting manual login with server:', loginEndpoint);
       
-      // Store the token and user ID
-      await saveAuthData(idToken, userCredential.user.uid);
+      // Create a timeout promise
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Request timeout - server took too long to respond')), SERVER_TIMEOUT_MS);
+      });
       
-    } catch (error: any) {
-      console.error(error);
-      if (error.code === 'auth/invalid-email') {
-        Alert.alert('Error', 'That email address is invalid!');
-      } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-        Alert.alert('Error', 'Invalid email or password');
+      // Race between the fetch and the timeout
+      const response = await Promise.race([
+        fetch(loginEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            email,
+            password
+          }),
+        }),
+        timeoutPromise
+      ]) as Response;
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        console.log('Server login successful', data);
+        
+        // Store JWT token from server response
+        if (data.token) {
+          try {
+            // Use the auth utilities to store token
+            await saveAuthData(data.token, data.user.id);
+            console.log('Authentication data stored successfully');
+            
+            // Explicitly call signIn to update auth state
+            console.log('Manually updating auth state...');
+            signIn();
+            console.log('Auth state updated, navigation should occur automatically');
+          } catch (storageError) {
+            console.error('Error storing token:', storageError);
+            Alert.alert('Error', 'Failed to save authentication data');
+          }
+        } else {
+          throw new Error('No token received from server');
+        }
       } else {
-        Alert.alert('Error', error.message || 'An error occurred during sign in');
+        // Handle server error responses
+        console.error('Server login failed:', data.message);
+        Alert.alert('Login Failed', data.message || 'Invalid email or password');
       }
+    } catch (error: any) {
+      console.error('Login error:', error);
+      Alert.alert('Error', error.message || 'An error occurred during sign in');
     } finally {
       setIsSigninInProgress(false);
     }
@@ -303,6 +341,7 @@ const SignInScreen = () => {
                 // Use the new auth utilities to store token
                 await saveAuthData(data.token, data.userId || firebaseUserCredential.user.uid);
                 console.log('Authentication data stored successfully');
+                signIn();
               } catch (storageError) {
                 console.error('Error storing token:', storageError);
               }
@@ -315,6 +354,7 @@ const SignInScreen = () => {
             const firebaseToken = await firebaseUserCredential.user.getIdToken();
             await saveAuthData(firebaseToken, firebaseUserCredential.user.uid);
             console.log('Saved Firebase credentials as fallback');
+            signIn();
             
             Alert.alert('Warning', 'Server authentication failed, but Firebase login succeeded. Using Firebase authentication as fallback.');
           }
@@ -329,6 +369,7 @@ const SignInScreen = () => {
             const firebaseToken = await firebaseUserCredential.user.getIdToken();
             await saveAuthData(firebaseToken, firebaseUserCredential.user.uid);
             console.log('Saved Firebase credentials as fallback after server error');
+            signIn();
             
             Alert.alert(
               'Warning', 

@@ -9,6 +9,7 @@ import ErrorBoundary from '../components/ErrorBoundary';
 import { AuthContext, AuthContextType, useAuth } from './index';
 import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Screens
 import LobbyScreen from '../screens/LobbyScreen';
@@ -16,6 +17,7 @@ import ChatsScreen from '../screens/ChatsScreen';
 import RankingScreen from '../screens/RankingScreen';
 import ContactsScreen from '../screens/ContactsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import EditProfileScreen from '../screens/EditProfileScreen';
 import ChatDetailScreen from '../screens/ChatDetailScreen';
 import CallScreen from '../screens/CallScreen';
 
@@ -204,7 +206,10 @@ const RootNavigator = () => {
   return (
     <Stack.Navigator screenOptions={screenOptions}>
       {isSignedIn ? (
-        <Stack.Screen name="Main" component={MainNavigator} />
+        <>
+          <Stack.Screen name="Main" component={MainNavigator} />
+          <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+        </>
       ) : (
         <Stack.Screen name="Auth" component={AuthNavigator} />
       )}
@@ -237,6 +242,23 @@ const AppNavigator = () => {
     // Subscribe to auth state changes
     const subscriber = auth().onAuthStateChanged(onAuthStateChanged);
     
+    // Check for manual authentication token
+    const checkManualAuth = async () => {
+      try {
+        const token = await AsyncStorage.getItem('authToken');
+        // If token exists, set isSignedIn to true for manual auth
+        if (token) {
+          console.log('Found manual auth token, setting signed in state');
+          setIsSignedIn(true);
+        }
+      } catch (error) {
+        console.error('Error checking manual auth token:', error);
+      }
+    };
+    
+    // Run manual auth check
+    checkManualAuth();
+    
     // Initialize navigation after a short delay
     const timer = setTimeout(() => {
       setIsNavigationReady(true);
@@ -254,14 +276,21 @@ const AppNavigator = () => {
     isSignedIn,
     signIn: async () => {
       console.log("Signing in");
-      // This is handled by Firebase Auth now
-      // This function remains for compatibility with current code
+      // Set isSignedIn to true for manual login flows
+      setIsSignedIn(true);
     },
     signOut: async () => {
       console.log("Signing out");
       try {
-        // Sign out from Firebase
-        await auth().signOut();
+        // Check if a Firebase user exists before attempting to sign out
+        const currentUser = auth().currentUser;
+        if (currentUser) {
+          // Sign out from Firebase if a user exists
+          await auth().signOut();
+          console.log("Successfully signed out from Firebase");
+        } else {
+          console.log("No Firebase user to sign out");
+        }
         
         // Try to sign out from Google regardless of sign-in state
         try {
@@ -271,8 +300,13 @@ const AppNavigator = () => {
           // This is expected if user wasn't signed in with Google
           console.log("Google sign out not needed or failed:", googleError);
         }
+        
+        // Always set isSignedIn to false for manual login flows
+        setIsSignedIn(false);
       } catch (error) {
-        console.error('Error signing out: ', error);
+        console.error('Error during sign out process:', error);
+        // Even if there's an error, still set isSignedIn to false to ensure the user can log out
+        setIsSignedIn(false);
       }
     },
   }), [isSignedIn]);

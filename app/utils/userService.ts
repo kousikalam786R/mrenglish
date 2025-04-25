@@ -53,9 +53,9 @@ export const getAllUsers = async (): Promise<User[]> => {
       console.log('Current user ID from userId key:', currentUserId);
     }
     
-    // Construct URL for fetching users
-    // Use the route specified in your server (might be /api/auth/users or /api/users)
-    const url = getApiUrl(`${API_URL}/auth/users`);
+    // Construct URL for fetching users - IMPORTANT: Fix the URL
+    // The correct endpoint might be /api/auth/users or /api/users
+    const url = getApiUrl(`${API_ENDPOINTS.USER}s`); // Add 's' to make it /api/auth/users
     console.log('Fetching users from:', url);
     console.log('Using token (first 10 chars):', token.substring(0, 10) + '...');
     
@@ -71,74 +71,116 @@ export const getAllUsers = async (): Promise<User[]> => {
       // Even if response is not OK, try to get the response text for debugging
       const responseText = await response.text();
       console.log('Response status:', response.status);
-      console.log('Response text:', responseText.substring(0, 100) + '...');
+      console.log('Response text preview:', responseText.substring(0, 200) + '...');
       
       if (!response.ok) {
-        let errorMessage = 'Failed to fetch users';
-        try {
-          const errorData = JSON.parse(responseText);
-          errorMessage = errorData.message || errorMessage;
-        } catch (e) {
-          console.error('Error parsing error response:', e);
-        }
-        throw new Error(errorMessage);
+        console.error('Failed to fetch users. Status:', response.status);
+        console.error('Response:', responseText);
+        
+        // Try alternate endpoint as fallback
+        return await fetchUsersAlternate(token, currentUserId);
       }
       
       let users = [];
       try {
         users = JSON.parse(responseText);
+        console.log('Successfully parsed user data, found', users.length, 'users');
       } catch (e) {
         console.error('Error parsing users response:', e);
-        throw new Error('Invalid user data received from server');
+        return await fetchUsersAlternate(token, currentUserId);
       }
       
-      // If no users are returned, try using some dummy data for testing
+      // If no users are returned, try using fallback
       if (!users || users.length === 0) {
-        console.log('No users returned from API, using dummy data');
-        return [
-          {
-            _id: '65f2d76b1bcf0f79dc9ac01e', // Valid MongoDB ObjectId format
-            name: 'John Doe',
-            email: 'john@example.com',
-            profilePic: 'https://randomuser.me/api/portraits/men/1.jpg'
-          },
-          {
-            _id: '65f2d76b1bcf0f79dc9ac01f', // Valid MongoDB ObjectId format
-            name: 'Jane Smith',
-            email: 'jane@example.com',
-            profilePic: 'https://randomuser.me/api/portraits/women/1.jpg'
-          }
-        ];
+        console.log('No users returned from API, trying alternate endpoint');
+        return await fetchUsersAlternate(token, currentUserId);
       }
       
       // Filter out current user and log the results
       const filteredUsers = users.filter((user: User) => user._id !== currentUserId);
       console.log('Filtered users count:', filteredUsers.length);
       
-      return filteredUsers;
+      // Make sure all user objects have required fields
+      const validatedUsers = filteredUsers.map((user: User) => ({
+        _id: user._id,
+        name: user.name || `User ${user._id.substring(0, 4)}`,
+        email: user.email || `user-${user._id.substring(0, 4)}@example.com`,
+        profilePic: user.profilePic || `https://randomuser.me/api/portraits/men/${Math.floor(Math.random() * 50)}.jpg`
+      }));
+      
+      return validatedUsers;
     } catch (fetchError) {
       console.error('Error during fetch operation:', fetchError);
-      throw fetchError;
+      return await fetchUsersAlternate(token, currentUserId);
     }
   } catch (error) {
     console.error('Error in getAllUsers:', error);
-    // Return dummy data when there's an error
-    return [
-      {
-        _id: '65f2d76b1bcf0f79dc9ac01e', // Valid MongoDB ObjectId format
-        name: 'John Doe (Fallback)',
-        email: 'john@example.com',
-        profilePic: 'https://randomuser.me/api/portraits/men/1.jpg'
-      },
-      {
-        _id: '65f2d76b1bcf0f79dc9ac01f', // Valid MongoDB ObjectId format
-        name: 'Jane Smith (Fallback)',
-        email: 'jane@example.com',
-        profilePic: 'https://randomuser.me/api/portraits/women/1.jpg'
-      }
-    ];
+    // Return fallback data
+    return getFallbackUsers();
   }
 };
+
+// Fallback function to try different API endpoint
+async function fetchUsersAlternate(token: string, currentUserId: string): Promise<User[]> {
+  try {
+    // Try alternate endpoint
+    const alternateUrl = getApiUrl(`${API_URL}/users`);
+    console.log('Trying alternate endpoint for users:', alternateUrl);
+    
+    const response = await fetch(alternateUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      console.error('Alternate endpoint also failed. Status:', response.status);
+      return getFallbackUsers();
+    }
+    
+    const users = await response.json();
+    
+    if (!users || users.length === 0) {
+      console.log('No users from alternate endpoint either');
+      return getFallbackUsers();
+    }
+    
+    // Filter and validate
+    const filteredUsers = users.filter((user: User) => user._id !== currentUserId);
+    const validatedUsers = filteredUsers.map((user: User) => ({
+      _id: user._id,
+      name: user.name || `User ${user._id.substring(0, 4)}`,
+      email: user.email || `user-${user._id.substring(0, 4)}@example.com`,
+      profilePic: user.profilePic || `https://randomuser.me/api/portraits/men/${Math.floor(Math.random() * 50)}.jpg`
+    }));
+    
+    return validatedUsers;
+  } catch (error) {
+    console.error('Error in alternate fetch:', error);
+    return getFallbackUsers();
+  }
+}
+
+// Get fallback users when all else fails
+function getFallbackUsers(): User[] {
+  console.log('Using fallback users');
+  return [
+    {
+      _id: '65f2d76b1bcf0f79dc9ac01e', // Valid MongoDB ObjectId format
+      name: 'John Doe (Test User)',
+      email: 'john@example.com',
+      profilePic: 'https://randomuser.me/api/portraits/men/1.jpg'
+    },
+    {
+      _id: '65f2d76b1bcf0f79dc9ac01f', // Valid MongoDB ObjectId format
+      name: 'Jane Smith (Test User)',
+      email: 'jane@example.com',
+      profilePic: 'https://randomuser.me/api/portraits/women/1.jpg'
+    }
+  ];
+}
 
 /**
  * Get user profile by ID

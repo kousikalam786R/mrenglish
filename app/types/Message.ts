@@ -18,6 +18,7 @@ export interface ChatUser extends User {
   unreadCount: number;
   lastMessage?: Message;
   isOnline?: boolean;
+  user?: User;
 }
 
 export interface MessageState {
