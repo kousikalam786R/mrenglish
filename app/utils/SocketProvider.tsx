@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import socketService from './socketService';
-import { useAuth } from '../navigation';
+import { useAppSelector } from '../redux/hooks';
 import { getAuthToken, getUserIdFromToken } from './authUtils';
 
 // Create socket context
@@ -32,8 +32,9 @@ const SocketContext = createContext<SocketContextType>({
 // Socket provider component
 export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isConnected, setIsConnected] = useState(false);
-  const { isSignedIn } = useAuth();
+  const { isSignedIn } = useAppSelector((state: any) => state.auth);
 
+  // Connect to socket
   // Connect to socket
   const connect = async () => {
     try {
@@ -46,11 +47,21 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       // Initialize socket connection
       await socketService.initialize();
       setIsConnected(true);
-
+  
       // Store the socket ID as a fallback if we couldn't get the user ID from JWT
       const socket = socketService.getSocket();
-      if (socket && socket.id && !userId) {
-        await AsyncStorage.setItem('userId', socket.id);
+      if (socket) {
+        if (socket.id && !userId) {
+          await AsyncStorage.setItem('userId', socket.id);
+        }
+        
+        // Add listener for user data
+        socket.on('user_data', (userData) => {
+          console.log('Received user data from socket:', userData);
+          if (userData) {
+            socketService.storeUserData(userData);
+          }
+        });
       }
     } catch (error) {
       console.error('Failed to connect to socket:', error);
@@ -91,4 +102,4 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 // Hook to use socket context
 export const useSocket = () => useContext(SocketContext);
 
-export default SocketProvider; 
+export default SocketProvider;

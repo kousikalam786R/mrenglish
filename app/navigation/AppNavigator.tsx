@@ -10,6 +10,8 @@ import { AuthContext, AuthContextType, useAuth } from './index';
 import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAppSelector, useAppDispatch } from '../redux/hooks';
+import { checkAuthState } from '../redux/thunks/authThunks';
 
 // Screens
 import LobbyScreen from '../screens/LobbyScreen';
@@ -201,7 +203,8 @@ const AuthNavigator = () => {
 
 // Root navigator
 const RootNavigator = () => {
-  const { isSignedIn } = useAuth();
+  // Use Redux auth state instead of context
+  const { isSignedIn } = useAppSelector((state: any) => state.auth);
 
   return (
     <Stack.Navigator screenOptions={screenOptions}>
@@ -231,6 +234,7 @@ const AppNavigator = () => {
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [initializing, setInitializing] = useState(true);
   const [isNavigationReady, setIsNavigationReady] = useState(false);
+  const dispatch = useAppDispatch();
   
   // Handle user state changes
   function onAuthStateChanged(user: FirebaseAuthTypes.User | null) {
@@ -241,6 +245,9 @@ const AppNavigator = () => {
   useEffect(() => {
     // Subscribe to auth state changes
     const subscriber = auth().onAuthStateChanged(onAuthStateChanged);
+    
+    // Check auth state from Redux
+    dispatch(checkAuthState());
     
     // Check for manual authentication token
     const checkManualAuth = async () => {

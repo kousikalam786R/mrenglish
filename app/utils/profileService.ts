@@ -56,6 +56,8 @@ const getApiUrl = (endpoint: string): string => {
  */
 const getHeaders = async () => {
   const token = await getAuthToken();
+  console.log(token,"logtoken");
+  
   return {
     'Authorization': `Bearer ${token}`,
     'Content-Type': 'application/json'
@@ -82,60 +84,136 @@ export interface UserProfile {
   }>;
 }
 
+const waitForToken = async (retries = 3, delay = 300): Promise<string | null> => {
+  for (let i = 0; i < retries; i++) {
+    const token = await getAuthToken();
+    if (token) return token;
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+  return null;
+};
+
+// When a connection is successful, store the working URL
+let lastSuccessfulUrl: string | null = null;
+
 /**
  * Get current user profile
  */
 export const getUserProfile = async (): Promise<UserProfile | null> => {
   try {
-    const token = await getAuthToken();
+    const token = await waitForToken();
+    console.log(token,"token");
+    
     if (!token) {
       console.error('No token found for profile fetch');
       return null;
     }
     
+    // First try to get user data from AsyncStorage
+    const cachedUser = await AsyncStorage.getItem('user');
+    if (cachedUser) {
+      try {
+        const userData = JSON.parse(cachedUser);
+        console.log('Found cached user data:', userData);
+        if (userData._id) {
+          // Return cached data immediately
+          return userData;
+        }
+      } catch (e) {
+        console.error('Error parsing cached user data:', e);
+      }
+    }
+    
+    // Try fetching from last successful URL first if we have one
+    if (lastSuccessfulUrl) {
+      try {
+        console.log('Trying last successful URL:', lastSuccessfulUrl);
+        const response = await fetchFromUrl(lastSuccessfulUrl, token);
+        if (response) return response;
+      } catch (error) {
+        console.error('Failed to fetch from last successful URL:', error);
+      }
+    }
+    
     // The endpoint should just be USER not USER/me
-    const url = getApiUrl(`${API_ENDPOINTS.USER}`);
+    const url = API_ENDPOINTS.USER
     console.log('Fetching user profile from:', url);
     
-    // Add timeout to prevent hanging requests
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-    
+    // Try main API endpoint
     try {
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Error fetching profile:', errorText);
-        return null;
-      }
-      
-      const data = await response.json();
-      return data.user || data;
-    } catch (fetchError: any) {
-      clearTimeout(timeoutId);
-      
-      // Check if it's a timeout/network error
-      if (fetchError.name === 'AbortError') {
-        console.error('Request timed out when fetching profile');
-      } else {
-        console.error('Fetch error:', fetchError);
-      }
-      
-      // Try alternate endpoint as fallback
-      return await getUserProfileAlternate();
+      const response = await fetchFromUrl(url, token);
+      if (response) return response;
+    } catch (error) {
+      console.error('Failed to fetch from main URL:', error);
     }
+    
+    // Try direct LAN IP as fallback
+    try {
+      const directUrl = `http://192.168.29.151:5000/api/auth/me`;
+      console.log('Trying direct LAN IP URL:', directUrl);
+      const response = await fetchFromUrl(directUrl, token);
+      if (response) return response;
+    } catch (error) {
+      console.error('Failed to fetch from direct LAN IP:', error);
+    }
+    
+    // Try alternate endpoint as last resort
+    return await getUserProfileAlternate();
   } catch (error) {
     console.error('Error getting user profile:', error);
+    return null;
+  }
+};
+
+/**
+ * Helper function to fetch user profile from a specific URL
+ */
+const fetchFromUrl = async (url: string, token: string): Promise<UserProfile | null> => {
+  // Add timeout to prevent hanging requests
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache' // Prevent caching
+      },
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Error fetching profile from ${url}:`, errorText);
+      return null;
+    }
+    
+    const data = await response.json();
+    const userData = data.user || data;
+    
+    // Remember this URL as successful
+    lastSuccessfulUrl = url;
+    
+    // Store the user data in AsyncStorage for future use
+    if (userData && userData._id) {
+      await AsyncStorage.setItem('user', JSON.stringify(userData));
+    }
+    
+    return userData;
+  } catch (fetchError: any) {
+    clearTimeout(timeoutId);
+    
+    // Check if it's a timeout/network error
+    if (fetchError.name === 'AbortError') {
+      console.error(`Request timed out when fetching profile from ${url}`);
+    } else {
+      console.error(`Fetch error from ${url}:`, fetchError);
+    }
+    
     return null;
   }
 };
@@ -145,11 +223,69 @@ export const getUserProfile = async (): Promise<UserProfile | null> => {
  */
 export const getUserProfileAlternate = async () => {
   try {
-    // Use empty string instead of /me since the endpoint already includes it
-    const response = await axios.get(getApiUrl('/api/users/me'), {
-      headers: await getHeaders(),
-    });
-    return response.data;
+    console.log('Trying alternate profile fetch methods...');
+    
+    // Try different URLs with axios
+    const urls = [
+      getApiUrl('/auth/me'),
+      'http://192.168.29.151:5000/api/auth/me',
+      'http://10.0.2.2:5000/api/auth/me',
+      'http://localhost:5000/api/auth/me'
+    ];
+    
+    // Get user token
+    const token = await getAuthToken();
+    if (!token) {
+      console.error('No token found for alternate profile fetch');
+      return null;
+    }
+    
+    const headers = {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache'
+    };
+    
+    // Try each URL with a timeout
+    for (const url of urls) {
+      try {
+        console.log(`Trying alternate URL: ${url}`);
+        
+        // Create a promise that resolves with the first successful response or rejects if all fail
+        const axiosConfig = {
+          headers,
+          timeout: 5000 // 5 second timeout per attempt
+        };
+        
+        const response = await axios.get(url, axiosConfig);
+        
+        if (response.data) {
+          console.log(`Successful response from ${url}`);
+          
+          // Store this as last successful URL
+          lastSuccessfulUrl = url;
+          
+          // Cache the user data
+          const userData = response.data.user || response.data;
+          if (userData && (userData._id || userData.id)) {
+            await AsyncStorage.setItem('user', JSON.stringify(userData));
+          }
+          
+          return userData;
+        }
+      } catch (urlError: any) {
+        console.error(`Error with ${url}:`, urlError.message || 'Unknown error');
+      }
+    }
+    
+    // If all URLs failed, try to load from cache as last resort
+    console.log('All profile fetch attempts failed, using cached data if available');
+    const cachedUser = await AsyncStorage.getItem('user');
+    if (cachedUser) {
+      return JSON.parse(cachedUser);
+    }
+    
+    return null;
   } catch (error) {
     console.error('Error in getUserProfileAlternate:', error);
     return null;
@@ -168,7 +304,7 @@ export const updateUserProfile = async (profileData: Partial<UserProfile>): Prom
     }
     
     // Use the correct API endpoint
-    const url = getApiUrl(`${API_ENDPOINTS.USER}`);
+    const url = API_ENDPOINTS.UPDATE_USER
     console.log('Updating user profile at:', url);
     
     // Add timeout to prevent hanging requests
@@ -368,4 +504,4 @@ const testApiConnection = async (): Promise<string | null> => {
     console.error('Error testing API connectivity:', error);
     return null;
   }
-}; 
+};

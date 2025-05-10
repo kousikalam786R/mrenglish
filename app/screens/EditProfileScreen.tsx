@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
-import { updateUserProfile, updateProfilePicture, UserProfile } from '../utils/profileService';
+import { updateUserProfile, updateProfilePicture, UserProfile, getUserProfile } from '../utils/profileService';
 
 // Define route params type
 type EditProfileScreenRouteProp = RouteProp<
@@ -64,7 +64,7 @@ const EditProfileScreen = () => {
         .filter((interest) => interest.length > 0);
       
       // Create updated profile object
-      const updatedProfile: Partial<UserProfile> = {
+      const profileData: Partial<UserProfile> = {
         name,
         bio,
         country,
@@ -72,9 +72,13 @@ const EditProfileScreen = () => {
       };
       
       // Update profile on server
-      const result = await updateUserProfile(updatedProfile);
+      const result = await updateUserProfile(profileData);
       
       if (result) {
+        const profile = await getUserProfile(); 
+        if (profile && profile.success && profile.user) {
+          setUserData(profile.user); // ✅ This is the missing part
+        }
         Alert.alert(
           'Success',
           'Profile updated successfully',

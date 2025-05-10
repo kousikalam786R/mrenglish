@@ -32,50 +32,101 @@ async function getAuthToken(): Promise<string> {
 
 export const getMessages = async (receiverId: string): Promise<Message[]> => {
   try {
-    // Check if ID is valid MongoDB format
-    if (!isValidObjectId(receiverId)) {
-      console.warn(`Non-standard ID format: ${receiverId}. Returning empty message list.`);
+    console.log(`Fetching messages for receiver ID: ${receiverId}`);
+    
+    // Only check if ID is non-empty
+    if (!receiverId) {
+      console.warn(`Empty receiver ID. Returning empty message list.`);
       return []; // Return empty array instead of throwing error
     }
   
     const token = await getAuthToken();
+    if (!token) {
+      console.error('No auth token available for fetching messages');
+      return [];
+    }
     
     const url = getApiUrl(`${API_ENDPOINTS.MESSAGES}/conversations/${receiverId}`);
     console.log('Fetching messages from:', url);
     
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    });
+    // Create abort controller with timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Server response:', response.status, errorText);
-      let errorMessage = 'Failed to fetch messages';
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache' // Prevent caching
+        },
+        signal: controller.signal
+      });
       
-      try {
-        // Try to parse error as JSON
-        const errorData = JSON.parse(errorText);
-        if (errorData.message) {
-          errorMessage = errorData.message;
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Server response:', response.status, errorText);
+        let errorMessage = 'Failed to fetch messages';
+        
+        try {
+          // Try to parse error as JSON
+          const errorData = JSON.parse(errorText);
+          if (errorData.message) {
+            errorMessage = errorData.message;
+          }
+        } catch (parseError) {
+          // If not valid JSON, use the text directly
+          if (errorText) {
+            errorMessage = errorText;
+          }
         }
-      } catch (parseError) {
-        // If not valid JSON, use the text directly
-        if (errorText) {
-          errorMessage = errorText;
+        
+        console.error(`Error fetching messages: ${errorMessage}`);
+        
+        // Try to load from cache as fallback
+        const cachedMessages = await AsyncStorage.getItem(`messages_${receiverId}`);
+        if (cachedMessages) {
+          console.log(`Found cached messages for ${receiverId}, using those`);
+          const messages = JSON.parse(cachedMessages);
+          return messages;
         }
+        
+        throw new Error(errorMessage);
       }
       
-      throw new Error(errorMessage);
+      const messages = await response.json();
+      console.log(`Successfully fetched ${messages.length} messages for chat ${receiverId}`);
+      
+      // Cache messages for offline use
+      AsyncStorage.setItem(`messages_${receiverId}`, JSON.stringify(messages))
+        .catch(err => console.error('Error caching messages:', err));
+      
+      return messages;
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      
+      if (fetchError.name === 'AbortError') {
+        console.error('Request timed out when fetching messages');
+      } else {
+        console.error('Fetch error:', fetchError);
+      }
+      
+      // Try to load from cache as fallback
+      const cachedMessages = await AsyncStorage.getItem(`messages_${receiverId}`);
+      if (cachedMessages) {
+        console.log(`Found cached messages for ${receiverId} after fetch error, using those`);
+        const messages = JSON.parse(cachedMessages);
+        return messages;
+      }
+      
+      throw fetchError;
     }
-    
-    return await response.json();
   } catch (error) {
     console.error('Error fetching messages:', error);
-    throw error;
+    return []; // Return empty array instead of throwing to avoid app crashes
   }
 };
 
@@ -86,24 +137,7 @@ export const sendMessage = async (receiverId: string, content: string): Promise<
       throw new Error('Message content cannot be empty');
     }
     
-    // For non-standard IDs, return a mock success response
-    if (!isValidObjectId(receiverId)) {
-      console.warn(`Cannot send message via API to non-standard ID: ${receiverId}`);
-      console.log('Message will be handled via socket only');
-      
-      // Return a mock message object
-      const mockMessage: Message = {
-        _id: `local_${Date.now()}`,
-        content: content.trim(),
-        sender: await AsyncStorage.getItem('userId') || 'current-user',
-        receiver: receiverId,
-        createdAt: new Date().toISOString(),
-        read: false
-      };
-      
-      return mockMessage;
-    }
-    
+    // For any ID format - we'll let the server handle validation
     const token = await getAuthToken();
     
     const url = getApiUrl(`${API_ENDPOINTS.MESSAGES}/send`);
@@ -150,7 +184,50 @@ export const getRecentChats = async (): Promise<ChatUser[]> => {
       throw new Error(errorData.message || 'Failed to fetch recent chats');
     }
     
-    return await response.json();
+    // Parse the response
+    const rawData = await response.json();
+    console.log('Recent chats raw data:', rawData);
+    
+    // Transform the server response format to match the expected ChatUser format
+    const chats: ChatUser[] = rawData.map((item: any) => {
+      // If the response follows the format with a user object 
+      if (item.user && typeof item.user === 'object') {
+        return {
+          _id: item.user._id,
+          name: item.user.name || 'Unknown User',
+          email: item.user.email || '',
+          profilePic: item.user.profilePic,
+          unreadCount: item.unreadCount || 0,
+          lastMessage: item.lastMessage,
+          isOnline: false // Default to false, will be updated by socket events
+        };
+      } 
+      // If the item itself is the user object
+      else if (item._id) {
+        return {
+          ...item,
+          unreadCount: item.unreadCount || 0,
+          isOnline: false
+        };
+      }
+      // Fallback for unexpected formats
+      else {
+        console.warn('Unexpected chat item format:', item);
+        return {
+          _id: item._id || 'unknown-id',
+          name: 'Unknown User',
+          email: '',
+          unreadCount: 0,
+          isOnline: false
+        };
+      }
+    });
+    
+    // Cache the transformed chats
+    AsyncStorage.setItem('recentChats', JSON.stringify(chats))
+      .catch(err => console.error('Error caching chats:', err));
+    
+    return chats;
   } catch (error) {
     console.error('Error fetching recent chats:', error);
     throw error;

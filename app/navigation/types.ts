@@ -23,13 +23,13 @@ export type AppStackParamList = {
 // Stack parameter lists for nested navigators
 export type ChatsStackParamList = {
   ChatsMain: undefined;
-  ChatDetail: { id: string; name: string; user?: ChatUser };
+  ChatDetail: { id: string; name: string; avatar?: string; user?: ChatUser };
   Call: { id: string; name: string; isVideoCall?: boolean };
 };
 
 export type ContactsStackParamList = {
   ContactsMain: undefined;
-  ChatDetail: { id: string; name: string; user?: ChatUser };
+  ChatDetail: { id: string; name: string; avatar?: string; user?: ChatUser };
   Call: { id: string; name: string; isVideoCall?: boolean };
 };
 

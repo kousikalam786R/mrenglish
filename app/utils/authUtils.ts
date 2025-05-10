@@ -15,9 +15,11 @@ interface JwtPayload {
  * Checks multiple possible token keys
  */
 export const getAuthToken = async (): Promise<string | null> => {
+
   try {
     // Try primary token key
     let token = await AsyncStorage.getItem('token');
+    console.log(token,"token");
     
     // Try alternate token key if primary not found
     if (!token) {
@@ -76,6 +78,7 @@ export const getUserIdFromToken = async (): Promise<string | null> => {
  */
 export const saveAuthData = async (token: string, userId?: string): Promise<void> => {
   try {
+ 
     // Store token in multiple formats for compatibility
     await AsyncStorage.setItem('token', token);
     await AsyncStorage.setItem('auth_token', token);

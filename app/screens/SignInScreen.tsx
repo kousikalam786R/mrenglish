@@ -20,10 +20,16 @@ import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { saveAuthData } from '../utils/authUtils';
 import { API_URL, API_ENDPOINTS, BASE_URL } from '../utils/config';
+import { getUserProfile } from '../utils/profileService';
+import { useAppDispatch } from '../redux/hooks';
+import { signInSuccess } from '../redux/slices/authSlice';
+import { jwtDecode } from 'jwt-decode';
+import { setUserData } from '../redux/slices/userSlice';
 
 // Server request timeout
-const SERVER_TIMEOUT_MS = 30000; // 30 seconds (increased from 20 seconds)
+const SERVER_TIMEOUT_MS = 15000; // 15 seconds (reduced from 30 seconds for better UX)
 const DEBUG_MODE = true;
+const DIRECT_LAN_IP = '192.168.29.151'; // Use this for direct connections as it's most reliable
 
 const SignInScreen = () => {
   const [email, setEmail] = useState('');
@@ -32,6 +38,7 @@ const SignInScreen = () => {
   const [isSigninInProgress, setIsSigninInProgress] = useState(false);
   const navigation = useNavigation<AuthScreenNavigationProp>();
   const { signIn } = useAuth();
+  const dispatch = useAppDispatch();
 
   // Test server connectivity focusing on working methods
   const testServerConnection = async () => {
@@ -199,63 +206,84 @@ const SignInScreen = () => {
     try {
       setIsSigninInProgress(true);
       
-      // Use direct server API for manual login
-      const loginEndpoint = 'http://192.168.29.151:5000/api/auth/login';
-      console.log('Attempting manual login with server:', loginEndpoint);
+      // Try login with direct IP first since it's most reliable from our tests
+      const loginEndpoint = `http://${DIRECT_LAN_IP}:5000/api/auth/login`;
+      console.log('Attempting login with direct LAN IP:', loginEndpoint);
       
-      // Create a timeout promise
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Request timeout - server took too long to respond')), SERVER_TIMEOUT_MS);
-      });
+      // Use AbortController for more reliable timeout control
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+      }, SERVER_TIMEOUT_MS);
       
-      // Race between the fetch and the timeout
-      const response = await Promise.race([
-        fetch(loginEndpoint, {
+      try {
+        const response = await fetch(loginEndpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Accept': 'application/json'
+            'Accept': 'application/json',
+            'Cache-Control': 'no-cache' // Prevent caching
           },
           body: JSON.stringify({
             email,
             password
           }),
-        }),
-        timeoutPromise
-      ]) as Response;
-      
-      const data = await response.json();
-      
-      if (response.ok) {
-        console.log('Server login successful', data);
+          signal: controller.signal
+        });
         
-        // Store JWT token from server response
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ message: 'Unknown server error' }));
+          console.error('Login failed:', errorData);
+          Alert.alert('Login Failed', errorData.message || 'Invalid credentials');
+          setIsSigninInProgress(false);
+          return;
+        }
+        
+        const data = await response.json();
+        
         if (data.token) {
-          try {
-            // Use the auth utilities to store token
-            await saveAuthData(data.token, data.user.id);
-            console.log('Authentication data stored successfully');
+          console.log('Login successful, saving auth data...');
+          
+          // Store token and user ID
+          await saveAuthData(data.token, data.user?.id);
+          
+          // Immediately cache user data to avoid profile loading delays
+          if (data.user) {
+            console.log('Caching user data for faster profile access');
+            await AsyncStorage.setItem('user', JSON.stringify(data.user));
             
-            // Explicitly call signIn to update auth state
-            console.log('Manually updating auth state...');
-            signIn();
-            console.log('Auth state updated, navigation should occur automatically');
-          } catch (storageError) {
-            console.error('Error storing token:', storageError);
-            Alert.alert('Error', 'Failed to save authentication data');
+            // Update Redux state with user data
+            dispatch(setUserData(data.user));
           }
+          
+          // Update auth state
+          dispatch(signInSuccess({ 
+            token: data.token, 
+            userId: data.user?.id 
+          }));
+          
+          console.log('Login complete, navigation should occur automatically');
         } else {
           throw new Error('No token received from server');
         }
-      } else {
-        // Handle server error responses
-        console.error('Server login failed:', data.message);
-        Alert.alert('Login Failed', data.message || 'Invalid email or password');
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        
+        if (fetchError.name === 'AbortError') {
+          console.error('Login request timed out');
+          Alert.alert('Connection Timeout', 'The server took too long to respond. Please try again.');
+        } else {
+          console.error('Login error:', fetchError.message);
+          Alert.alert('Login Error', `Could not sign in: ${fetchError.message}`);
+        }
+        
+        setIsSigninInProgress(false);
       }
     } catch (error: any) {
-      console.error('Login error:', error);
-      Alert.alert('Error', error.message || 'An error occurred during sign in');
-    } finally {
+      console.error('Login error:', error.message);
+      Alert.alert('Error', `Login failed: ${error.message}`);
       setIsSigninInProgress(false);
     }
   };
@@ -339,9 +367,10 @@ const SignInScreen = () => {
             if (data.token) {
               try {
                 // Use the new auth utilities to store token
-                await saveAuthData(data.token, data.userId || firebaseUserCredential.user.uid);
+                const userId = data.userId || firebaseUserCredential.user.uid;
+                await saveAuthData(data.token, userId);
                 console.log('Authentication data stored successfully');
-                signIn();
+                dispatch(signInSuccess({ token: data.token, userId }));
               } catch (storageError) {
                 console.error('Error storing token:', storageError);
               }
@@ -352,9 +381,10 @@ const SignInScreen = () => {
             // Fall back to using Firebase credentials
             console.log('Falling back to Firebase authentication...');
             const firebaseToken = await firebaseUserCredential.user.getIdToken();
-            await saveAuthData(firebaseToken, firebaseUserCredential.user.uid);
+            const userId = firebaseUserCredential.user.uid;
+            await saveAuthData(firebaseToken, userId);
             console.log('Saved Firebase credentials as fallback');
-            signIn();
+            dispatch(signInSuccess({ token: firebaseToken, userId }));
             
             Alert.alert('Warning', 'Server authentication failed, but Firebase login succeeded. Using Firebase authentication as fallback.');
           }
@@ -367,9 +397,10 @@ const SignInScreen = () => {
           try {
             console.log('Falling back to Firebase authentication after server error...');
             const firebaseToken = await firebaseUserCredential.user.getIdToken();
-            await saveAuthData(firebaseToken, firebaseUserCredential.user.uid);
+            const userId = firebaseUserCredential.user.uid;
+            await saveAuthData(firebaseToken, userId);
             console.log('Saved Firebase credentials as fallback after server error');
-            signIn();
+            dispatch(signInSuccess({ token: firebaseToken, userId }));
             
             Alert.alert(
               'Warning', 

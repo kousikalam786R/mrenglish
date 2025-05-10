@@ -248,4 +248,65 @@ function createDummyUser(userId: string): User {
     email: `user-${id.substring(0, 4)}@example.com`,
     profilePic: `https://randomuser.me/api/portraits/men/${Math.floor(Math.random() * 50)}.jpg`
   };
-} 
+}
+
+/**
+ * Get only users that the current user has chatted with
+ */
+export const getConnectedUsers = async (): Promise<User[]> => {
+  try {
+    const token = await getAuthToken();
+    
+    // Construct URL for fetching connected users
+    const url = getApiUrl(`${API_URL}/messages/connected-users`);
+    console.log('Fetching connected users from:', url);
+    
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        console.error('Failed to fetch connected users. Status:', response.status);
+        
+        // Try to get connected users from recent chats as fallback
+        try {
+          const cachedChatsJson = await AsyncStorage.getItem('recentChats');
+          if (cachedChatsJson) {
+            const cachedChats: User[] = JSON.parse(cachedChatsJson);
+            return cachedChats;
+          }
+        } catch (cacheError) {
+          console.error('Error reading cached chats:', cacheError);
+        }
+        
+        throw new Error('Failed to fetch connected users');
+      }
+      
+      const users = await response.json();
+      return users;
+    } catch (fetchError) {
+      console.error('Error during fetch operation:', fetchError);
+      
+      // Try to get connected users from recent chats as fallback
+      try {
+        const cachedChatsJson = await AsyncStorage.getItem('recentChats');
+        if (cachedChatsJson) {
+          const cachedChats: User[] = JSON.parse(cachedChatsJson);
+          return cachedChats;
+        }
+      } catch (cacheError) {
+        console.error('Error reading cached chats:', cacheError);
+      }
+      
+      throw fetchError;
+    }
+  } catch (error) {
+    console.error('Error getting connected users:', error);
+    return [];
+  }
+}; 

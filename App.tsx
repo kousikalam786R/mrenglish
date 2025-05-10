@@ -13,15 +13,19 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AppNavigator from './app/navigation/AppNavigator';
 import { StyleSheet } from 'react-native';
 import SocketProvider from './app/utils/SocketProvider';
+import { Provider } from 'react-redux';
+import { store } from './app/redux/store'; // Adjust this import path if needed
 
 function App(): React.JSX.Element {
   return (
     <GestureHandlerRootView style={styles.container}>
-      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-        <SocketProvider>
-          <AppNavigator />
-        </SocketProvider>
-      </SafeAreaProvider>
+      <Provider store={store}>
+        <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+          <SocketProvider>
+            <AppNavigator />
+          </SocketProvider>
+        </SafeAreaProvider>
+      </Provider>
     </GestureHandlerRootView>
   );
 }

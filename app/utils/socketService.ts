@@ -1,12 +1,21 @@
 import { io, Socket } from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_URL, DIRECT_IP } from './config';
+import { API_URL, DIRECT_IP, BACKUP_IPS, getAlternateUrls } from './config';
 import { getAuthToken } from './authUtils';
 import { Platform } from 'react-native';
+
+// Declare the global property for TypeScript
+declare global {
+  // eslint-disable-next-line no-var
+  var _successfulSocketUrl: string | undefined;
+}
 
 class SocketService {
   private socket: Socket | null = null;
   private static instance: SocketService;
+  private connectionAttempts: number = 0;
+  private maxConnectionAttempts: number = 3;
+  private lastSuccessfulUrl: string | null = null;
 
   private constructor() {}
 
@@ -28,71 +37,226 @@ class SocketService {
 
       console.log('Connecting to socket with token:', token.substring(0, 10) + '...');
       
-      // Use direct LAN IP for Android emulators
-      let socketUrl = API_URL;
+      // Only try to connect if there's no existing connection
+      if (this.socket && this.socket.connected) {
+        console.log('Socket already connected, reusing connection:', this.socket.id);
+        return;
+      }
       
-      // For Android emulators, direct LAN IP works best based on testing
+      // If there's an existing socket that's not connected, disconnect it
+      if (this.socket) {
+        console.log('Disconnecting existing socket before creating new one');
+        this.socket.disconnect();
+        this.socket = null;
+      }
+
+      // Reset connection attempts
+      this.connectionAttempts = 0;
+      
+      // Use the global successful URL if available
+      if (global._successfulSocketUrl) {
+        console.log(`Trying previously successful URL: ${global._successfulSocketUrl}`);
+        const result = await this.tryConnection(global._successfulSocketUrl, token);
+        if (result) return;
+      }
+      
+      // Try the last successful URL if available
+      if (this.lastSuccessfulUrl) {
+        console.log(`Trying last successful URL: ${this.lastSuccessfulUrl}`);
+        const result = await this.tryConnection(this.lastSuccessfulUrl, token);
+        if (result) return;
+      }
+      
+      // For Android, prioritize the direct IP that has been working
       if (Platform.OS === 'android') {
-        // Use direct LAN IP from config
-        socketUrl = `http://${DIRECT_IP}:5000`;
-        console.log('Using direct LAN IP for socket connection:', socketUrl);
+        const directIpUrl = `http://${DIRECT_IP}:5000/api`;
+        console.log(`Trying direct IP URL: ${directIpUrl}`);
+        const result = await this.tryConnection(directIpUrl, token);
+        if (result) return;
       }
-
-      // Try to ping the server first to check connectivity
-      try {
-        console.log('Testing server connectivity before socket connection...');
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        
-        const response = await fetch(`${socketUrl}/`, { 
-          method: 'GET',
-          signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-        console.log('Server ping successful:', await response.text());
-      } catch (pingError: any) {
-        console.warn('Server ping failed:', pingError.message, 
-          'Attempting socket connection anyway...');
-      }
-
-      this.socket = io(socketUrl, {
-        auth: { token },
-        reconnection: true,
-        reconnectionDelay: 1000,
-        reconnectionAttempts: 5,
-        transports: ['websocket', 'polling'],
-        extraHeaders: {
-          Authorization: `Bearer ${token}`
-        },
-        timeout: 30000, // Increased timeout
-        autoConnect: true
-      });
-
-      this.socket.on('connect', () => {
-        console.log('Socket connected:', this.socket?.id);
-      });
-
-      this.socket.on('connect_error', (error) => {
-        console.error('Socket connection error:', error.message);
-        console.error('Socket connection error details:', error);
-        
-        // Log additional debug info
-        console.log('Connection URL:', socketUrl);
-        console.log('Token status:', token ? 'Present' : 'Missing');
-        console.log('Socket options:', {
-          reconnection: true,
-          reconnectionAttempts: 5,
-          timeout: 30000
-        });
-      });
-
-      this.socket.on('disconnect', (reason) => {
-        console.log('Socket disconnected:', reason);
-      });
+      
+      // Try to connect with main URL
+      await this.tryConnection(API_URL, token);
     } catch (error) {
       console.error('Error initializing socket:', error);
     }
+  }
+  
+  private async tryConnection(url: string, token: string): Promise<boolean> {
+    this.connectionAttempts++;
+    console.log(`Connection attempt ${this.connectionAttempts} to ${url}`);
+    
+    try {
+      // Socket.IO uses the namespace format without '/api' - this is likely causing the "Invalid namespace" error
+      // Just use the base URL without appending '/api' as the namespace
+      const socketsUrl = url.endsWith('/api') ? url.substring(0, url.length - 4) : url;
+      
+      console.log(`Connecting to socket URL: ${socketsUrl}`);
+      
+      // Create socket with current URL - start with polling first, then try to upgrade to websocket
+      this.socket = io(socketsUrl, {
+        auth: { token },
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionAttempts: 3,
+        transports: ['polling', 'websocket'], // Start with polling first
+        timeout: 15000, // Slightly longer timeout for slower connections
+        autoConnect: true,
+        forceNew: true,
+        upgrade: true // Attempt to upgrade to websocket after establishing polling connection
+      });
+      
+      // Set up a promise that resolves on connect or rejects on error
+      const connectionPromise = new Promise<boolean>((resolve, reject) => {
+        // Set a timeout for the connection attempt
+        const timeoutId = setTimeout(() => {
+          reject(new Error('Connection timeout'));
+        }, 15000);
+        
+        if (!this.socket) {
+          clearTimeout(timeoutId);
+          reject(new Error('Socket not created'));
+          return;
+        }
+        
+        this.socket.on('connect', () => {
+          clearTimeout(timeoutId);
+          console.log('Socket connected successfully:', this.socket?.id);
+          console.log('Using transport:', this.socket?.io?.engine?.transport?.name);
+          
+          // Store the successful URL
+          this.lastSuccessfulUrl = url;
+          global._successfulSocketUrl = url;
+          
+          resolve(true);
+        });
+        
+        this.socket.on('connect_error', (error) => {
+          console.error(`Socket connect_error to ${url}:`, error.message);
+          clearTimeout(timeoutId);
+          reject(error);
+        });
+      });
+      
+      // Wait for connection or error
+      await connectionPromise;
+      
+      // If we get here, connection was successful
+      this.setupEventListeners();
+      return true;
+    } catch (error) {
+      console.error(`Failed to connect to ${url}:`, error);
+      
+      // Clean up failed socket
+      if (this.socket) {
+        this.socket.disconnect();
+        this.socket = null;
+      }
+      
+      // Try next fallback if we have attempts left
+      if (this.connectionAttempts < this.maxConnectionAttempts) {
+        // Get alternate URLs and try the next one
+        const alternateUrls = getAlternateUrls();
+        const nextUrlIndex = this.connectionAttempts % alternateUrls.length;
+        const nextUrl = alternateUrls[nextUrlIndex];
+        
+        console.log(`Trying fallback URL: ${nextUrl}`);
+        return this.tryConnection(nextUrl, token);
+      } else {
+        console.error('Maximum connection attempts reached. Could not connect to any server.');
+        
+        // Last resort: try polling only on the DIRECT_IP with extended timeout
+        // Using the direct IP that has been shown to work in profileService
+        console.log('Trying final attempt with polling transport only and extended timeout...');
+        try {
+          const finalUrl = `http://${DIRECT_IP}:5000`;
+          console.log(`Final attempt using: ${finalUrl}`);
+          
+          this.socket = io(finalUrl, {
+            auth: { token },
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionAttempts: 2,
+            transports: ['polling'], // Polling only as last resort
+            timeout: 30000, // Longer timeout for last attempt
+            autoConnect: true,
+            forceNew: true,
+            upgrade: false // Disable upgrade attempts to keep polling
+          });
+          
+          // Add specific listener for this last attempt
+          const finalPromise = new Promise<boolean>((resolve, reject) => {
+            const finalTimeoutId = setTimeout(() => {
+              if (this.socket && !this.socket.connected) {
+                reject(new Error('Final connection attempt timed out'));
+              }
+            }, 30000);
+            
+            if (!this.socket) {
+              clearTimeout(finalTimeoutId);
+              reject(new Error('Socket not created in final attempt'));
+              return;
+            }
+            
+            this.socket.on('connect', () => {
+              clearTimeout(finalTimeoutId);
+              console.log('Final attempt socket connected successfully:', this.socket?.id);
+              console.log('Using transport:', this.socket?.io?.engine?.transport?.name);
+              
+              // Store the successful URL
+              this.lastSuccessfulUrl = finalUrl;
+              global._successfulSocketUrl = finalUrl;
+              
+              resolve(true);
+            });
+            
+            this.socket.on('connect_error', (error) => {
+              clearTimeout(finalTimeoutId);
+              console.error('Final attempt connect error:', error.message);
+              reject(error);
+            });
+          });
+          
+          await finalPromise;
+          this.setupEventListeners();
+          return true;
+        } catch (e) {
+          console.error('Final connection attempt failed:', e);
+          return false;
+        }
+      }
+    }
+  }
+  
+  // Helper method to set up event listeners
+  private setupEventListeners(): void {
+    if (!this.socket) return;
+    
+    this.socket.on('connect', () => {
+      console.log('Socket connected:', this.socket?.id);
+    });
+
+    this.socket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error.message);
+    });
+
+    this.socket.on('disconnect', (reason) => {
+      console.log('Socket disconnected:', reason);
+    });
+    
+    this.socket.on('error', (error) => {
+      console.error('Socket error:', error);
+    });
+    
+    // Set up user status listener
+    this.socket.on('user-status', (data) => {
+      console.log('User status update:', data);
+    });
+    
+    // Set up new message listener
+    this.socket.on('new-message', (data) => {
+      console.log('New message received');
+    });
   }
 
   public disconnect(): void {
@@ -159,6 +323,21 @@ class SocketService {
     if (!this.socket) return;
     this.socket.removeAllListeners();
   }
+
+  public storeUserData(userData: any): void {
+    if (!userData) return;
+    
+    console.log('Storing user data from socket:', userData);
+    
+    // Store the user data in AsyncStorage
+    try {
+      AsyncStorage.setItem('user', JSON.stringify(userData))
+        .then(() => console.log('Successfully stored user data from socket'))
+        .catch(err => console.error('Error storing user data from socket:', err));
+    } catch (error) {
+      console.error('Error in storeUserData:', error);
+    }
+  }
 }
 
-export default SocketService.getInstance(); 
+export default SocketService.getInstance();

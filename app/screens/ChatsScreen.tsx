@@ -1,92 +1,85 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  FlatList, 
-  TouchableOpacity, 
-  StatusBar,
-  ActivityIndicator,
-  RefreshControl,
-  Alert,
-  Button,
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
   Image,
+  FlatList,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { ChatsStackNavigationProp } from '../navigation/types';
-import { getRecentChats } from '../utils/messageService';
-import { ChatUser, User } from '../types/Message';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/types';
+import Icon from 'react-native-vector-icons/MaterialIcons';
+import { ChatUser } from '../types/Message';
+import { useAppDispatch, useAppSelector } from '../redux/hooks';
+import { fetchRecentChats } from '../redux/thunks/messageThunks';
 import socketService from '../utils/socketService';
-import { useAuth } from '../navigation';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getAllUsers } from '../utils/userService';
 
-// Chat Item Component
-const ChatItem = ({ 
-  chat, 
-  onPress 
-}: { 
-  chat: ChatUser; 
-  onPress: () => void 
-}) => {
-  const lastMessageTime = chat.lastMessage ? new Date(chat.lastMessage.createdAt) : null;
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  
-  // Get current user ID for message formatting
-  useEffect(() => {
-    const getUserId = async () => {
-      try {
-        const userId = await AsyncStorage.getItem('userId');
-        setCurrentUserId(userId);
-      } catch (error) {
-        console.error('Error getting user ID:', error);
-      }
-    };
-    getUserId();
-  }, []);
-  
-  // Format time
-  const formatTime = (date: Date): string => {
+// Chat item component
+interface ChatItemProps {
+  chat: ChatUser;
+  onPress: () => void;
+}
+
+const ChatItem: React.FC<ChatItemProps> = ({ chat, onPress }) => {
+  // Format timestamp to readable time
+  const formatTime = (timestamp: string) => {
+    const date = new Date(timestamp);
     const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const diffDays = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
     
-    if (diffDays === 0) {
+    // Return time for today's messages
+    if (date.toDateString() === now.toDateString()) {
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } else if (diffDays === 1) {
-      return 'Yesterday';
-    } else if (diffDays < 7) {
-      return ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][date.getDay()];
-    } else {
-      return date.toLocaleDateString();
     }
-  };
-
-  // Display name or a fallback to prevent errors
-  const displayName = chat.name || 'User';
-  const firstLetter = displayName.charAt(0);
-  
-  // Whether to show profile pic or avatar circle with initial
-  const hasProfilePic = chat.profilePic && chat.profilePic !== '';
-  
-  // Format the last message with sender info
-  const getFormattedLastMessage = () => {
-    if (!chat.lastMessage) return 'No messages yet';
     
-    // Check if the last message was sent by current user
-    const isMyMessage = chat.lastMessage.sender === currentUserId ||
-                       (typeof chat.lastMessage.sender === 'object' && 
-                        chat.lastMessage.sender?._id === currentUserId);
+    // Return 'Yesterday' for yesterday's messages
+    if (date.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
+    }
     
-    // Format based on who sent it
-    const prefix = isMyMessage ? 'You: ' : '';
-    return `${prefix}${chat.lastMessage.content}`;
+    // Return date for older messages
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   };
   
-  // Dynamic last message content
-  const lastMessageContent = getFormattedLastMessage();
-
+  // Better user name handling - check all possible name fields
+  const getUserName = () => {
+    if (chat.name && chat.name.trim() !== '') {
+      return chat.name;
+    }
+    
+    // Check if we have a username field
+    if (chat.username && chat.username.trim() !== '') {
+      return chat.username;
+    }
+    
+    // Check for email as a fallback
+    if (chat.email) {
+      // Use email without domain as a name
+      return chat.email.split('@')[0];
+    }
+    
+    return 'Unknown User';
+  };
+  
+  // Get first letter of name for avatar fallback
+  const displayName = getUserName();
+  const firstLetter = displayName.charAt(0).toUpperCase();
+  
+  // Check if we have a profile pic
+  const hasProfilePic = !!chat.profilePic;
+  
+  // Format last message content
+  const lastMessageContent = chat.lastMessage?.content || 'No messages yet';
+  
+  // Format last message time
+  const lastMessageTime = chat.lastMessage?.createdAt || '';
+  
   return (
     <TouchableOpacity 
       style={styles.chatItem} 
@@ -96,7 +89,6 @@ const ChatItem = ({
         <Image 
           source={{ uri: chat.profilePic }} 
           style={[styles.avatarCircle, chat.isOnline && styles.onlineIndicator]} 
-          onError={() => console.log('Failed to load profile image for:', chat.name)}
         />
       ) : (
         <View style={[styles.avatarCircle, chat.isOnline && styles.onlineIndicator]}>
@@ -132,322 +124,109 @@ const ChatItem = ({
   );
 };
 
-// Main component
+// Chat list empty component
+const EmptyChats = () => (
+  <View style={styles.emptyContainer}>
+    <Icon name="chat-bubble-outline" size={60} color="#D1D1D1" />
+    <Text style={styles.emptyTitle}>No conversations yet</Text>
+    <Text style={styles.emptyText}>
+      Start chatting with language partners to begin conversations.
+    </Text>
+  </View>
+);
+
+// Main screen component
 const ChatsScreen = () => {
-  const navigation = useNavigation<ChatsStackNavigationProp>();
-  const { signOut } = useAuth();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const dispatch = useAppDispatch();
+  const { recentChats, loading } = useAppSelector(state => state.message);
   
-  const [chats, setChats] = useState<ChatUser[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [authError, setAuthError] = useState<boolean>(false);
-  
-  const loadRealUsers = async () => {
-    try {
-      console.log('Loading real users...');
-      setLoading(true);
-      
-      // Use the getAllUsers function from userService
-      const users = await getAllUsers();
-      console.log('Fetched users:', users?.length || 0);
-      
-      if (users && users.length > 0) {
-        // Log all users' IDs and info for debugging
-        users.forEach((user, index) => {
-          console.log(`User ${index}: ID=${user._id}, name=${user.name}`);
-        });
-        
-        // Convert users to ChatUser format with necessary defaults
-        const chatUsers: ChatUser[] = users.map(user => ({
-          _id: user._id,
-          name: user.name || 'Unknown User',
-          email: user.email || '',
-          profilePic: user.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg',
-          unreadCount: 0,
-          isOnline: false,
-          // Add dummy last message to make the UI look better
-          lastMessage: {
-            _id: `dummy_${user._id}`,
-            content: 'Start a conversation',
-            sender: user._id,
-            receiver: 'you',
-            createdAt: new Date().toISOString(),
-            read: true
-          }
-        }));
-        
-        setChats(chatUsers);
-        console.log('Loaded real users:', chatUsers.length);
-        return true;
-      } else {
-        console.log('No real users found');
-        
-        // Show message to user
-        Alert.alert(
-          'No Users Found',
-          'Could not find any users to chat with. Please try again later.',
-          [{ text: 'OK' }]
-        );
-        
-        return false;
-      }
-    } catch (error: any) {
-      console.error('Error loading real users:', error.message);
-      
-      // Show error to user
-      Alert.alert(
-        'Error',
-        'Could not load users. ' + (error.message || 'Please try again later.'),
-        [{ text: 'OK' }]
-      );
-      
-      return false;
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-  
-  const fetchChats = async () => {
-    try {
-      setAuthError(false);
-      setLoading(true);
-      
-      // First try to get real chats
-      const recentChats = await getRecentChats();
-      
-      if (recentChats && recentChats.length > 0) {
-        console.log('Found real chats:', recentChats.length);
-        
-        // Ensure each chat has required information
-        const validatedChats = recentChats.map(chat => {
-          // Create a fully validated chat object with default values for missing fields
-          return {
-            ...chat,
-            name: chat.name || 'Unknown User',
-            email: chat.email || '',
-            profilePic: chat.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg'
-          };
-        });
-        
-        setChats(validatedChats);
-        console.log('Set validated chats:', validatedChats.length);
-      } else {
-        console.log('No real chats found, loading real users instead');
-        
-        // If no real chats, load real users
-        await loadRealUsers();
-      }
-    } catch (error: any) {
-      console.error('Error fetching chats:', error);
-      
-      if (error.message && error.message.includes('authentication')) {
-        setAuthError(true);
-        // Alert with login again option
-        Alert.alert(
-          'Authentication Error',
-          'Your session has expired. Please log in again.',
-          [
-            {
-              text: 'Log Out',
-              onPress: () => signOut()
-            }
-          ]
-        );
-      } else {
-        // If server connection fails, try to load real users
-        console.log('Server connection error, trying to load real users');
-        await loadRealUsers();
-      }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-  
+  // Fetch chats on component mount
   useEffect(() => {
+    loadChats();
+    
     // Initialize socket connection
-    const initializeSocket = async () => {
-      try {
-        await socketService.initialize();
-        
-        // Listen for new messages to update chat list
-        socketService.onNewMessage(() => {
-          fetchChats();
-        });
-        
-        // Listen for user status changes
-        socketService.onUserStatus((data) => {
-          if (data && data.userId) {
-            setChats(prevChats => 
-              prevChats.map(chat => 
-                chat._id === data.userId 
-                  ? { ...chat, isOnline: data.status === 'online' } 
-                  : chat
-              )
-            );
-          }
-        });
-      } catch (error) {
-        console.error('Error initializing socket:', error);
+    socketService.initialize();
+    
+    // Add socket event listeners
+    socketService.onUserStatus((data) => {
+      if (data && data.userId && data.status) {
+        // Update user status in chats list through Redux
+        // This would need to be implemented in the messageSlice
       }
-    };
+    });
     
-    // Check if we have a valid token
-    const checkToken = async () => {
-      try {
-        // Try to get token
-        let token = await AsyncStorage.getItem('token');
-        if (!token) token = await AsyncStorage.getItem('auth_token');
-        
-        if (!token) {
-          setAuthError(true);
-          setLoading(false);
-          return;
-        }
-        
-        initializeSocket();
-        fetchChats();
-      } catch (error) {
-        console.error('Error checking token:', error);
-        setLoading(false);
-        setAuthError(true);
-      }
-    };
+    // Listen for new messages to update chat list
+    socketService.onNewMessage((data) => {
+      // When a new message arrives, refresh chats list
+      loadChats();
+    });
     
-    checkToken();
-    
-    // Cleanup socket listeners
+    // Clean up listeners when component unmounts
     return () => {
       socketService.removeAllListeners();
     };
-  }, []);
+  }, [dispatch]);
   
-  // Simple navigation to chat detail
+  // Load chats from API
+  const loadChats = () => {
+    dispatch(fetchRecentChats())
+      .unwrap()
+      .then(() => {
+        console.log('Recent chats loaded successfully');
+      })
+      .catch(error => {
+        Alert.alert('Error', 'Could not load your conversations. Please try again.');
+      });
+  };
+  
+  // Navigate to chat details
   const handleChatPress = (chat: ChatUser) => {
-    console.log('Chat pressed:', chat);
-    
-    // Create a properly structured chat object that works with both formats
-    // (flat structure or nested user object)
-    const finalChat: ChatUser = {
-      _id: chat._id || (chat.user?._id || ''),
-      name: chat.name || (chat.user?.name || 'Unknown User'),
-      email: chat.email || (chat.user?.email || ''),
-      profilePic: chat.profilePic || (chat.user?.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg'),
-      unreadCount: chat.unreadCount || 0,
-      isOnline: chat.isOnline || false,
-      lastMessage: chat.lastMessage
-    };
-    
-    // Make sure we have a chat ID
-    if (!finalChat._id) {
-      console.error('Missing chat ID:', chat);
-      Alert.alert(
-        'Invalid Chat',
-        'This chat is missing required information.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-    
-    console.log('Navigating with fixed chat object:', finalChat);
-    
-    // Check MongoDB ID format for consistency
-    const isValidMongoId = /^[0-9a-fA-F]{24}$/.test(finalChat._id);
-    if (!isValidMongoId) {
-      console.warn('Invalid chat ID format:', finalChat._id);
-      
-      // Show warning but allow conversation
-      Alert.alert(
-        'Warning',
-        'This contact has an unusual ID format. Some features might not work correctly.',
-        [{ text: 'Continue Anyway' }]
-      );
-    }
-    
-    navigation.navigate('ChatDetail', { 
-      id: finalChat._id,
-      name: finalChat.name,
-      user: finalChat
+    navigation.navigate('ChatDetail', {
+      id: chat._id,
+      name: chat.name,
+      avatar: chat.profilePic,
+      user: chat
     });
   };
   
-  const handleRefresh = () => {
-    setRefreshing(true);
-    fetchChats();
+  // Navigate to new chat screen
+  const handleNewChat = () => {
+    navigation.navigate('Contacts');
   };
-
-  if (authError) {
-    return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>Authentication error</Text>
-        <Text style={styles.errorSubText}>Please log in again to continue</Text>
-        <TouchableOpacity 
-          style={styles.logoutButton} 
-          onPress={() => signOut()}
-        >
-          <Text style={styles.logoutButtonText}>Log Out</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4A90E2" />
-      </View>
-    );
-  }
-
+  
+  // Render a chat item
+  const renderItem = ({ item }: { item: ChatUser }) => (
+    <ChatItem 
+      chat={item} 
+      onPress={() => handleChatPress(item)} 
+    />
+  );
+  
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
-      
       <View style={styles.header}>
-        <Text style={styles.title}>Messages</Text>
-        
-        <TouchableOpacity 
-          style={styles.refreshButton} 
-          onPress={() => loadRealUsers()}
-        >
-          <Text style={styles.refreshButtonText}>Find Users</Text>
+        <Text style={styles.headerTitle}>Chats</Text>
+        <TouchableOpacity style={styles.newChatButton} onPress={handleNewChat}>
+          <Icon name="edit" size={24} color="#6A3DE8" />
         </TouchableOpacity>
       </View>
       
-      <FlatList
-        data={chats}
-        keyExtractor={(item) => item._id}
-        renderItem={({ item }) => (
-          <ChatItem
-            chat={item}
-            onPress={() => handleChatPress(item)}
-          />
-        )}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            colors={['#4A90E2']}
-          />
-        }
-        initialNumToRender={10}
-        maxToRenderPerBatch={10}
-        removeClippedSubviews={true}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>
-              No messages or contacts found. Pull down to refresh or tap the button below to find users.
-            </Text>
-            <TouchableOpacity 
-              style={styles.refreshButton}
-              onPress={() => loadRealUsers()}
-            >
-              <Text style={styles.refreshButtonText}>Find Users</Text>
-            </TouchableOpacity>
-          </View>
-        }
-      />
+      {loading ? (
+        <View style={styles.loaderContainer}>
+          <ActivityIndicator size="large" color="#6A3DE8" />
+        </View>
+      ) : (
+        <FlatList
+          data={recentChats}
+          keyExtractor={(item) => item._id}
+          renderItem={renderItem}
+          contentContainerStyle={styles.chatsList}
+          ListEmptyComponent={<EmptyChats />}
+          refreshing={loading}
+          onRefresh={loadChats}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -457,96 +236,61 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  errorContainer: {
-    flex: 1, 
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    padding: 20,
-  },
-  errorText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FF3B30',
-    marginBottom: 10,
-  },
-  errorSubText: {
-    fontSize: 16,
-    color: '#666666',
-    textAlign: 'center',
-    marginBottom: 30,
-  },
-  logoutButton: {
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 30,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  logoutButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
   header: {
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F2F2F2',
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
   },
-  title: {
+  headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#333333',
   },
-  refreshButton: {
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-    marginTop: 15,
+  newChatButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#F0F0F0',
   },
-  refreshButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: 'bold',
+  chatsList: {
+    flexGrow: 1,
+  },
+  loaderContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   chatItem: {
     flexDirection: 'row',
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F2F2F2',
-    alignItems: 'center',
+    borderBottomColor: '#F0F0F0',
   },
   avatarCircle: {
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#E0E0E0',
+    backgroundColor: '#6A3DE8',
     justifyContent: 'center',
     alignItems: 'center',
-    position: 'relative',
-    overflow: 'hidden',
+    marginRight: 12,
   },
   onlineIndicator: {
     borderWidth: 2,
     borderColor: '#4CAF50',
   },
   avatarText: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
-    color: '#4A90E2',
+    color: '#FFFFFF',
   },
   chatContent: {
     flex: 1,
-    marginLeft: 12,
+    justifyContent: 'center',
   },
   chatHeader: {
     flexDirection: 'row',
@@ -555,7 +299,7 @@ const styles = StyleSheet.create({
   },
   chatName: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: 'bold',
     color: '#333333',
   },
   chatTime: {
@@ -568,39 +312,48 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   lastMessage: {
-    flex: 1,
     fontSize: 14,
     color: '#666666',
+    flex: 1,
+    marginRight: 8,
   },
   unreadMessage: {
     fontWeight: 'bold',
     color: '#333333',
   },
   unreadBadge: {
-    backgroundColor: '#4A90E2',
-    borderRadius: 10,
-    width: 20,
+    backgroundColor: '#6A3DE8',
+    minWidth: 20,
     height: 20,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 8,
+    paddingHorizontal: 5,
   },
   unreadText: {
-    color: 'white',
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: 'bold',
   },
   emptyContainer: {
     flex: 1,
-    padding: 20,
-    alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 50,
+    alignItems: 'center',
+    paddingHorizontal: 30,
+    paddingTop: 60,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333333',
+    marginTop: 16,
+    marginBottom: 8,
   },
   emptyText: {
     fontSize: 16,
     color: '#666666',
     textAlign: 'center',
+    lineHeight: 22,
   },
 });
 
