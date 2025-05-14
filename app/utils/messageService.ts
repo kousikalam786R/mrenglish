@@ -167,6 +167,7 @@ export const sendMessage = async (receiverId: string, content: string): Promise<
 export const getRecentChats = async (): Promise<ChatUser[]> => {
   try {
     const token = await getAuthToken();
+    const userId = await AsyncStorage.getItem('userId');
     
     const url = getApiUrl(`${API_ENDPOINTS.MESSAGES}/recent`);
     console.log('Fetching recent chats from:', url);
@@ -223,11 +224,15 @@ export const getRecentChats = async (): Promise<ChatUser[]> => {
       }
     });
     
+    // Filter out any chats where the user ID matches the current user
+    const filteredChats = chats.filter(chat => chat._id !== userId);
+    console.log(`Filtered out ${chats.length - filteredChats.length} self-chats`);
+    
     // Cache the transformed chats
-    AsyncStorage.setItem('recentChats', JSON.stringify(chats))
+    AsyncStorage.setItem('recentChats', JSON.stringify(filteredChats))
       .catch(err => console.error('Error caching chats:', err));
     
-    return chats;
+    return filteredChats;
   } catch (error) {
     console.error('Error fetching recent chats:', error);
     throw error;

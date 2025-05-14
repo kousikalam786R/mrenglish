@@ -12,6 +12,12 @@ import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAppSelector, useAppDispatch } from '../redux/hooks';
 import { checkAuthState } from '../redux/thunks/authThunks';
+import { useSelector } from 'react-redux';
+import { RootState } from '../redux/store';
+import { CallStatus } from '../utils/callService';
+import IncomingCallModal from '../components/IncomingCallModal';
+import SplashScreen from '../screens/SplashScreen';
+import { navigationRef, processQueuedActions } from './NavigationService';
 
 // Screens
 import LobbyScreen from '../screens/LobbyScreen';
@@ -204,16 +210,49 @@ const AuthNavigator = () => {
 // Root navigator
 const RootNavigator = () => {
   // Use Redux auth state instead of context
-  const { isSignedIn } = useAppSelector((state: any) => state.auth);
-
+  const { isSignedIn, status } = useSelector((state: any) => state.auth);
+  const callState = useSelector((state: RootState) => state.call.activeCall);
+  const [showIncomingCall, setShowIncomingCall] = useState(false);
+  
+  // Show incoming call modal when call status is RINGING
+  useEffect(() => {
+    if (callState.status === CallStatus.RINGING) {
+      setShowIncomingCall(true);
+    } else {
+      setShowIncomingCall(false);
+    }
+  }, [callState.status]);
+  
   return (
     <Stack.Navigator screenOptions={screenOptions}>
-      {isSignedIn ? (
+      {status === 'loading' ? (
+        // Only show splash while loading
+        <Stack.Screen name="Splash" component={SplashScreen} options={{ headerShown: false }} />
+      ) : isSignedIn ? (
+        // Authenticated flow
         <>
           <Stack.Screen name="Main" component={MainNavigator} />
-          <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+          <Stack.Screen 
+            name="Call" 
+            component={CallScreen} 
+            options={{
+              headerShown: false,
+              presentation: 'fullScreenModal',
+              animation: 'slide_from_bottom'
+            }}
+          />
+          <Stack.Screen 
+            name="EditProfile" 
+            component={EditProfileScreen} 
+            options={{
+              headerShown: false,
+              presentation: 'modal',
+              animation: 'slide_from_bottom'
+            }}
+          />
         </>
       ) : (
+        // Auth flow
         <Stack.Screen name="Auth" component={AuthNavigator} />
       )}
     </Stack.Navigator>
@@ -230,114 +269,37 @@ GoogleSignin.configure({
 
 // App navigator with auth context
 const AppNavigator = () => {
-  // State to track if user is signed in
-  const [isSignedIn, setIsSignedIn] = useState(false);
-  const [initializing, setInitializing] = useState(true);
-  const [isNavigationReady, setIsNavigationReady] = useState(false);
-  const dispatch = useAppDispatch();
+  const { isSignedIn, status } = useSelector((state: any) => state.auth);
+  const callState = useSelector((state: RootState) => state.call.activeCall);
+  const [showIncomingCall, setShowIncomingCall] = useState(false);
   
-  // Handle user state changes
-  function onAuthStateChanged(user: FirebaseAuthTypes.User | null) {
-    setIsSignedIn(!!user);
-    if (initializing) setInitializing(false);
-  }
-
+  // Show incoming call modal when call status is RINGING
   useEffect(() => {
-    // Subscribe to auth state changes
-    const subscriber = auth().onAuthStateChanged(onAuthStateChanged);
-    
-    // Check auth state from Redux
-    dispatch(checkAuthState());
-    
-    // Check for manual authentication token
-    const checkManualAuth = async () => {
-      try {
-        const token = await AsyncStorage.getItem('authToken');
-        // If token exists, set isSignedIn to true for manual auth
-        if (token) {
-          console.log('Found manual auth token, setting signed in state');
-          setIsSignedIn(true);
-        }
-      } catch (error) {
-        console.error('Error checking manual auth token:', error);
-      }
-    };
-    
-    // Run manual auth check
-    checkManualAuth();
-    
-    // Initialize navigation after a short delay
-    const timer = setTimeout(() => {
-      setIsNavigationReady(true);
-    }, 200);
-    
-    // Clean up subscription and timer
-    return () => {
-      subscriber();
-      clearTimeout(timer);
-    };
-  }, []);
+    if (callState.status === CallStatus.RINGING) {
+      setShowIncomingCall(true);
+    } else {
+      setShowIncomingCall(false);
+    }
+  }, [callState.status]);
   
-  // Auth functions
-  const authContext = useMemo(() => ({
-    isSignedIn,
-    signIn: async () => {
-      console.log("Signing in");
-      // Set isSignedIn to true for manual login flows
-      setIsSignedIn(true);
-    },
-    signOut: async () => {
-      console.log("Signing out");
-      try {
-        // Check if a Firebase user exists before attempting to sign out
-        const currentUser = auth().currentUser;
-        if (currentUser) {
-          // Sign out from Firebase if a user exists
-          await auth().signOut();
-          console.log("Successfully signed out from Firebase");
-        } else {
-          console.log("No Firebase user to sign out");
-        }
-        
-        // Try to sign out from Google regardless of sign-in state
-        try {
-          await GoogleSignin.signOut();
-          console.log("Successfully signed out from Google");
-        } catch (googleError) {
-          // This is expected if user wasn't signed in with Google
-          console.log("Google sign out not needed or failed:", googleError);
-        }
-        
-        // Always set isSignedIn to false for manual login flows
-        setIsSignedIn(false);
-      } catch (error) {
-        console.error('Error during sign out process:', error);
-        // Even if there's an error, still set isSignedIn to false to ensure the user can log out
-        setIsSignedIn(false);
-      }
-    },
-  }), [isSignedIn]);
-
-  if (!isNavigationReady || initializing) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Loading...</Text>
-      </View>
-    );
+  // Show loading screen while authentication status is being determined
+  if (status === 'loading') {
+    return <SplashScreen />;
   }
-
+  
   return (
-    <AuthContext.Provider value={authContext}>
-      <ErrorBoundary
-        onError={(error) => {
-          console.error('Navigation error caught:', error);
-        }}
-      >
-        <NavigationContainer theme={NavigationTheme}>
-          <RootNavigator />
-        </NavigationContainer>
-      </ErrorBoundary>
-    </AuthContext.Provider>
+    <NavigationContainer 
+      ref={navigationRef} 
+      theme={NavigationTheme} 
+      onReady={() => {
+        // Process any queued navigation actions once the container is ready
+        processQueuedActions();
+      }}
+    >
+      <RootNavigator />
+      {/* Incoming call modal - now inside NavigationContainer */}
+      <IncomingCallModal visible={showIncomingCall} />
+    </NavigationContainer>
   );
 };
 

@@ -11,6 +11,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { ContactsStackNavigationProp } from '../navigation/types';
+import { useDispatch } from 'react-redux';
+import { AppDispatch } from '../redux/store';
+import { initiateCall } from '../redux/thunks/callThunks';
 
 // Simple contact data structure
 interface Contact {
@@ -126,6 +129,7 @@ type ContactTab = 'calls' | 'friends' | 'blocked';
 const ContactsScreen = () => {
   const [activeTab, setActiveTab] = useState<ContactTab>('calls');
   const navigation = useNavigation<ContactsStackNavigationProp>();
+  const dispatch = useDispatch<AppDispatch>();
   
   // Simple tab navigation
   const renderTabs = () => {
@@ -197,8 +201,21 @@ const ContactsScreen = () => {
     navigation.navigate('ChatDetail', { id: contact.id, name: contact.name });
   };
   
+  // Handle call press with call service
   const handleCallPress = (contact: Contact) => {
-    navigation.navigate('Call', { id: contact.id, name: contact.name, isVideoCall: false });
+    // Initiate the call
+    void dispatch(initiateCall({
+      userId: contact.id,
+      userName: contact.name,
+      options: { audio: true, video: false }
+    }));
+    
+    // Navigate to call screen
+    navigation.navigate('Call', { 
+      id: contact.id, 
+      name: contact.name, 
+      isVideoCall: false 
+    });
   };
   
   const handleMessagePress = (contact: Contact) => {

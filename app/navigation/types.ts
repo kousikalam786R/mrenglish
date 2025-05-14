@@ -37,6 +37,7 @@ export type ContactsStackParamList = {
 export type RootStackParamList = {
   Auth: undefined;
   Main: undefined;
+  Splash: undefined;
 } & AuthStackParamList & AppStackParamList & ChatsStackParamList & ContactsStackParamList;
 
 // Navigation prop types

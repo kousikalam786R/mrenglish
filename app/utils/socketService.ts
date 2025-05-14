@@ -16,6 +16,7 @@ class SocketService {
   private connectionAttempts: number = 0;
   private maxConnectionAttempts: number = 3;
   private lastSuccessfulUrl: string | null = null;
+  private remoteUserId: string | null = null;
 
   private constructor() {}
 
@@ -33,6 +34,18 @@ class SocketService {
       if (!token) {
         console.error('No token found for socket connection');
         return;
+      }
+
+      // Extract userID from token for debugging
+      try {
+        const tokenParts = token.split('.');
+        if (tokenParts.length === 3) {
+          const payload = JSON.parse(atob(tokenParts[1]));
+          console.log('Token payload for socket connection:', payload);
+          console.log('User ID from token:', payload.id);
+        }
+      } catch (e) {
+        console.error('Error parsing token:', e);
       }
 
       console.log('Connecting to socket with token:', token.substring(0, 10) + '...');
@@ -97,13 +110,17 @@ class SocketService {
       this.socket = io(socketsUrl, {
         auth: { token },
         reconnection: true,
-        reconnectionDelay: 1000,
-        reconnectionAttempts: 3,
+        reconnectionDelay: 2000,        // Increase delay between attempts
+        reconnectionAttempts: 5,        // Increase number of attempts
         transports: ['polling', 'websocket'], // Start with polling first
-        timeout: 15000, // Slightly longer timeout for slower connections
+        timeout: 20000,                 // Increased timeout
         autoConnect: true,
         forceNew: true,
-        upgrade: true // Attempt to upgrade to websocket after establishing polling connection
+        upgrade: true,                  // Attempt to upgrade to websocket after establishing polling connection
+        extraHeaders: {                 // Add extra headers that might help with connection
+          "Authorization": `Bearer ${token}`,
+          "Access-Control-Allow-Origin": "*"
+        }
       });
       
       // Set up a promise that resolves on connect or rejects on error
@@ -175,13 +192,17 @@ class SocketService {
           this.socket = io(finalUrl, {
             auth: { token },
             reconnection: true,
-            reconnectionDelay: 1000,
-            reconnectionAttempts: 2,
-            transports: ['polling'], // Polling only as last resort
-            timeout: 30000, // Longer timeout for last attempt
+            reconnectionDelay: 2000,          // Increased delay
+            reconnectionAttempts: 3,          // Increased attempts
+            transports: ['polling'],          // Polling only as last resort
+            timeout: 45000,                   // Much longer timeout for last attempt
             autoConnect: true,
             forceNew: true,
-            upgrade: false // Disable upgrade attempts to keep polling
+            upgrade: false,                   // Disable upgrade attempts to keep polling
+            extraHeaders: {                   // Add extra headers that might help with connection
+              "Authorization": `Bearer ${token}`,
+              "Access-Control-Allow-Origin": "*"
+            }
           });
           
           // Add specific listener for this last attempt
@@ -233,7 +254,8 @@ class SocketService {
     if (!this.socket) return;
     
     this.socket.on('connect', () => {
-      console.log('Socket connected:', this.socket?.id);
+      console.log('Socket connected successfully:', this.socket?.id);
+      console.log('Using transport:', this.socket?.io?.engine?.transport?.name);
     });
 
     this.socket.on('connect_error', (error) => {
@@ -248,9 +270,12 @@ class SocketService {
       console.error('Socket error:', error);
     });
     
-    // Set up user status listener
+    // Set up user status listener with more detailed logging
     this.socket.on('user-status', (data) => {
-      console.log('User status update:', data);
+      console.log('User status update received:', data);
+      if (data && data.userId) {
+        console.log(`User ${data.userId} is now ${data.status}`);
+      }
     });
     
     // Set up new message listener
@@ -337,6 +362,76 @@ class SocketService {
     } catch (error) {
       console.error('Error in storeUserData:', error);
     }
+  }
+
+  // Call-related methods
+  public sendCallOffer(targetUserId: string, sdp: string, type: string, isVideo: boolean = false): void {
+    if (!this.socket) {
+      console.error('Socket not initialized');
+      return;
+    }
+    
+    console.log(`Sending call offer to ${targetUserId}`);
+    this.socket.emit('call-offer', { targetUserId, sdp, type, isVideo });
+  }
+  
+  public sendCallAnswer(targetUserId: string, sdp: string, type: string, accepted: boolean): void {
+    if (!this.socket) {
+      console.error('Socket not initialized');
+      return;
+    }
+    
+    console.log(`Sending call answer to ${targetUserId}: ${accepted ? 'accepted' : 'rejected'}`);
+    this.socket.emit('call-answer', { targetUserId, sdp, type, accepted });
+  }
+  
+  public sendCallEnd(targetUserId: string): void {
+    if (!this.socket) {
+      console.error('Socket not initialized');
+      return;
+    }
+    
+    console.log(`Sending call end to ${targetUserId}`);
+    this.socket.emit('call-end', { targetUserId });
+  }
+  
+  public sendIceCandidate(targetUserId: string, candidate: string, sdpMid: string, sdpMLineIndex: number): void {
+    if (!this.socket) {
+      console.error('Socket not initialized');
+      return;
+    }
+    
+    this.socket.emit('call-ice-candidate', { targetUserId, candidate, sdpMid, sdpMLineIndex });
+  }
+  
+  public onCallOffer(callback: (data: any) => void): void {
+    if (!this.socket) return;
+    this.socket.on('call-offer', callback);
+  }
+  
+  public onCallAnswer(callback: (data: any) => void): void {
+    if (!this.socket) return;
+    this.socket.on('call-answer', callback);
+  }
+  
+  public onCallEnd(callback: (data: any) => void): void {
+    if (!this.socket) return;
+    this.socket.on('call-end', callback);
+  }
+  
+  public onIceCandidate(callback: (data: any) => void): void {
+    if (!this.socket) return;
+    this.socket.on('call-ice-candidate', callback);
+  }
+
+  // Set remote user ID for active call
+  public setRemoteUserId(userId: string): void {
+    this.remoteUserId = userId;
+  }
+
+  // Get remote user ID for active call
+  public getRemoteUserId(): string | null {
+    return this.remoteUserId;
   }
 }
 

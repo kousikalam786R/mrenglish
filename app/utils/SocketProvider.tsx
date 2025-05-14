@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import socketService from './socketService';
-import { useAppSelector } from '../redux/hooks';
+import callService from './callService';
+import { useAppSelector, useAppDispatch } from '../redux/hooks';
 import { getAuthToken, getUserIdFromToken } from './authUtils';
+import { setCallState } from '../redux/slices/callSlice';
 
 // Create socket context
 type SocketContextType = {
@@ -33,8 +35,8 @@ const SocketContext = createContext<SocketContextType>({
 export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isConnected, setIsConnected] = useState(false);
   const { isSignedIn } = useAppSelector((state: any) => state.auth);
+  const dispatch = useAppDispatch();
 
-  // Connect to socket
   // Connect to socket
   const connect = async () => {
     try {
@@ -62,10 +64,38 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             socketService.storeUserData(userData);
           }
         });
+        
+        // Initialize call service
+        initializeCallService();
       }
     } catch (error) {
       console.error('Failed to connect to socket:', error);
       setIsConnected(false);
+    }
+  };
+
+  // Initialize call service and set up event listeners
+  const initializeCallService = () => {
+    try {
+      console.log('Initializing call service');
+      
+      // Initialize the call service
+      callService.initialize();
+      
+      // Set up listener for call state changes
+      callService.addEventListener('call-state-changed', (callState) => {
+        console.log('Call state changed:', callState);
+        dispatch(setCallState(callState));
+      });
+      
+      // Set up listener for incoming calls
+      callService.addEventListener('incoming-call', (data) => {
+        console.log('Incoming call:', data);
+        // Incoming call notification will be handled by the call state change
+      });
+      
+    } catch (error) {
+      console.error('Failed to initialize call service:', error);
     }
   };
 
