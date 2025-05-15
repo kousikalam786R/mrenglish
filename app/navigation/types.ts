@@ -18,6 +18,7 @@ export type AppStackParamList = {
   Contacts: undefined;
   Profile: undefined;
   EditProfile: { userData: any };
+  UserProfile: { userId: string; userName: string };
 };
 
 // Stack parameter lists for nested navigators
@@ -49,4 +50,5 @@ export type RootScreenNavigationProp = NativeStackNavigationProp<RootStackParamL
 
 // Route prop types
 export type ChatDetailRouteProp = RouteProp<RootStackParamList, 'ChatDetail'>;
-export type CallRouteProp = RouteProp<RootStackParamList, 'Call'>; 
+export type CallRouteProp = RouteProp<RootStackParamList, 'Call'>;
+export type UserProfileRouteProp = RouteProp<RootStackParamList, 'UserProfile'>; 

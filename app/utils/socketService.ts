@@ -17,6 +17,7 @@ class SocketService {
   private maxConnectionAttempts: number = 3;
   private lastSuccessfulUrl: string | null = null;
   private remoteUserId: string | null = null;
+  private currentUserReadyStatus: boolean = false;
 
   private constructor() {}
 
@@ -282,6 +283,29 @@ class SocketService {
     this.socket.on('new-message', (data) => {
       console.log('New message received');
     });
+    
+    // Set up ready-to-talk listener
+    this.socket.on('user-ready-status', (data) => {
+      console.log('User ready status update received:', data);
+      if (data && data.userId) {
+        console.log(`User ${data.userId} ready status: ${data.isReady}`);
+      }
+    });
+    
+    // Set up ready users list listener
+    this.socket.on('ready-users-list', (data) => {
+      console.log(`Received ${data.users?.length || 0} ready users`);
+    });
+    
+    // Set up random partner result listener
+    this.socket.on('random-partner-result', (data) => {
+      console.log('Random partner result received:', data.success);
+    });
+    
+    // Set up partner found listener
+    this.socket.on('partner-found', (data) => {
+      console.log('Partner found notification received');
+    });
   }
 
   public disconnect(): void {
@@ -432,6 +456,71 @@ class SocketService {
   // Get remote user ID for active call
   public getRemoteUserId(): string | null {
     return this.remoteUserId;
+  }
+
+  // Ready-to-talk related methods
+  public setReadyToTalk(status: boolean, additionalData: any = {}): void {
+    if (!this.socket) {
+      console.error('Socket not initialized');
+      return;
+    }
+    
+    console.log(`Setting ready to talk status to: ${status}`);
+    this.currentUserReadyStatus = status;
+    
+    this.socket.emit('set-ready-to-talk', { 
+      status, 
+      ...additionalData 
+    });
+  }
+  
+  public getReadyToTalkUsers(): void {
+    if (!this.socket) {
+      console.error('Socket not initialized');
+      return;
+    }
+    
+    console.log('Requesting ready to talk users');
+    this.socket.emit('get-ready-users');
+  }
+  
+  public findRandomPartner(): void {
+    if (!this.socket) {
+      console.error('Socket not initialized');
+      return;
+    }
+    
+    console.log('Finding random partner');
+    this.socket.emit('find-random-partner');
+  }
+  
+  public isUserReady(): boolean {
+    return this.currentUserReadyStatus;
+  }
+  
+  public onReadyStatusUpdated(callback: (data: any) => void): void {
+    if (!this.socket) return;
+    this.socket.on('ready-status-updated', callback);
+  }
+  
+  public onUserReadyStatus(callback: (data: any) => void): void {
+    if (!this.socket) return;
+    this.socket.on('user-ready-status', callback);
+  }
+  
+  public onReadyUsersList(callback: (data: any) => void): void {
+    if (!this.socket) return;
+    this.socket.on('ready-users-list', callback);
+  }
+  
+  public onRandomPartnerResult(callback: (data: any) => void): void {
+    if (!this.socket) return;
+    this.socket.on('random-partner-result', callback);
+  }
+  
+  public onPartnerFound(callback: (data: any) => void): void {
+    if (!this.socket) return;
+    this.socket.on('partner-found', callback);
   }
 }
 

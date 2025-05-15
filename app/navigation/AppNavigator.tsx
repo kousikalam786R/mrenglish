@@ -28,6 +28,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
 import ChatDetailScreen from '../screens/ChatDetailScreen';
 import CallScreen from '../screens/CallScreen';
+import UserProfileScreen from '../screens/UserProfileScreen';
 
 // Auth Screens
 import HomeScreen from '../screens/HomeScreen';
@@ -222,7 +223,7 @@ const RootNavigator = () => {
       setShowIncomingCall(false);
     }
   }, [callState.status]);
-  
+
   return (
     <Stack.Navigator screenOptions={screenOptions}>
       {status === 'loading' ? (
@@ -248,6 +249,24 @@ const RootNavigator = () => {
               headerShown: false,
               presentation: 'modal',
               animation: 'slide_from_bottom'
+            }}
+          />
+          <Stack.Screen 
+            name="UserProfile" 
+            component={UserProfileScreen} 
+            options={{
+              headerShown: false,
+              presentation: 'card',
+              animation: 'slide_from_right'
+            }}
+          />
+          <Stack.Screen 
+            name="ChatDetail" 
+            component={ChatDetailScreen} 
+            options={{
+              headerShown: false,
+              presentation: 'card',
+              animation: 'slide_from_right'
             }}
           />
         </>

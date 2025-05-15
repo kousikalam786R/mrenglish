@@ -22,6 +22,8 @@ import { getAuthToken } from '../utils/authUtils';
 import { requestMicrophonePermission, showPermissionExplanation, checkMicrophonePermission } from '../utils/permissionUtils';
 import ProgressDialog from '../components/ProgressDialog';
 import Icon from 'react-native-vector-icons/Ionicons';
+import IconMaterial from 'react-native-vector-icons/MaterialIcons';
+import PartnerSearchScreen from '../components/PartnerSearchScreen';
 
 // Define user type
 interface User {
@@ -32,68 +34,108 @@ interface User {
   country?: string;
   isOnline?: boolean;
   email?: string;
+  gender?: string;
+  rating?: number;
+  talks?: number;
+  readyToTalk?: boolean;
 }
 
 interface UserCardProps {
   user: User;
+  onCallPress: () => void;
+  onMessagePress: () => void;
   onPress: () => void;
 }
 
-const UserCard = ({ user, onPress }: UserCardProps) => {
+const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps) => {
+  // Level indicator background colors
+  const getLevelBgColor = (level?: string) => {
+    if (!level) return '#e0e0e0';
+    const firstChar = level.charAt(0).toUpperCase();
+    switch (firstChar) {
+      case 'A': return '#4CAF50'; // Green
+      case 'B': return '#2196F3'; // Blue
+      case 'C': return '#FFC107'; // Yellow
+      default: return '#e0e0e0'; // Grey
+    }
+  };
+
   return (
-    <TouchableOpacity 
-      style={[
-        styles.userCard,
-        user.isOnline ? styles.userCardOnline : styles.userCardOffline
-      ]} 
-      onPress={onPress}
-      activeOpacity={0.7}
-    >
-      <View style={styles.userCardContent}>
+    <View style={styles.userCard}>
+      <TouchableOpacity 
+        style={styles.userCardContent}
+        onPress={onPress}
+        activeOpacity={0.7}
+      >
         <View style={styles.avatarContainer}>
           <Image 
             source={{ uri: user.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg' }} 
             style={styles.avatar} 
           />
+          <View style={[styles.levelIndicator, { backgroundColor: getLevelBgColor(user.level) }]}>
+            <Text style={styles.levelText}>{user.level || 'A1'}</Text>
+          </View>
           {user.isOnline && <View style={styles.onlineIndicator} />}
         </View>
+        
         <View style={styles.userInfo}>
-          <Text style={styles.userName}>{user.name}</Text>
-          <Text style={styles.userMeta}>
-            {user.level || 'Beginner'} • {user.country || '🌎 Global'}
+          <Text style={styles.userName}>
+            {user.name} {user.gender === 'Female' ? '🌸' : user.gender === 'Male' ? '👨' : ''}
           </Text>
-          {user.isOnline ? (
-            <Text style={styles.onlineText}>Online Now</Text>
-          ) : (
-            <Text style={styles.offlineText}>Currently Offline</Text>
-          )}
+          <View style={styles.ratingContainer}>
+            <Text style={styles.thumbsUp}>👍 {user.rating || 95}%</Text>
+            <Text style={styles.userGender}> • {user.gender || 'Not specified'}</Text>
+          </View>
+          <Text style={styles.userCountry}>
+            {user.country || '🌎 Global'} • {user.talks || 0} talks
+          </Text>
+          <Text style={user.isOnline ? styles.onlineText : styles.offlineText}>
+            {user.isOnline ? 'online' : 'offline'}
+          </Text>
         </View>
-        <TouchableOpacity 
-          style={[
-            styles.callButton,
-            !user.isOnline && styles.callButtonDisabled
-          ]} 
-          onPress={onPress}
-          disabled={!user.isOnline}
-        >
-          <Text style={styles.callButtonText}>Call</Text>
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
+        
+        {user.isOnline ? (
+          <TouchableOpacity 
+            style={styles.callButton} 
+            onPress={(e) => {
+              e.stopPropagation(); // Prevent triggering the parent's onPress
+              onCallPress();
+            }}
+          >
+            <IconMaterial name="call" size={24} color="white" />
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity 
+            style={styles.messageButton} 
+            onPress={(e) => {
+              e.stopPropagation(); // Prevent triggering the parent's onPress
+              onMessagePress();
+            }}
+          >
+            <IconMaterial name="chat" size={24} color="white" />
+          </TouchableOpacity>
+        )}
+      </TouchableOpacity>
+    </View>
   );
 };
 
-interface LobbyScreenProps {
+interface LobbyScreenProps { 
   navigation: NativeStackNavigationProp<RootStackParamList>;
 }
 
 const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   const [users, setUsers] = useState<User[]>([]);
+  const [readyUsers, setReadyUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [permissionChecked, setPermissionChecked] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
   const [progressMessage, setProgressMessage] = useState('');
+  const [currentUserReady, setCurrentUserReady] = useState(false);
+  const [findingPartner, setFindingPartner] = useState(false);
+  const [showPartnerSearch, setShowPartnerSearch] = useState(false);
+  const [searchEmoji, setSearchEmoji] = useState('👨‍🍳');
 
   // Check microphone permission on component mount
   useEffect(() => {
@@ -140,8 +182,22 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       const fetchedUsers = await response.json();
       console.log('Fetched online users:', fetchedUsers.length);
       
+      // Add mock data for demo
+      const enhancedUsers = fetchedUsers.map((user: User) => ({
+        ...user,
+        gender: Math.random() > 0.5 ? 'Male' : 'Female',
+        rating: Math.floor(Math.random() * 20) + 80, // 80-100
+        talks: Math.floor(Math.random() * 1000) + 1,
+        level: ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'][Math.floor(Math.random() * 6)],
+        readyToTalk: Math.random() > 0.3 // 70% ready to talk
+      }));
+      
       // Update state with fetched users
-      setUsers(fetchedUsers);
+      setUsers(enhancedUsers);
+      
+      // Filter users who are ready to talk
+      const usersReadyToTalk = enhancedUsers.filter((user: User) => user.isOnline && user.readyToTalk);
+      setReadyUsers(usersReadyToTalk);
       
       // Initialize socket service to receive user status updates
       await initializeSocketConnection();
@@ -162,9 +218,14 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       const standardUsers = await getAllUsers();
       
       // Make sure we have the online status property for each user, but default to false
-      const usersWithStatus = standardUsers.map(user => ({
+      const usersWithStatus = standardUsers.map((user: User) => ({
         ...user,
-        isOnline: false // Default to offline unless socket confirms they're online
+        isOnline: false, // Default to offline unless socket confirms they're online
+        gender: Math.random() > 0.5 ? 'Male' : 'Female',
+        rating: Math.floor(Math.random() * 20) + 80, // 80-100
+        talks: Math.floor(Math.random() * 1000) + 1,
+        level: ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'][Math.floor(Math.random() * 6)],
+        readyToTalk: Math.random() > 0.3 // 70% ready to talk
       }));
       
       setUsers(usersWithStatus);
@@ -177,7 +238,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     }
   };
 
-  // Initialize socket connection
+  // Initialize socket connection and listen for events
   const initializeSocketConnection = async () => {
     try {
       // Initialize socket connection if not already connected
@@ -196,6 +257,9 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         console.log('Socket already connected:', socketService.getSocket()?.id);
       }
       
+      // Set up initial ready status
+      setCurrentUserReady(socketService.isUserReady());
+      
       // Listen for user status updates
       socketService.onUserStatus((data) => {
         if (data && data.userId) {
@@ -204,6 +268,60 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         }
       });
       
+      // Listen for user ready-to-talk status updates
+      socketService.onUserReadyStatus((data) => {
+        if (data && data.userId) {
+          console.log(`Updating user ${data.userId} ready status to ${data.isReady}`);
+          updateUserReadyStatus(data.userId, data.isReady, data.userData);
+        }
+      });
+      
+      // Listen for ready status updates for current user
+      socketService.onReadyStatusUpdated((data) => {
+        console.log('Ready status updated:', data);
+        if (data.success) {
+          setCurrentUserReady(data.isReady);
+        }
+      });
+      
+      // Listen for ready users list updates
+      socketService.onReadyUsersList((data) => {
+        if (data.users && Array.isArray(data.users)) {
+          console.log(`Received ${data.users.length} ready users`);
+          updateReadyUsersList(data.users);
+        }
+      });
+      
+      // Listen for partner found notifications
+      socketService.onPartnerFound((data) => {
+        if (data.partner) {
+          // Close the partner search screen if it's open
+          setShowPartnerSearch(false);
+          setFindingPartner(false);
+          
+          console.log('You were matched with:', data.partner.name);
+          Alert.alert(
+            'Partner Found',
+            `${data.partner.name} is looking for a partner and matched with you!`,
+            [
+              { 
+                text: 'Decline', 
+                style: 'cancel',
+                onPress: () => console.log('Partner match declined')
+              },
+              { 
+                text: 'Call Now', 
+                style: 'default',
+                onPress: () => handleCallPress(data.partner)
+              },
+            ]
+          );
+        }
+      });
+      
+      // Request a list of ready users
+      socketService.getReadyToTalkUsers();
+      
     } catch (error) {
       console.error('Error initializing socket connection:', error);
     }
@@ -211,17 +329,91 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
 
   // Update a single user's online status
   const updateUserStatus = (userId: string, isOnline: boolean) => {
-    setUsers(prevUsers => 
-      prevUsers.map(user => 
+    setUsers(prevUsers => {
+      const updatedUsers = prevUsers.map((user: User) => 
         user._id === userId 
           ? { ...user, isOnline } 
           : user
-      )
-    );
+      );
+      
+      // Also update ready users list
+      setReadyUsers(updatedUsers.filter((user: User) => user.isOnline && user.readyToTalk));
+      
+      return updatedUsers;
+    });
+  };
+  
+  // Update a single user's ready-to-talk status
+  const updateUserReadyStatus = (userId: string, isReady: boolean, userData: any = {}) => {
+    setUsers(prevUsers => {
+      const updatedUsers = prevUsers.map((user: User) => {
+        if (user._id === userId) {
+          // Update user with new ready status and any additional data
+          return { 
+            ...user, 
+            readyToTalk: isReady,
+            level: userData.level || user.level,
+            name: userData.name || user.name,
+            profilePic: userData.profilePic || user.profilePic
+          };
+        }
+        return user;
+      });
+      
+      // Update ready users list
+      setReadyUsers(updatedUsers.filter((user: User) => user.isOnline && user.readyToTalk));
+      
+      return updatedUsers;
+    });
+  };
+  
+  // Update the list of ready users
+  const updateReadyUsersList = (readyUsersList: any[]) => {
+    console.log('Updating ready users list with', readyUsersList.length, 'users');
+    
+    // Mark users as ready in our local state based on the list
+    setUsers(prevUsers => {
+      const userMap = new Map();
+      prevUsers.forEach(user => userMap.set(user._id, user));
+      
+      // Update or add users from the ready list
+      readyUsersList.forEach(readyUser => {
+        const userId = readyUser.userId;
+        const existingUser = userMap.get(userId);
+        
+        if (existingUser) {
+          // Update existing user
+          userMap.set(userId, {
+            ...existingUser,
+            readyToTalk: true,
+            level: readyUser.level || existingUser.level,
+            name: readyUser.name || existingUser.name,
+            profilePic: readyUser.profilePic || existingUser.profilePic
+          });
+        } else if (userId) {
+          // Add new user if we have a minimum of information
+          userMap.set(userId, {
+            _id: userId,
+            name: readyUser.name || 'Unknown User',
+            profilePic: readyUser.profilePic,
+            level: readyUser.level || 'Intermediate',
+            isOnline: true,
+            readyToTalk: true
+          });
+        }
+      });
+      
+      const updatedUsers = Array.from(userMap.values());
+      
+      // Also update the ready users list
+      setReadyUsers(updatedUsers.filter((user: User) => user.isOnline && user.readyToTalk));
+      
+      return updatedUsers;
+    });
   };
 
   // Handle initiating a call to a user
-  const handleUserPress = async (user: User) => {
+  const handleCallPress = async (user: User) => {
     try {
       if (!user.isOnline) {
         Alert.alert('Cannot Call', 'This user is offline. Please try again when they are online.');
@@ -313,6 +505,15 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     }
   };
 
+  // Handle message to a user
+  const handleMessagePress = (user: User) => {
+    navigation.navigate('ChatDetail', { 
+      id: user._id, 
+      name: user.name,
+      avatar: user.profilePic
+    });
+  };
+
   // Handle call cancellation
   const handleCancelCall = () => {
     setShowProgress(false);
@@ -325,32 +526,91 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     fetchUsers();
   };
 
-  // Handle random call
+  // Handle random call with the new functionality
   const handleRandomCall = async () => {
-    const onlineUsers = users.filter(user => user.isOnline);
-    
-    if (onlineUsers.length === 0) {
+    try {
+      // If not ready, set status to ready
+      if (!currentUserReady) {
+        socketService.setReadyToTalk(true);
+      }
+      
+      // Pick a random emoji for the search screen
+      const emojis = ['👨‍🍳', '🧑‍🎓', '👩‍🏫', '🧑‍💼', '👨‍💻', '🧑‍🔬', '👩‍🚀', '🧑‍🎨'];
+      setSearchEmoji(emojis[Math.floor(Math.random() * emojis.length)]);
+      
+      // Show the partner search screen
+      setShowPartnerSearch(true);
+      setFindingPartner(true);
+      
+      // Request a random partner
+      socketService.findRandomPartner();
+      
+      // Set a timeout to avoid waiting too long
+      setTimeout(() => {
+        if (findingPartner) {
+          setFindingPartner(false);
+          setShowPartnerSearch(false);
+          Alert.alert(
+            'Taking Too Long',
+            'Finding a partner is taking longer than expected. Please try again later.',
+            [{ text: 'OK', style: 'default' }]
+          );
+        }
+      }, 60000); // 60 second timeout (increased from 15 seconds)
+    } catch (error) {
+      console.error('Error finding random partner:', error);
+      setFindingPartner(false);
+      setShowPartnerSearch(false);
       Alert.alert(
-        'No Users Online', 
-        'There are no users online to call right now. Please try again later or wait for users to connect.',
+        'Error',
+        'Failed to find a partner. Please try again later.',
         [{ text: 'OK', style: 'default' }]
       );
-      return;
     }
-    
-    // Randomly select an online user
-    const randomIndex = Math.floor(Math.random() * onlineUsers.length);
-    const randomUser = onlineUsers[randomIndex];
-    
-    // Call the randomly selected user
-    handleUserPress(randomUser);
+  };
+
+  // Cancel partner search
+  const handleCancelSearch = () => {
+    setFindingPartner(false);
+    setShowPartnerSearch(false);
+    // If the user cancels, set them as not ready to talk
+    socketService.setReadyToTalk(false);
+  };
+
+  // Handle search settings
+  const handleSearchSettings = () => {
+    setShowPartnerSearch(false);
+    // Navigate to settings or show a settings modal
+    Alert.alert(
+      'Search Settings',
+      'You can set your preferences for finding partners.',
+      [
+        { 
+          text: 'Cancel', 
+          style: 'cancel',
+          onPress: () => setShowPartnerSearch(true)
+        },
+        { 
+          text: 'Confirm', 
+          onPress: () => {
+            // Apply settings and restart search
+            setShowPartnerSearch(true);
+          }
+        }
+      ]
+    );
   };
 
   // Add this getter to determine if random calls are available
-  const isRandomCallAvailable = users.some(user => user.isOnline);
+  const isRandomCallAvailable = true; // Always allow finding a partner
 
-  // Add this getter for online users count
-  const onlineUsersCount = users.filter(user => user.isOnline).length;
+  // Handle pressing a user card to view their profile
+  const handleUserPress = (user: User) => {
+    navigation.navigate('UserProfile', {
+      userId: user._id,
+      userName: user.name
+    });
+  };
 
   // Load users when component mounts
   useEffect(() => {
@@ -361,78 +621,6 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       socketService.removeAllListeners();
     };
   }, []);
-
-  // Add function to check socket connection and reconnect if needed
-  const checkSocketConnection = async () => {
-    const socket = socketService.getSocket();
-    
-    if (!socket) {
-      console.log('No socket found, initializing...');
-      await socketService.initialize();
-      return 'Socket initialized';
-    }
-    
-    if (!socket.connected) {
-      console.log('Socket exists but not connected, reconnecting...');
-      await socketService.initialize();
-      return socket.connected ? 'Reconnected successfully' : 'Failed to reconnect';
-    }
-    
-    return `Socket connected (ID: ${socket.id})`;
-  };
-  
-  // Add a debug function to show socket status
-  const showSocketStatus = async () => {
-    try {
-      const socketStatus = await checkSocketConnection();
-      const token = await getAuthToken();
-      
-      // Fetch online users from debug endpoint
-      const response = await fetch(`${API_URL}/auth/debug-online-users`);
-      const data = await response.json();
-      console.log('Debug online users response:', data);
-      
-      // Get current socket
-      const socket = socketService.getSocket();
-      
-      // Format debug message
-      let debugMessage = `Socket: ${socketStatus}\n`;
-      debugMessage += `Socket ID: ${socket?.id || 'N/A'}\n`;
-      debugMessage += `Socket connected: ${socket?.connected ? 'Yes' : 'No'}\n\n`;
-      debugMessage += `Online users: ${data.onlineUsersCount}\n`;
-      
-      if (data.onlineUsers && data.onlineUsers.length > 0) {
-        debugMessage += `Users: ${data.onlineUsers.map((u: {name: string}) => u.name).join(', ')}\n\n`;
-      } else {
-        debugMessage += 'No users online\n\n';
-      }
-      
-      debugMessage += 'User IDs:\n';
-      debugMessage += data.rawOnlineUserIds.join('\n');
-      
-      Alert.alert(
-        'Connection Debug',
-        debugMessage,
-        [
-          { 
-            text: 'Refresh Users', 
-            onPress: () => fetchUsers() 
-          },
-          { 
-            text: 'Reconnect', 
-            onPress: async () => {
-              await socketService.initialize();
-              fetchUsers();
-            }
-          },
-          { text: 'OK' }
-        ]
-      );
-    } catch (error) {
-      console.error('Error checking socket status:', error);
-      Alert.alert('Error', 'Failed to check connection status');
-    }
-  };
 
   if (loading && !refreshing) {
     return (
@@ -448,32 +636,68 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
       
       <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <Text style={styles.title}>Online Users</Text>
-          <TouchableOpacity 
-            style={styles.refreshButton} 
-            onPress={showSocketStatus}
-          >
-            <Icon name="refresh" size={20} color="#4A90E2" />
-          </TouchableOpacity>
-        </View>
-        <View style={styles.onlineCountContainer}>
-          <View style={styles.onlineCountBadge}>
-            <Text style={styles.onlineCountText}>{onlineUsersCount}</Text>
+        <Text style={styles.title}>Lobby</Text>
+        <TouchableOpacity 
+          style={styles.settingsButton}
+          onPress={() => {
+            // Toggle ready status when settings button is pressed
+            const newStatus = !currentUserReady;
+            socketService.setReadyToTalk(newStatus);
+            setCurrentUserReady(newStatus);
+            Alert.alert(
+              'Status Updated',
+              newStatus 
+                ? 'You are now set as available for calls!' 
+                : 'You are no longer set as available for calls.',
+              [{ text: 'OK', style: 'default' }]
+            );
+          }}
+        >
+          <IconMaterial 
+            name={currentUserReady ? "settings-power" : "settings"} 
+            size={24} 
+            color={currentUserReady ? "#4CAF50" : "#333"} 
+          />
+        </TouchableOpacity>
+      </View>
+      
+      {readyUsers.length === 0 ? (
+        <View style={styles.emptyStateContainer}>
+          <View style={styles.emptyIconContainer}>
+            <IconMaterial name="person" size={50} color="#ccc" />
           </View>
-          <Text style={styles.subtitle}>
-            {onlineUsersCount === 1 
-              ? 'person ready to practice' 
-              : 'people ready to practice'}
-          </Text>
+          <Text style={styles.emptyStateTitle}>There's no one here yet</Text>
         </View>
+      ) : null}
+      
+      <View style={styles.inviteSection}>
+        <Text style={styles.inviteTitle}>
+          {currentUserReady 
+            ? 'You are ready to talk!' 
+            : 'Invite online partners'}
+        </Text>
+        <TouchableOpacity 
+          style={styles.refreshButton}
+          onPress={handleRefresh}
+        >
+          <Icon name="refresh" size={22} color="white" />
+          <Text style={styles.refreshText}>Refresh</Text>
+        </TouchableOpacity>
       </View>
       
       <FlatList
-        data={users}
+        data={readyUsers.length > 0 
+          ? readyUsers // Show ready users first if available
+          : users.filter((user: User) => user.isOnline) // Otherwise show all online users
+        }
         keyExtractor={(item) => item._id}
         renderItem={({ item }) => (
-          <UserCard user={item} onPress={() => handleUserPress(item)} />
+          <UserCard 
+            user={item} 
+            onCallPress={() => handleCallPress(item)} 
+            onMessagePress={() => handleMessagePress(item)}
+            onPress={() => handleUserPress(item)}
+          />
         )}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
@@ -481,34 +705,49 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         onRefresh={handleRefresh}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No users found</Text>
+            <Text style={styles.emptyText}>No users available</Text>
+            <Text style={styles.emptySubtext}>
+              Try using "Find a perfect partner" to get matched with someone!
+            </Text>
           </View>
         }
       />
       
       <TouchableOpacity 
         style={[
-          styles.randomCallButton,
-          !isRandomCallAvailable && styles.randomCallButtonDisabled
+          styles.perfectPartnerButton,
+          findingPartner && styles.buttonActive
         ]}
         onPress={handleRandomCall}
-        disabled={!isRandomCallAvailable}
+        disabled={findingPartner}
       >
-        <Icon name="call" size={20} color="white" style={styles.randomCallIcon} />
-        <Text style={styles.randomCallText}>
-          {isRandomCallAvailable 
-            ? 'Start Random Call' 
-            : 'No Online Users Available'}
+        <Icon name="sparkles" size={20} color="white" style={styles.buttonIcon} />
+        <Text style={styles.perfectPartnerText}>
+          {findingPartner 
+            ? 'Finding a partner...' 
+            : 'Find a perfect partner'}
         </Text>
       </TouchableOpacity>
+      
+      {/* Partner Search Screen */}
+      <PartnerSearchScreen
+        visible={showPartnerSearch}
+        onCancel={handleCancelSearch}
+        onSettings={handleSearchSettings}
+        emoji={searchEmoji}
+      />
       
       {/* Progress Dialog */}
       <ProgressDialog
         visible={showProgress}
-        title="Starting Call"
+        title={findingPartner ? "Finding Partner" : "Starting Call"}
         message={progressMessage}
         cancelable={true}
-        onCancel={handleCancelCall}
+        onCancel={() => {
+          setShowProgress(false);
+          setFindingPartner(false);
+          handleCancelCall();
+        }}
       />
     </SafeAreaView>
   );
@@ -531,31 +770,78 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 20,
     paddingTop: 15,
     paddingBottom: 10,
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5E5',
-  },
-  headerTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
+    position: 'relative',
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#333',
   },
-  subtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 4,
+  settingsButton: {
+    position: 'absolute',
+    right: 20,
+    padding: 5,
+  },
+  emptyStateContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    borderRadius: 15,
+    margin: 20,
+    backgroundColor: '#F9F9F9',
+  },
+  emptyIconContainer: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#E5E5E5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  emptyStateTitle: {
+    fontSize: 18,
+    color: '#888',
+    textAlign: 'center',
+  },
+  inviteSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+  },
+  inviteTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  refreshButton: {
+    backgroundColor: '#673AB7',
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 25,
+  },
+  refreshText: {
+    color: 'white',
+    marginLeft: 5,
+    fontWeight: 'bold',
   },
   listContent: {
     padding: 15,
+    paddingBottom: 100, // Extra padding for the bottom button
   },
   userCard: {
     backgroundColor: 'white',
@@ -568,13 +854,6 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
-  userCardOnline: {
-    borderLeftWidth: 4,
-    borderLeftColor: '#4CAF50',
-  },
-  userCardOffline: {
-    opacity: 0.7,
-  },
   userCardContent: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -583,9 +862,27 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+  },
+  levelIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#4CAF50',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'white',
+  },
+  levelText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 12,
   },
   onlineIndicator: {
     position: 'absolute',
@@ -594,7 +891,9 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: 'green',
+    backgroundColor: '#4CAF50',
+    borderWidth: 1,
+    borderColor: 'white',
   },
   userInfo: {
     flex: 1,
@@ -605,54 +904,75 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
   },
-  userMeta: {
+  ratingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  thumbsUp: {
+    fontSize: 13,
+    color: '#666',
+  },
+  userGender: {
+    fontSize: 13,
+    color: '#666',
+  },
+  userCountry: {
     fontSize: 13,
     color: '#666',
     marginTop: 2,
   },
   onlineText: {
     fontSize: 12,
-    color: 'green',
+    color: '#4CAF50',
     marginTop: 4,
   },
   offlineText: {
     fontSize: 12,
-    color: 'red',
+    color: '#F44336',
     marginTop: 4,
   },
   callButton: {
-    backgroundColor: '#4A90E2',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 50,
-  },
-  callButtonText: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  callButtonDisabled: {
-    backgroundColor: '#ccc',
-  },
-  randomCallButton: {
-    backgroundColor: '#4A90E2',
-    margin: 20,
-    padding: 16,
-    borderRadius: 50,
+    backgroundColor: '#673AB7',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     alignItems: 'center',
-    shadowColor: '#4A90E2',
+    justifyContent: 'center',
+  },
+  messageButton: {
+    backgroundColor: '#673AB7',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  perfectPartnerButton: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    right: 20,
+    backgroundColor: '#673AB7',
+    padding: 16,
+    borderRadius: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#673AB7',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: 8,
   },
-  randomCallButtonDisabled: {
+  buttonDisabled: {
     backgroundColor: '#ccc',
+    shadowOpacity: 0.1,
   },
-  randomCallIcon: {
+  buttonIcon: {
     marginRight: 10,
   },
-  randomCallText: {
+  perfectPartnerText: {
     color: 'white',
     fontWeight: 'bold',
     fontSize: 16,
@@ -665,26 +985,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
   },
-  onlineCountContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  onlineCountBadge: {
-    backgroundColor: '#4A90E2',
-    borderRadius: 12,
-    padding: 4,
-    marginRight: 8,
-  },
-  onlineCountText: {
-    color: 'white',
-    fontWeight: 'bold',
+  emptySubtext: {
     fontSize: 14,
+    color: '#888',
+    marginTop: 8,
+    textAlign: 'center',
   },
-  refreshButton: {
-    padding: 8,
-    backgroundColor: '#f0f8ff',
-    borderRadius: 20,
-    marginLeft: 10,
+  buttonActive: {
+    backgroundColor: '#4A148C', // Darker purple when active
   },
 });
 

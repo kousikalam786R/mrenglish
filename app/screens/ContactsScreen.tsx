@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,87 +7,130 @@ import {
   TouchableOpacity,
   StatusBar,
   Platform,
+  Image,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { ContactsStackNavigationProp } from '../navigation/types';
-import { useDispatch } from 'react-redux';
-import { AppDispatch } from '../redux/store';
+import { useDispatch, useSelector } from 'react-redux';
+import { AppDispatch, RootState } from '../redux/store';
 import { initiateCall } from '../redux/thunks/callThunks';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Icon from 'react-native-vector-icons/Ionicons';
 
-// Simple contact data structure
-interface Contact {
-  id: string;
+// Friend interface
+interface Friend {
+  _id: string;
   name: string;
-  lastInteraction?: string;
-  isFriend: boolean;
-  isBlocked: boolean;
+  profilePic?: string;
+  level?: string;
+  country?: string;
 }
 
-// Mock data
-const CONTACTS: Contact[] = [
-  {
-    id: '1',
-    name: 'Sarah Johnson',
-    lastInteraction: '2 days ago',
-    isFriend: true,
-    isBlocked: false,
-  },
-  {
-    id: '2',
-    name: 'Michael Chen',
-    lastInteraction: 'Yesterday',
-    isFriend: true,
-    isBlocked: false,
-  },
-  {
-    id: '3',
-    name: 'Ana Garcia',
-    lastInteraction: '1 week ago',
-    isFriend: true,
-    isBlocked: false,
-  },
-  {
-    id: '4',
-    name: 'David Kim',
-    lastInteraction: '3 days ago',
-    isFriend: false,
-    isBlocked: true,
-  },
-  {
-    id: '5',
-    name: 'Emma Wilson',
-    lastInteraction: '5 days ago',
-    isFriend: true,
-    isBlocked: false,
-  },
-  {
-    id: '6',
-    name: 'James Brown',
-    lastInteraction: '2 weeks ago',
-    isFriend: false,
-    isBlocked: true,
-  },
-  {
-    id: '7',
-    name: 'Olivia Martin',
-    lastInteraction: '3 weeks ago',
-    isFriend: true,
-    isBlocked: false,
-  },
-];
+// Call history interface
+interface CallHistoryItem {
+  userId: string;
+  userName: string;
+  timestamp: number;
+  duration: number;
+  wasVideoCall: boolean;
+  wasIncoming: boolean;
+}
 
-// Simple, stateless contact item component
-const ContactItem = ({ 
-  contact, 
+// Tab types
+type ContactTab = 'calls' | 'friends' | 'blocked';
+
+// Format duration in minutes
+const formatDuration = (seconds: number): string => {
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes} min`;
+};
+
+// Format date to display in a readable format
+const formatDate = (timestamp: number): string => {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  
+  if (date.getDate() === today.getDate() && 
+      date.getMonth() === today.getMonth() && 
+      date.getFullYear() === today.getFullYear()) {
+    return `Today, ${date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+  } else if (date.getDate() === yesterday.getDate() && 
+             date.getMonth() === yesterday.getMonth() && 
+             date.getFullYear() === yesterday.getFullYear()) {
+    return `Yesterday, ${date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+  } else {
+    return `${date.toLocaleDateString([], {month: 'short', day: 'numeric'})}, ${date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+  }
+};
+
+// Friend item component
+const FriendItem = ({ 
+  friend, 
   onPress,
   onCallPress,
-  onMessagePress 
+  onMessagePress,
+  onRemovePress
 }: { 
-  contact: Contact; 
+  friend: Friend; 
   onPress: () => void;
   onCallPress: () => void;
   onMessagePress: () => void;
+  onRemovePress: () => void;
+}) => {
+  return (
+    <TouchableOpacity 
+      style={styles.contactItem} 
+      onPress={onPress}
+    >
+      <View style={styles.avatarContainer}>
+        {friend.profilePic ? (
+          <Image 
+            source={{ uri: friend.profilePic }} 
+            style={styles.avatar} 
+          />
+        ) : (
+          <View style={styles.avatarCircle}>
+            <Text style={styles.avatarText}>{friend.name.charAt(0)}</Text>
+          </View>
+        )}
+        {friend.level && (
+          <View style={styles.levelBadge}>
+            <Text style={styles.levelText}>{friend.level}</Text>
+          </View>
+        )}
+      </View>
+      
+      <View style={styles.contactInfo}>
+        <Text style={styles.contactName}>{friend.name}</Text>
+        {friend.country && (
+          <Text style={styles.lastInteraction}>{friend.country}</Text>
+        )}
+      </View>
+      
+      <TouchableOpacity 
+        style={styles.removeButton} 
+        onPress={onRemovePress}
+      >
+        <Text style={styles.removeButtonText}>Remove</Text>
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
+};
+
+// Call history item component
+const CallItem = ({ 
+  call, 
+  onPress,
+  onCallPress,
+}: { 
+  call: CallHistoryItem; 
+  onPress: () => void;
+  onCallPress: () => void;
 }) => {
   return (
     <TouchableOpacity 
@@ -95,41 +138,70 @@ const ContactItem = ({
       onPress={onPress}
     >
       <View style={styles.avatarCircle}>
-        <Text style={styles.avatarText}>{contact.name.charAt(0)}</Text>
+        <Text style={styles.avatarText}>{call.userName.charAt(0)}</Text>
       </View>
       
       <View style={styles.contactInfo}>
-        <Text style={styles.contactName}>{contact.name}</Text>
-        {contact.lastInteraction && (
-          <Text style={styles.lastInteraction}>Last call: {contact.lastInteraction}</Text>
-        )}
+        <Text style={styles.contactName}>{call.userName}</Text>
+        <Text style={styles.lastInteraction}>{formatDate(call.timestamp)}</Text>
       </View>
       
-      <View style={styles.actionButtons}>
-        <TouchableOpacity 
-          style={styles.callButton} 
-          onPress={onCallPress}
-        >
-          <Text style={styles.callButtonText}>Call</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.messageButton} 
-          onPress={onMessagePress}
-        >
-          <Text style={styles.messageButtonText}>Message</Text>
-        </TouchableOpacity>
+      <View style={styles.callInfo}>
+        <Icon 
+          name={call.wasVideoCall ? "videocam" : "call"} 
+          size={16} 
+          color="#4A90E2" 
+          style={styles.callIcon}
+        />
+        <Text style={styles.durationText}>{formatDuration(call.duration)}</Text>
       </View>
     </TouchableOpacity>
   );
 };
 
-type ContactTab = 'calls' | 'friends' | 'blocked';
-
 // Main component
 const ContactsScreen = () => {
   const [activeTab, setActiveTab] = useState<ContactTab>('calls');
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [blockedUsers, setBlockedUsers] = useState<Friend[]>([]);
   const navigation = useNavigation<ContactsStackNavigationProp>();
   const dispatch = useDispatch<AppDispatch>();
+  const callHistory = useSelector((state: RootState) => state.call.callHistory);
+  
+  // Load stored users data (friends, blocked)
+  const loadStoredUsersData = useCallback(async () => {
+    try {
+      // Load friends
+      const friendsData = await AsyncStorage.getItem('favorites');
+      if (friendsData) {
+        setFriends(JSON.parse(friendsData));
+      } else {
+        setFriends([]);
+      }
+      
+      // Load blocked users
+      const blockedData = await AsyncStorage.getItem('blockedUsers');
+      if (blockedData) {
+        setBlockedUsers(JSON.parse(blockedData));
+      } else {
+        setBlockedUsers([]);
+      }
+    } catch (error) {
+      console.error('Error loading stored users data:', error);
+    }
+  }, []);
+  
+  // Reload data when screen focuses
+  useFocusEffect(
+    useCallback(() => {
+      loadStoredUsersData();
+    }, [loadStoredUsersData])
+  );
+  
+  // Initial load
+  useEffect(() => {
+    loadStoredUsersData();
+  }, [loadStoredUsersData]);
   
   // Simple tab navigation
   const renderTabs = () => {
@@ -159,17 +231,17 @@ const ContactsScreen = () => {
     );
   };
   
-  // Filter contacts based on selected tab
-  const getFilteredContacts = () => {
+  // Get data based on selected tab
+  const getData = () => {
     switch (activeTab) {
       case 'calls':
-        return CONTACTS.filter(contact => contact.lastInteraction);
+        return callHistory;
       case 'friends':
-        return CONTACTS.filter(contact => contact.isFriend);
+        return friends;
       case 'blocked':
-        return CONTACTS.filter(contact => contact.isBlocked);
+        return blockedUsers;
       default:
-        return CONTACTS;
+        return [];
     }
   };
   
@@ -196,30 +268,162 @@ const ContactsScreen = () => {
     );
   };
   
-  // Simple navigation handlers
-  const handleContactPress = (contact: Contact) => {
-    navigation.navigate('ChatDetail', { id: contact.id, name: contact.name });
+  // Navigation handlers
+  const handleContactPress = (contact: Friend | CallHistoryItem) => {
+    const userId = 'userId' in contact ? contact.userId : contact._id;
+    const userName = 'userName' in contact ? contact.userName : contact.name;
+    
+    // Navigate to UserProfile through the root navigation
+    // @ts-ignore - This works but TypeScript doesn't understand the parent navigator access
+    navigation.getParent()?.navigate('UserProfile', { userId, userName });
   };
   
   // Handle call press with call service
-  const handleCallPress = (contact: Contact) => {
+  const handleCallPress = (contact: Friend | CallHistoryItem) => {
+    const userId = 'userId' in contact ? contact.userId : contact._id;
+    const userName = 'userName' in contact ? contact.userName : contact.name;
+    
     // Initiate the call
     void dispatch(initiateCall({
-      userId: contact.id,
-      userName: contact.name,
+      userId,
+      userName,
       options: { audio: true, video: false }
     }));
     
     // Navigate to call screen
     navigation.navigate('Call', { 
-      id: contact.id, 
-      name: contact.name, 
+      id: userId, 
+      name: userName, 
       isVideoCall: false 
     });
   };
   
-  const handleMessagePress = (contact: Contact) => {
-    navigation.navigate('ChatDetail', { id: contact.id, name: contact.name });
+  const handleMessagePress = (contact: Friend | CallHistoryItem) => {
+    const userId = 'userId' in contact ? contact.userId : contact._id;
+    const userName = 'userName' in contact ? contact.userName : contact.name;
+    
+    navigation.navigate('ChatDetail', { id: userId, name: userName });
+  };
+  
+  // Handle remove friend
+  const handleRemoveFriend = async (friend: Friend) => {
+    try {
+      // Get current favorites from AsyncStorage
+      const favoritesString = await AsyncStorage.getItem('favorites');
+      if (!favoritesString) return;
+      
+      const favorites = JSON.parse(favoritesString);
+      // Remove the friend
+      const updatedFavorites = favorites.filter((item: Friend) => item._id !== friend._id);
+      
+      // Save updated favorites back to AsyncStorage
+      await AsyncStorage.setItem('favorites', JSON.stringify(updatedFavorites));
+      
+      // Update state
+      setFriends(updatedFavorites);
+      
+      // Notify user
+      Alert.alert('Success', `${friend.name} removed from your friends list`);
+    } catch (error) {
+      console.error('Error removing friend:', error);
+      Alert.alert('Error', 'Failed to remove friend');
+    }
+  };
+  
+  // Handle unblock user
+  const handleUnblockUser = async (user: Friend) => {
+    try {
+      // Get current blocked users from AsyncStorage
+      const blockedUsersString = await AsyncStorage.getItem('blockedUsers');
+      if (!blockedUsersString) return;
+      
+      const blockedUsers = JSON.parse(blockedUsersString);
+      // Remove the user from blocked list
+      const updatedBlockedUsers = blockedUsers.filter((item: Friend) => item._id !== user._id);
+      
+      // Save updated blocked users back to AsyncStorage
+      await AsyncStorage.setItem('blockedUsers', JSON.stringify(updatedBlockedUsers));
+      
+      // Update state
+      setBlockedUsers(updatedBlockedUsers);
+      
+      // Notify user
+      Alert.alert('Success', `${user.name} has been unblocked`);
+    } catch (error) {
+      console.error('Error unblocking user:', error);
+      Alert.alert('Error', 'Failed to unblock user');
+    }
+  };
+  
+  // Render appropriate item based on tab
+  const renderItem = ({ item }: { item: Friend | CallHistoryItem }) => {
+    if (activeTab === 'calls') {
+      return (
+        <CallItem
+          call={item as CallHistoryItem}
+          onPress={() => handleContactPress(item)}
+          onCallPress={() => handleCallPress(item)}
+        />
+      );
+    } else if (activeTab === 'friends') {
+      return (
+        <FriendItem
+          friend={item as Friend}
+          onPress={() => handleContactPress(item)}
+          onCallPress={() => handleCallPress(item)}
+          onMessagePress={() => handleMessagePress(item)}
+          onRemovePress={() => handleRemoveFriend(item as Friend)}
+        />
+      );
+    } else {
+      // Blocked users
+      return (
+        <FriendItem
+          friend={item as Friend}
+          onPress={() => handleContactPress(item)}
+          onCallPress={() => handleCallPress(item)}
+          onMessagePress={() => handleMessagePress(item)}
+          onRemovePress={() => handleUnblockUser(item as Friend)}
+        />
+      );
+    }
+  };
+  
+  // Group calls by date
+  const renderCallsByDate = () => {
+    if (activeTab !== 'calls' || callHistory.length === 0) {
+      return null;
+    }
+    
+    // Group calls by date
+    const groupedCalls: { [key: string]: CallHistoryItem[] } = {};
+    callHistory.forEach(call => {
+      const date = new Date(call.timestamp);
+      const month = date.toLocaleString('default', { month: 'long' });
+      const year = date.getFullYear();
+      const key = `${month} ${year}`;
+      
+      if (!groupedCalls[key]) {
+        groupedCalls[key] = [];
+      }
+      
+      groupedCalls[key].push(call);
+    });
+    
+    // Convert to array for FlatList
+    return Object.entries(groupedCalls).map(([date, calls]) => (
+      <View key={date}>
+        <Text style={styles.dateHeader}>{date}</Text>
+        {calls.map((call, index) => (
+          <CallItem
+            key={`${call.userId}-${call.timestamp}-${index}`}
+            call={call}
+            onPress={() => handleContactPress(call)}
+            onCallPress={() => handleCallPress(call)}
+          />
+        ))}
+      </View>
+    ));
   };
   
   return (
@@ -232,19 +436,26 @@ const ContactsScreen = () => {
       
       {renderTabs()}
       
-      <FlatList
-        data={getFilteredContacts()}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <ContactItem
-            contact={item}
-            onPress={() => handleContactPress(item)}
-            onCallPress={() => handleCallPress(item)}
-            onMessagePress={() => handleMessagePress(item)}
-          />
-        )}
-        ListEmptyComponent={<EmptyList />}
-      />
+      {activeTab === 'calls' && callHistory.length > 0 ? (
+        <FlatList
+          data={[]}
+          ListHeaderComponent={renderCallsByDate}
+          renderItem={null}
+          keyExtractor={() => 'dummy'}
+        />
+      ) : (
+        <FlatList
+          data={getData()}
+          keyExtractor={(item, index) => {
+            if ('userId' in item) {
+              return `${item.userId}-${item.timestamp}`;
+            }
+            return `${item._id}-${index}`;
+          }}
+          renderItem={renderItem}
+          ListEmptyComponent={<EmptyList />}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -277,23 +488,29 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     paddingVertical: 8,
-    borderRadius: 20,
-    marginHorizontal: 4,
+    borderBottomWidth: 3,
+    borderBottomColor: 'transparent',
   },
   activeTab: {
-    backgroundColor: '#4A90E2',
+    borderBottomColor: '#673AB7',
+    backgroundColor: 'transparent',
   },
   tabText: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#666666',
+    color: '#999999',
   },
   activeTabText: {
-    color: '#FFFFFF',
+    color: '#673AB7',
+    fontWeight: 'bold',
   },
-  listContent: {
-    flexGrow: 1,
-    paddingBottom: 16,
+  dateHeader: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    backgroundColor: '#F5F5F5',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginTop: 8,
   },
   contactItem: {
     flexDirection: 'row',
@@ -309,6 +526,14 @@ const styles = StyleSheet.create({
     elevation: 2,
     alignItems: 'center',
   },
+  avatarContainer: {
+    position: 'relative',
+  },
+  avatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+  },
   avatarCircle: {
     width: 50,
     height: 50,
@@ -320,7 +545,25 @@ const styles = StyleSheet.create({
   avatarText: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#4A90E2',
+    color: '#673AB7',
+  },
+  levelBadge: {
+    position: 'absolute',
+    bottom: -5,
+    right: -5,
+    backgroundColor: 'white',
+    borderRadius: 10,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#673AB7',
+  },
+  levelText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#673AB7',
   },
   contactInfo: {
     flex: 1,
@@ -336,11 +579,23 @@ const styles = StyleSheet.create({
     color: '#666666',
     marginTop: 4,
   },
+  callInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  callIcon: {
+    marginRight: 4,
+  },
+  durationText: {
+    fontSize: 14,
+    color: '#333333',
+    fontWeight: '500',
+  },
   actionButtons: {
     flexDirection: 'row',
   },
   callButton: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: '#673AB7',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 16,
@@ -372,6 +627,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666666',
     textAlign: 'center',
+  },
+  removeButton: {
+    backgroundColor: 'white',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    marginLeft: 8,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 1,
+  },
+  removeButtonText: {
+    color: '#333333',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 
