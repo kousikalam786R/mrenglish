@@ -7,6 +7,7 @@ import {
   setRemoteUser,
   resetCallState
 } from '../slices/callSlice';
+import { RootState } from '../store';
 
 // Thunk to initiate a call
 export const initiateCall = createAsyncThunk(
@@ -137,13 +138,24 @@ export const toggleAudioMute = createAsyncThunk(
 // Thunk to toggle video
 export const toggleVideoStream = createAsyncThunk(
   'call/toggleVideoStream',
-  async (_, { dispatch, getState }) => {
+  async (_, { getState }) => {
     try {
-      const isEnabled = callService.toggleVideo();
-      return { isEnabled };
+      const state = getState() as RootState;
+      const callState = state.call.activeCall;
+      
+      // If already in a connected call, use the video upgrade flow
+      if (callState.status === CallStatus.CONNECTED && !callState.isVideoEnabled) {
+        // For enabling, we'll use the upgrade flow in the UI component
+        // This will just return the current state
+        return { success: false, isVideoEnabled: callState.isVideoEnabled };
+      }
+      
+      // Otherwise, just toggle the video
+      const isEnabled = await callService.toggleVideo();
+      return { success: true, isVideoEnabled: isEnabled };
     } catch (error) {
-      console.error('Error toggling video:', error);
-      return { success: false };
+      console.error('Error toggling video stream:', error);
+      return { success: false, isVideoEnabled: false, error: String(error) };
     }
   }
 ); 

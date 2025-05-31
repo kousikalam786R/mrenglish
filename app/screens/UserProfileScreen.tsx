@@ -270,6 +270,21 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
     });
   };
 
+  // Handle video call user
+  const handleVideoCallUser = () => {
+    // Don't allow calling blocked users
+    if (isBlocked) {
+      Alert.alert('Blocked', 'You cannot call a blocked user');
+      return;
+    }
+    
+    navigation.navigate('Call', { 
+      id: userId, 
+      name: userName, 
+      isVideoCall: true 
+    });
+  };
+
   // Handle message user
   const handleMessageUser = () => {
     // Don't allow messaging blocked users
@@ -357,11 +372,11 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
             </TouchableOpacity>
             
             <TouchableOpacity 
-              style={styles.callButton} 
+              style={[styles.callButton, styles.callButtonFullWidth]} 
               onPress={handleCallUser}
             >
               <Icon name="call-outline" size={24} color="#fff" />
-              <Text style={styles.buttonText}>Call user</Text>
+              <Text style={styles.buttonText}>Call</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -611,7 +626,7 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   callButton: {
-    backgroundColor: '#673AB7',
+    backgroundColor: '#2196F3',
     borderRadius: 30,
     paddingVertical: 12,
     paddingHorizontal: 25,
@@ -619,7 +634,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flex: 1,
-    marginLeft: 10,
+    marginRight: 10,
+  },
+  callButtonFullWidth: {
+    flex: 2,
   },
   buttonText: {
     color: '#FFFFFF',

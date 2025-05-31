@@ -18,6 +18,8 @@ import { store } from './app/redux/store'; // Adjust this import path if needed
 import PermissionsManager from './app/components/PermissionsManager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { signInSuccess } from './app/redux/slices/authSlice';
+import Toast from 'react-native-toast-message';
+import callService from './app/utils/callService';
 
 function App(): React.JSX.Element {
   useEffect(() => {
@@ -40,6 +42,26 @@ function App(): React.JSX.Element {
     checkAuth();
   }, []);
 
+  // Force reset of the CallService singleton to ensure latest methods are available
+  useEffect(() => {
+    try {
+      // Custom code to force the singleton to reset and reinitialize
+      const CallServiceClass = Object.getPrototypeOf(callService).constructor;
+      if (CallServiceClass && typeof CallServiceClass.resetInstance === 'function') {
+        CallServiceClass.resetInstance();
+        console.log('CallService has been reset and reinitialized');
+      } else {
+        // Fallback to normal initialization
+        callService.initialize();
+        console.log('CallService has been initialized without reset');
+      }
+    } catch (e) {
+      console.error('Error handling CallService initialization:', e);
+      // Fallback to direct initialization
+      callService.initialize();
+    }
+  }, []);
+
   return (
     <GestureHandlerRootView style={styles.container}>
       <Provider store={store}>
@@ -49,6 +71,7 @@ function App(): React.JSX.Element {
               <AppNavigator />
             </SocketProvider>
           </PermissionsManager>
+          <Toast />
         </SafeAreaProvider>
       </Provider>
     </GestureHandlerRootView>

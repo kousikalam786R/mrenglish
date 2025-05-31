@@ -15,6 +15,15 @@ export const BACKUP_IPS = [
   LOCAL_IP,  // Try actual IP last since Android emulator can't connect to it
 ];
 
+// Add more potential IP addresses for real devices
+export const REAL_DEVICE_IPS = [
+  LOCAL_IP,
+  // Add potential IPs for both devices here
+  // For example, if both devices are on same network:
+  '192.168.29.152',
+  '192.168.29.153',
+];
+
 // Helper to detect if we're on an emulator
 const isEmulator = (): boolean => {
   if (Platform.OS === 'android') {
@@ -79,19 +88,33 @@ export const DIRECT_IP = LOCAL_IP;
 // Function to get alternate URLs in case of connection issues
 export const getAlternateUrls = (): string[] => {
   const urls = [];
-  
-  // For Android, the direct IP should be first priority
-  if (Platform.OS === 'android') {
-    urls.push(`http://${LOCAL_IP}:5000`);
+
+  // For physical Android devices, try all real device IPs first
+  if (Platform.OS === 'android' && !isEmulator()) {
+    // Try all potential real device IPs - NEVER use /api for socket connections
+    REAL_DEVICE_IPS.forEach(ip => {
+      // Add URLs without /api first (better for Socket.IO)
+      urls.push(`http://${ip}:5000`);
+      // Then add with /api as fallback for REST API
+      urls.push(`http://${ip}:5000/api`);
+    });
+    
+    // Also try without specific IP (might work on some networks)
+    urls.push(`http://localhost:5000`);
+    urls.push(`http://localhost:5000/api`);
+  } else {
+    // For emulators, use the standard backup IPs
+    BACKUP_IPS.forEach(ip => {
+      // Add URLs without /api first (better for Socket.IO)
+      urls.push(`http://${ip}:5000`);
+      // Then add with /api as fallback for REST API
+      urls.push(`http://${ip}:5000/api`);
+    });
   }
-  
-  // Filter out the current BASE_HOST from alternates to avoid duplicate attempts
-  const backupUrls = BACKUP_IPS
-    .filter(ip => ip !== BASE_HOST && ip !== LOCAL_IP)
-    .map(ip => `http://${ip}:5000`);
-  
-  return [...urls, ...backupUrls];
+
+  return urls;
 };
+
 
 export const API_ENDPOINTS = {
   LOGIN: `${API_URL}/auth/login`,

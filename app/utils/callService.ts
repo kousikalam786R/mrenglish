@@ -82,8 +82,33 @@ class CallService {
   public static getInstance(): CallService {
     if (!CallService.instance) {
       CallService.instance = new CallService();
+      
+      // Initialize socket listeners as part of the singleton creation
+      // This ensures the instance will have all methods before it's used
+      setTimeout(() => {
+        CallService.instance.initialize();
+      }, 0);
     }
     return CallService.instance;
+  }
+  
+  // Force a reset of the singleton for testing/development
+  public static resetInstance(): void {
+    if (CallService.instance) {
+      try {
+        // End any ongoing call
+        CallService.instance.endCall();
+      } catch (e) {
+        console.error('Error ending call during reset:', e);
+      }
+      
+      // Clear instance
+      CallService.instance = new CallService();
+      
+      // Re-initialize
+      CallService.instance.initialize();
+      console.log('CallService instance has been reset');
+    }
   }
 
   // Initialize the call service and set up event listeners
@@ -93,6 +118,11 @@ class CallService {
     socketService.getSocket()?.on('call-answer', this.handleCallAnswer);
     socketService.getSocket()?.on('call-ice-candidate', this.handleIceCandidate);
     socketService.getSocket()?.on('call-end', this.handleCallEnd);
+    
+    // Register video upgrade event listeners
+    socketService.getSocket()?.on('video-upgrade-request', this.handleVideoUpgradeRequest);
+    socketService.getSocket()?.on('video-upgrade-accepted', this.handleVideoUpgradeAccepted);
+    socketService.getSocket()?.on('video-upgrade-rejected', this.handleVideoUpgradeRejected);
     
     // Register internal event listeners
     this.addEventListener('call-connected', this.handleCallConnected);
@@ -170,9 +200,53 @@ class CallService {
   private handleCallOffer = async (data: any) => {
     try {
       console.log('Received call offer:', data);
-      const { callerId, callerName, sdp, type, isVideo, callHistoryId } = data;
+      const { callerId, callerName, sdp, type, isVideo, callHistoryId, renegotiation } = data;
       
-      // Update call state with SDP and type explicitly
+      // Handle renegotiation during an active call
+      if (renegotiation === true && this.pc && this.callState.status === CallStatus.CONNECTED) {
+        console.log('Handling renegotiation offer during active call');
+        
+        try {
+          // Apply the remote description for the renegotiation
+          const remoteDesc = new RTCSessionDescription({
+            type: 'offer',
+            sdp
+          });
+          
+          await this.pc.setRemoteDescription(remoteDesc);
+          console.log('Set remote description for renegotiation');
+          
+          // Create answer for the renegotiation
+          const answer = await this.pc.createAnswer();
+          await this.pc.setLocalDescription(answer);
+          console.log('Created and set local answer for renegotiation');
+          
+          // Send the answer back
+          socketService.getSocket()?.emit('call-answer', {
+            targetUserId: callerId,
+            sdp: answer.sdp,
+            type: answer.type,
+            accepted: true,
+            callHistoryId: this.callState.callHistoryId,
+            renegotiation: true
+          });
+          
+          // Update video state if needed
+          if (isVideo) {
+            this.callState = {
+              ...this.callState,
+              isVideoEnabled: true
+            };
+            this.emitCallStateChange();
+          }
+        } catch (error) {
+          console.error('Error handling renegotiation:', error);
+        }
+        
+        return;
+      }
+      
+      // Normal call offer handling for new calls
       this.callState = {
         ...initialCallState,
         status: CallStatus.RINGING,
@@ -180,9 +254,9 @@ class CallService {
         remoteUserName: callerName || 'Unknown Caller',
         isVideoEnabled: isVideo || false,
         isAudioEnabled: true,
-        sdp: sdp, // Store the SDP
-        type: type, // Store the SDP type
-        callHistoryId: callHistoryId // Store the call history ID
+        sdp: sdp,
+        type: type,
+        callHistoryId: callHistoryId
       };
       
       console.log('Updated call state with offer SDP data and callHistoryId:', callHistoryId);
@@ -279,7 +353,7 @@ class CallService {
   // Handle call answer (accept/reject)
   private handleCallAnswer = async (data: any) => {
     try {
-      const { accepted, sdp, type, callHistoryId } = data;
+      const { accepted, sdp, type, callHistoryId, renegotiation } = data;
 
       // Store callHistoryId if provided
       if (callHistoryId) {
@@ -299,22 +373,79 @@ class CallService {
         return;
       }
 
+      // Handle renegotiation answer (e.g., when adding video to an existing call)
+      if (renegotiation === true && this.callState.status === CallStatus.CONNECTED) {
+        console.log("Handling answer for renegotiation");
+        
+        try {
+          // Parse SDP to check m-line order before applying
+          console.log("Checking SDP m-line structure for renegotiation answer");
+          
+          // Set the remote description with the answer
+          const remoteDesc = new RTCSessionDescription({
+            type: 'answer',
+            sdp
+          });
+          
+          console.log("Applying renegotiation answer...");
+          await this.pc.setRemoteDescription(remoteDesc);
+          console.log("Successfully applied renegotiation answer");
+          
+          // Verify all transceivers and tracks
+          if (this.pc.getTransceivers) {
+            const transceivers = this.pc.getTransceivers();
+            console.log(`Current transceivers after renegotiation: ${transceivers.length}`);
+            
+            transceivers.forEach((transceiver, idx) => {
+              console.log(`Transceiver ${idx}: mid=${transceiver.mid}, kind=${transceiver.receiver.track?.kind || 'none'}, direction=${transceiver.direction}`);
+            });
+          }
+          
+          // Update video state if needed
+          if (this.callState.isVideoEnabled) {
+            this.emitCallStateChange();
+          }
+        } catch (err) {
+          console.error("Error setting remote description for renegotiation:", err);
+          
+          // Log specific error information and recover if possible
+          if (err instanceof Error) {
+            console.error("Renegotiation error details:", err.message);
+            
+            // Check if this is an m-line order issue
+            if (err.message.includes('m-lines')) {
+              console.error("This appears to be an m-line order mismatch in SDP - attempting recovery");
+              
+              // Try to enable video locally despite renegotiation failure
+              this.callState = {
+                ...this.callState,
+                isVideoEnabled: true
+              };
+              this.emitCallStateChange();
+              this.emitEvent('local-stream-updated', this.localStream);
+            }
+          }
+        }
+        
+        return;
+      }
+
       // Log the current state for debugging
       console.log("Current call status:", this.callState.status);
       console.log("Current signaling state before processing answer:", this.pc.signalingState);
       
       // If we're already connected, this might be a duplicate answer
-      if (this.callState.status === CallStatus.CONNECTED as CallStatus) {
+      if (this.callState.status === CallStatus.CONNECTED) {
         console.log("Already in CONNECTED state, ignoring answer message");
         return;
       }
 
-      // Handle case where peer connection is in stable state
+      // Handle case where peer connection is in stable state - no need to set remote description again
       if (this.pc.signalingState === "stable") {
         console.log("Peer connection already in stable state, possibly already processed answer");
         
         // Update call state to connected if not already
-        if (this.callState.status !== CallStatus.CONNECTED as CallStatus) {
+        if (this.callState.status !== CallStatus.CONNECTED) {
           const currentTime = Date.now();
           console.log("Setting call start time to:", currentTime);
           this.callState = {
@@ -377,9 +508,10 @@ class CallService {
       } catch (err) {
         console.error("Error setting remote description:", err);
         
-        // Check if peer connection is in a stable state despite the error
-        if (this.pc && this.pc.signalingState === "stable") {
-          console.log("Peer connection is in stable state despite error - proceeding to connected state");
+        // If we get a stable state error, it means the connection is established
+        // This can happen if the answer was processed twice or we hit a race condition
+        if (err.toString().includes("Called in wrong state: stable")) {
+          console.log("Ignoring stable state error - connection appears to be established");
           const currentTime = Date.now();
           this.callState = {
             ...this.callState,
@@ -403,7 +535,7 @@ class CallService {
         console.log("Ignoring stable state error and attempting to continue the call");
         // Try to continue with the call despite the error
         const currentTime = Date.now();
-        if (this.callState.status !== CallStatus.CONNECTED as CallStatus) {
+        if (this.callState.status !== CallStatus.CONNECTED) {
           this.callState = {
             ...this.callState,
             status: CallStatus.CONNECTED,
@@ -733,24 +865,49 @@ class CallService {
   }
 
   // Toggle video
-  public toggleVideo(): boolean {
-    if (!this.localStream) return false;
-    
-    const videoTracks = this.localStream.getVideoTracks();
-    if (videoTracks.length === 0) return false;
-    
-    const isEnabled = !videoTracks[0].enabled;
-    videoTracks.forEach(track => {
-      track.enabled = isEnabled;
-    });
-    
-    this.callState = {
-      ...this.callState,
-      isVideoEnabled: isEnabled
-    };
-    
-    this.emitCallStateChange();
-    return isEnabled;
+  public async toggleVideo(): Promise<boolean> {
+    try {
+      if (!this.localStream) return false;
+      
+      // Check if we already have video tracks
+      let videoTracks = this.localStream.getVideoTracks();
+      
+      // If we're trying to enable video but have no video tracks
+      if (videoTracks.length === 0 && !this.callState.isVideoEnabled) {
+        // If we're in a call, use the upgrade flow instead of direct toggle
+        if (this.callState.status === CallStatus.CONNECTED) {
+          this.requestVideoUpgrade();
+          return false; // Will be updated once accepted
+        }
+        
+        // Otherwise (e.g., during call setup), directly enable video
+        return await this.enableVideo();
+      }
+      
+      // If we have video tracks, just toggle their enabled state
+      if (videoTracks.length > 0) {
+        const isEnabled = !videoTracks[0].enabled;
+        
+        videoTracks.forEach(track => {
+          track.enabled = isEnabled;
+          console.log(`Video track ${track.id} enabled: ${isEnabled}`);
+        });
+        
+        this.callState = {
+          ...this.callState,
+          isVideoEnabled: isEnabled
+        };
+        
+        // Notify listeners about the state change
+        this.emitCallStateChange();
+        return isEnabled;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('Error in toggleVideo:', error);
+      throw error;
+    }
   }
 
   // Toggle speaker
@@ -895,6 +1052,378 @@ class CallService {
         callStartTime: callStartTime
       };
       this.emitCallStateChange();
+    }
+  }
+
+  // Handle video upgrade request from remote peer
+  private handleVideoUpgradeRequest = (data: any) => {
+    const { from } = data;
+    console.log(`Received video upgrade request from ${from}`);
+    
+    // Emit event to notify UI about the upgrade request
+    this.emitEvent('video-upgrade-request', { userId: from });
+  };
+
+  // Handle video upgrade acceptance from remote peer
+  private handleVideoUpgradeAccepted = async (data: any) => {
+    console.log('Video upgrade accepted, adding video track');
+    
+    try {
+      // If we're in stable state, we should be the one to initiate renegotiation
+      // since we were the one who requested the upgrade
+      if (this.pc && this.pc.signalingState === 'stable') {
+        console.log('We requested the upgrade and remote accepted, starting renegotiation');
+        
+        // First make sure video is enabled on our side
+        await this.enableVideo();
+        
+        // Then initiate the renegotiation
+        await this.renegotiateWithVideo();
+      } else {
+        console.log('Signaling state not stable, only enabling local video without renegotiation');
+        // Just enable video locally, but don't try to renegotiate
+        await this.enableVideo();
+      }
+    } catch (error) {
+      console.error('Error enabling video after upgrade acceptance:', error);
+    }
+  };
+
+  // Handle video upgrade rejection from remote peer
+  private handleVideoUpgradeRejected = (data: any) => {
+    console.log('Video upgrade rejected');
+    this.emitEvent('video-upgrade-rejected', data);
+  };
+
+  // Request video upgrade from remote peer
+  public requestVideoUpgrade(): void {
+    if (!this.callState.remoteUserId || this.callState.status !== CallStatus.CONNECTED) {
+      console.error('Cannot request video upgrade: No active call');
+      return;
+    }
+    
+    if (this.callState.isVideoEnabled) {
+      console.log('Video is already enabled');
+      return;
+    }
+    
+    // Send video upgrade request via socket
+    socketService.requestVideoUpgrade(this.callState.remoteUserId);
+    
+    // Notify UI about pending request
+    this.emitEvent('video-upgrade-requested', { userId: this.callState.remoteUserId });
+    
+    // As the initiator, we should also enable our camera right away
+    // This will allow our UI to show the camera preview while waiting for acceptance
+    this.enableVideo().then(() => {
+      console.log('Local video enabled for upgrade request');
+    }).catch(error => {
+      console.error('Failed to enable local video for upgrade request:', error);
+    });
+  }
+
+  // Accept video upgrade request
+  public acceptVideoUpgrade(): void {
+    if (!this.callState.remoteUserId || this.callState.status !== CallStatus.CONNECTED) {
+      console.error('Cannot accept video upgrade: No active call');
+      return;
+    }
+    
+    // Send acceptance via socket first, so remote side can start showing UI immediately
+    socketService.acceptVideoUpgrade(this.callState.remoteUserId);
+    
+    // Check if we already have a local video track before enabling video
+    const existingVideoTracks = this.localStream?.getVideoTracks() || [];
+    
+    if (existingVideoTracks.length > 0) {
+      console.log('Using existing video tracks for upgrade');
+      // Just enable the existing tracks and update state
+      existingVideoTracks.forEach(track => {
+        track.enabled = true;
+      });
+      
+      this.callState = {
+        ...this.callState,
+        isVideoEnabled: true
+      };
+      
+      // Notify about state change immediately
+      this.emitCallStateChange();
+      this.emitEvent('local-stream-updated', this.localStream);
+      
+      // Don't initiate renegotiation when accepting - let the requesting side handle it
+      // This prevents both sides from creating offers simultaneously
+      console.log('Video enabled locally - waiting for remote renegotiation');
+    } else {
+      // No existing tracks, need to get camera stream
+      // Enable video on our side (this will get camera permission and add tracks)
+      this.enableVideo().then(() => {
+        // Successfully enabled video, but don't initiate renegotiation
+        console.log('Video enabled with new camera tracks - waiting for remote renegotiation');
+      }).catch(error => {
+        console.error('Error enabling video after accepting upgrade:', error);
+      });
+    }
+  }
+
+  // Reject video upgrade request
+  public rejectVideoUpgrade(): void {
+    if (!this.callState.remoteUserId) return;
+    
+    // Send rejection via socket
+    socketService.rejectVideoUpgrade(this.callState.remoteUserId);
+  }
+
+  // Enable video without toggling (for upgrade flow)
+  public async enableVideo(): Promise<boolean> {
+    try {
+      if (!this.localStream) return false;
+      
+      // Check if we already have video tracks
+      let videoTracks = this.localStream.getVideoTracks();
+      
+      // If we don't have video tracks, get them
+      if (videoTracks.length === 0) {
+        console.log('No video tracks available, requesting camera access');
+        
+        try {
+          // Start performance measurement
+          const startTime = Date.now();
+          
+          // Request camera permission
+          const { requestCameraPermission } = require('./permissionUtils');
+          
+          const hasPermission = await requestCameraPermission();
+          if (!hasPermission) {
+            console.error('Camera permission denied');
+            throw new Error('Camera permission denied');
+          }
+          
+          console.log(`Camera permission check completed in ${Date.now() - startTime}ms`);
+          
+          // First update the UI state to show we're working on it
+          this.callState = {
+            ...this.callState,
+            isVideoEnabled: true
+          };
+          
+          // Emit state change early to improve perceived performance
+          this.emitCallStateChange();
+          
+          // Set timeout for getUserMedia to avoid hanging indefinitely
+          const getUserMediaPromise = mediaDevices.getUserMedia({ 
+            video: true, 
+            audio: false 
+          });
+          
+          // Create a timeout promise
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Camera access timeout')), 10000);
+          });
+          
+          // Race the getUserMedia promise against the timeout
+          const videoStream = await Promise.race([
+            getUserMediaPromise,
+            timeoutPromise
+          ]) as MediaStream;
+          
+          console.log(`Camera stream obtained in ${Date.now() - startTime}ms`);
+          
+          if (!videoStream) {
+            console.error('Failed to get video stream');
+            return false;
+          }
+          
+          // Get the video tracks from the stream
+          const newVideoTracks = videoStream.getVideoTracks();
+          
+          if (newVideoTracks.length === 0) {
+            console.error('No video tracks in the obtained stream');
+            return false;
+          }
+          
+          // Add the video tracks to our existing stream - optimize by doing this in one batch
+          if (this.localStream) {
+            newVideoTracks.forEach(track => {
+              this.localStream?.addTrack(track);
+              console.log('Added video track to local stream:', track.id);
+            });
+          }
+          
+          // Update video tracks reference
+          videoTracks = this.localStream.getVideoTracks();
+          
+          // Emit local stream update immediately
+          this.emitEvent('local-stream-updated', this.localStream);
+          
+          console.log(`Total camera initialization completed in ${Date.now() - startTime}ms`);
+          
+          // If we're in a call, start the renegotiation process in background
+          if (this.callState.status === CallStatus.CONNECTED && this.pc) {
+            // Check if we're the one who initiated the video upgrade
+            const isUpgradeInitiator = this.callState.remoteUserId && 
+              this.pc.signalingState === 'stable';
+              
+            if (isUpgradeInitiator) {
+              console.log('We initiated the upgrade, starting renegotiation');
+              // Start the renegotiation process in background to avoid blocking UI
+              setTimeout(() => {
+                this.renegotiateWithVideo().catch(err => {
+                  console.error('Renegotiation error:', err);
+                });
+              }, 500);
+            } else {
+              console.log('We accepted the upgrade, waiting for remote renegotiation');
+              // If we're accepting an upgrade, let the other side handle renegotiation
+            }
+          }
+        } catch (error) {
+          console.error('Error getting camera stream:', error);
+          throw error;
+        }
+      }
+      
+      // Make sure video tracks are enabled
+      if (videoTracks.length > 0) {
+        videoTracks.forEach(track => {
+          track.enabled = true;
+          console.log(`Video track ${track.id} enabled`);
+        });
+        
+        this.callState = {
+          ...this.callState,
+          isVideoEnabled: true
+        };
+        
+        // Notify listeners about the state change
+        this.emitCallStateChange();
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('Error in enableVideo:', error);
+      throw error;
+    }
+  }
+  
+  // Separate method for renegotiation to allow returning early from enableVideo
+  private async renegotiateWithVideo(): Promise<void> {
+    // Ensure we have a valid peer connection and we're in CONNECTED state
+    if (!this.pc || this.callState.status !== CallStatus.CONNECTED) {
+      return;
+    }
+    
+    try {
+      console.log('Starting video renegotiation in current signaling state:', this.pc.signalingState);
+      
+      // Check current signaling state to determine the correct action
+      if (this.pc.signalingState === 'have-remote-offer') {
+        // We've received an offer but haven't answered yet
+        console.log('Cannot create offer in have-remote-offer state - need to answer the remote offer first');
+        
+        // Try to create an answer instead
+        const pendingRemoteDescription = this.pc.remoteDescription;
+        if (pendingRemoteDescription) {
+          console.log('Creating answer for pending remote offer');
+          const answer = await this.pc.createAnswer();
+          await this.pc.setLocalDescription(answer);
+          
+          // Send the answer
+          socketService.getSocket()?.emit('call-answer', {
+            targetUserId: this.callState.remoteUserId,
+            sdp: answer.sdp,
+            type: answer.type,
+            accepted: true,
+            callHistoryId: this.callState.callHistoryId,
+            renegotiation: true
+          });
+          
+          console.log('Sent answer to pending remote offer');
+          return;
+        }
+        return;
+      }
+      
+      if (this.pc.signalingState === 'have-local-offer') {
+        // We've sent an offer but haven't received an answer
+        console.log('Already have pending local offer, waiting for answer');
+        return;
+      }
+      
+      if (this.pc.signalingState === 'closed') {
+        console.log('Peer connection is closed, cannot renegotiate');
+        return;
+      }
+      
+      if (this.pc.signalingState !== 'stable') {
+        console.log('Peer connection is in', this.pc.signalingState, 'state, deferring renegotiation');
+        
+        // Wait for the connection to stabilize
+        setTimeout(() => {
+          this.renegotiateWithVideo().catch((err: Error) => {
+            console.error('Deferred renegotiation error:', err);
+          });
+        }, 2000);
+        return;
+      }
+      
+      // In stable state, safe to create a new offer
+      console.log('Creating offer for video renegotiation');
+      
+      const offer = await this.pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+        voiceActivityDetection: true
+      });
+      
+      console.log('New SDP offer created for video upgrade');
+      
+      // Apply the offer to local description
+      await this.pc.setLocalDescription(offer);
+      console.log('Successfully set local description for renegotiation');
+      
+      // Send the offer to the remote peer
+      socketService.getSocket()?.emit('call-offer', {
+        targetUserId: this.callState.remoteUserId,
+        sdp: offer.sdp,
+        type: offer.type,
+        isVideo: true,
+        renegotiation: true
+      });
+      
+      console.log('Sent renegotiation offer to remote peer');
+    } catch (error: unknown) {
+      console.error('Error during video renegotiation:', error);
+      
+      // Handle specific error cases
+      if (error instanceof Error && error.message.includes('have-remote-offer')) {
+        console.log('Handling have-remote-offer error by waiting and trying to answer');
+        
+        // Wait a moment and try to answer if there's a remote description
+        setTimeout(async () => {
+          try {
+            if (this.pc && this.pc.remoteDescription && this.pc.signalingState === 'have-remote-offer') {
+              console.log('Creating answer for existing remote offer after error');
+              const answer = await this.pc.createAnswer();
+              await this.pc.setLocalDescription(answer);
+              
+              socketService.getSocket()?.emit('call-answer', {
+                targetUserId: this.callState.remoteUserId,
+                sdp: answer.sdp,
+                type: answer.type,
+                accepted: true,
+                callHistoryId: this.callState.callHistoryId,
+                renegotiation: true
+              });
+            }
+          } catch (retryError) {
+            console.error('Error in renegotiation retry:', retryError);
+          }
+        }, 1000);
+      }
+      
+      throw error;
     }
   }
 }

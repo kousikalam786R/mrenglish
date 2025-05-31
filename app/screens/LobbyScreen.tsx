@@ -24,6 +24,7 @@ import ProgressDialog from '../components/ProgressDialog';
 import Icon from 'react-native-vector-icons/Ionicons';
 import IconMaterial from 'react-native-vector-icons/MaterialIcons';
 import PartnerSearchScreen from '../components/PartnerSearchScreen';
+import { mediaDevices } from 'react-native-webrtc';
 
 // Define user type
 interface User {
@@ -62,9 +63,9 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
 
   return (
     <View style={styles.userCard}>
-      <TouchableOpacity 
+    <TouchableOpacity 
         style={styles.userCardContent}
-        onPress={onPress}
+      onPress={onPress}
         activeOpacity={0.7}
       >
         <View style={styles.avatarContainer}>
@@ -85,7 +86,7 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
           <View style={styles.ratingContainer}>
             <Text style={styles.thumbsUp}>👍 {user.rating || 95}%</Text>
             <Text style={styles.userGender}> • {user.gender || 'Not specified'}</Text>
-          </View>
+        </View>
           <Text style={styles.userCountry}>
             {user.country || '🌎 Global'} • {user.talks || 0} talks
           </Text>
@@ -95,15 +96,17 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
         </View>
         
         {user.isOnline ? (
-          <TouchableOpacity 
-            style={styles.callButton} 
-            onPress={(e) => {
-              e.stopPropagation(); // Prevent triggering the parent's onPress
-              onCallPress();
-            }}
-          >
-            <IconMaterial name="call" size={24} color="white" />
-          </TouchableOpacity>
+          <View style={styles.buttonsContainer}>
+            <TouchableOpacity 
+              style={[styles.callButton, styles.callButtonFullWidth]} 
+              onPress={(e) => {
+                e.stopPropagation(); // Prevent triggering the parent's onPress
+                onCallPress();
+              }}
+            >
+              <IconMaterial name="call" size={24} color="white" />
+            </TouchableOpacity>
+      </View>
         ) : (
           <TouchableOpacity 
             style={styles.messageButton} 
@@ -115,12 +118,12 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
             <IconMaterial name="chat" size={24} color="white" />
           </TouchableOpacity>
         )}
-      </TouchableOpacity>
+    </TouchableOpacity>
     </View>
   );
 };
 
-interface LobbyScreenProps { 
+interface LobbyScreenProps {
   navigation: NativeStackNavigationProp<RootStackParamList>;
 }
 
@@ -505,6 +508,124 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     }
   };
 
+  // Handle video call to a user
+  const handleVideoCallPress = async (user: User) => {
+    try {
+      if (!user.isOnline) {
+        Alert.alert('Cannot Call', 'This user is offline. Please try again when they are online.');
+        return;
+      }
+      
+      // Request microphone and camera permissions before starting the call
+      const hasMicPermission = await requestMicrophonePermission();
+      
+      if (!hasMicPermission) {
+        showPermissionExplanation();
+        return;
+      }
+      
+      // Request camera permission
+      let hasCameraPermission = false;
+      try {
+        const cameraStream = await mediaDevices.getUserMedia({
+          audio: false,
+          video: true
+        });
+        
+        // Stop all tracks to avoid keeping the camera on
+        cameraStream.getTracks().forEach(track => track.stop());
+        hasCameraPermission = true;
+      } catch (err) {
+        console.error('Camera permission error:', err);
+        hasCameraPermission = false;
+      }
+      
+      if (!hasCameraPermission) {
+        Alert.alert(
+          'Camera Permission Required',
+          'Video calls require camera access. Please grant camera permission in settings.',
+          [{ text: 'OK', style: 'default' }]
+        );
+        return;
+      }
+      
+      // Store the remote user ID for future ICE candidate sharing
+      socketService.setRemoteUserId(user._id);
+      
+      // Check if socket is connected
+      const socket = socketService.getSocket();
+      if (!socket || !socket.connected) {
+        console.log('Socket not connected, initializing...');
+        
+        // Show connecting dialog
+        setProgressMessage('Connecting to server...');
+        setShowProgress(true);
+        
+        await socketService.initialize();
+        
+        // Check again after initialization
+        if (!socketService.getSocket()?.connected) {
+          setShowProgress(false);
+          throw new Error('Failed to connect to signaling server. Please check your internet connection.');
+        }
+      }
+      
+      console.log(`Initiating video call to ${user.name} (${user._id})`);
+      
+      // Update progress dialog
+      setProgressMessage(`Starting video call with ${user.name}...`);
+      setShowProgress(true);
+      
+      // Initialize call service
+      callService.initialize();
+      
+      // Navigate to call screen first so UI is ready
+      console.log('Navigating to call screen');
+      navigation.navigate('Call', { 
+        id: user._id, 
+        name: user.name, 
+        isVideoCall: true 
+      });
+      
+      // Add a longer delay to ensure navigation is complete
+      setTimeout(async () => {
+        try {
+          // Start the video call with both audio and video enabled
+          console.log('Starting video call with user:', user._id);
+          await callService.startCall(user._id, user.name, { audio: true, video: true });
+          console.log('Video call initiated successfully');
+          
+          // Hide progress dialog
+          setShowProgress(false);
+        } catch (callStartError) {
+          console.error('Error in delayed video call start:', callStartError);
+          
+          // Hide progress dialog
+          setShowProgress(false);
+          
+          Alert.alert(
+            'Video Call Failed', 
+            `Could not start video call: ${callStartError instanceof Error ? callStartError.message : 'Please check camera and microphone permissions'}`
+          );
+          
+          // Navigate back if there was an error
+          navigation.goBack();
+        }
+      }, 1000); // Increased delay to ensure navigation completes
+      
+    } catch (error) {
+      console.error('Error starting video call:', error);
+      
+      // Hide progress dialog
+      setShowProgress(false);
+      
+      Alert.alert(
+        'Video Call Failed', 
+        `Failed to start video call: ${error instanceof Error ? error.message : 'Please try again later'}`
+      );
+    }
+  };
+
   // Handle message to a user
   const handleMessagePress = (user: User) => {
     navigation.navigate('ChatDetail', { 
@@ -546,7 +667,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       socketService.findRandomPartner();
       
       // Set a timeout to avoid waiting too long
-      setTimeout(() => {
+    setTimeout(() => {
         if (findingPartner) {
           setFindingPartner(false);
           setShowPartnerSearch(false);
@@ -694,7 +815,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         renderItem={({ item }) => (
           <UserCard 
             user={item} 
-            onCallPress={() => handleCallPress(item)} 
+            onCallPress={() => handleCallPress(item)}
             onMessagePress={() => handleMessagePress(item)}
             onPress={() => handleUserPress(item)}
           />
@@ -932,13 +1053,22 @@ const styles = StyleSheet.create({
     color: '#F44336',
     marginTop: 4,
   },
+  buttonsContainer: {
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    height: 110,
+  },
   callButton: {
-    backgroundColor: '#673AB7',
+    backgroundColor: '#4CAF50',
+    borderRadius: 30,
     width: 50,
     height: 50,
-    borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 10,
+  },
+  callButtonFullWidth: {
+    width: '100%',
   },
   messageButton: {
     backgroundColor: '#673AB7',
