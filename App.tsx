@@ -14,7 +14,7 @@ import AppNavigator from './app/navigation/AppNavigator';
 import { StyleSheet } from 'react-native';
 import SocketProvider from './app/utils/SocketProvider';
 import { Provider } from 'react-redux';
-import { store } from './app/redux/store'; // Adjust this import path if needed
+import { store } from './app/redux/store';
 import PermissionsManager from './app/components/PermissionsManager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { signInSuccess } from './app/redux/slices/authSlice';
@@ -28,7 +28,6 @@ function App(): React.JSX.Element {
       try {
         const token = await AsyncStorage.getItem('token');
         const userId = await AsyncStorage.getItem('userId');
-        const userData = await AsyncStorage.getItem('user');
         
         // If we have valid authentication data, update Redux state
         if (token && userId) {
@@ -46,19 +45,23 @@ function App(): React.JSX.Element {
   useEffect(() => {
     try {
       // Custom code to force the singleton to reset and reinitialize
-      const CallServiceClass = Object.getPrototypeOf(callService).constructor;
-      if (CallServiceClass && typeof CallServiceClass.resetInstance === 'function') {
-        CallServiceClass.resetInstance();
-        console.log('CallService has been reset and reinitialized');
-      } else {
-        // Fallback to normal initialization
-        callService.initialize();
-        console.log('CallService has been initialized without reset');
+      if (callService) {
+        const CallServiceClass = Object.getPrototypeOf(callService).constructor;
+        if (CallServiceClass && typeof CallServiceClass.resetInstance === 'function') {
+          CallServiceClass.resetInstance();
+          console.log('CallService has been reset and reinitialized');
+        } else {
+          // Fallback to normal initialization
+          callService.initialize();
+          console.log('CallService has been initialized without reset');
+        }
       }
     } catch (e) {
       console.error('Error handling CallService initialization:', e);
       // Fallback to direct initialization
-      callService.initialize();
+      if (callService && typeof callService.initialize === 'function') {
+        callService.initialize();
+      }
     }
   }, []);
 

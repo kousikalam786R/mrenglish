@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, memo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   FlatList,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -25,7 +26,8 @@ interface ChatItemProps {
   onPress: () => void;
 }
 
-const ChatItem: React.FC<ChatItemProps> = ({ chat, onPress }) => {
+// Use memo to prevent unnecessary re-renders
+const ChatItem = memo<ChatItemProps>(({ chat, onPress }) => {
   // Format timestamp to readable time
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -80,10 +82,15 @@ const ChatItem: React.FC<ChatItemProps> = ({ chat, onPress }) => {
   // Format last message time
   const lastMessageTime = chat.lastMessage?.createdAt || '';
   
+  // Generate a unique key for the TouchableOpacity
+  const itemKey = `chat-item-${chat._id}`;
+  
   return (
     <TouchableOpacity 
       style={styles.chatItem} 
       onPress={onPress}
+      key={itemKey}
+      activeOpacity={0.7}
     >
       {hasProfilePic ? (
         <Image 
@@ -122,10 +129,13 @@ const ChatItem: React.FC<ChatItemProps> = ({ chat, onPress }) => {
       </View>
     </TouchableOpacity>
   );
-};
+});
+
+// Ensure display name is set for debugging
+ChatItem.displayName = 'ChatItem';
 
 // Chat list empty component
-const EmptyChats = () => (
+const EmptyChats = memo(() => (
   <View style={styles.emptyContainer}>
     <Icon name="chat-bubble-outline" size={60} color="#D1D1D1" />
     <Text style={styles.emptyTitle}>No conversations yet</Text>
@@ -133,75 +143,91 @@ const EmptyChats = () => (
       Start chatting with language partners to begin conversations.
     </Text>
   </View>
-);
+));
+
+EmptyChats.displayName = 'EmptyChats';
 
 // Main screen component
 const ChatsScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const dispatch = useAppDispatch();
   const { recentChats, loading } = useAppSelector(state => state.message);
+  const [mounted, setMounted] = useState(true);
   
   // Fetch chats on component mount
   useEffect(() => {
+    setMounted(true);
     loadChats();
     
     // Initialize socket connection
     socketService.initialize();
     
-    // Add socket event listeners
-    socketService.onUserStatus((data) => {
-      if (data && data.userId && data.status) {
+    // Add socket event listeners for user status updates
+    socketService.socketOn('user_status', (data: any) => {
+      if (data && data.userId && data.status && mounted) {
         // Update user status in chats list through Redux
         // This would need to be implemented in the messageSlice
       }
     });
     
     // Listen for new messages to update chat list
-    socketService.onNewMessage((data) => {
+    socketService.socketOn('new_message', (data: any) => {
       // When a new message arrives, refresh chats list
-      loadChats();
+      if (mounted) {
+        loadChats();
+      }
     });
     
     // Clean up listeners when component unmounts
     return () => {
-      socketService.removeAllListeners();
+      setMounted(false);
+      // Remove socket event listeners
+      socketService.socketOff('user_status');
+      socketService.socketOff('new_message');
     };
   }, [dispatch]);
   
   // Load chats from API
   const loadChats = () => {
+    if (!mounted) return;
+    
     dispatch(fetchRecentChats())
       .unwrap()
       .then(() => {
         console.log('Recent chats loaded successfully');
       })
       .catch(error => {
-        Alert.alert('Error', 'Could not load your conversations. Please try again.');
+        if (mounted) {
+          Alert.alert('Error', 'Could not load your conversations. Please try again.');
+        }
       });
   };
   
   // Navigate to chat details
-  const handleChatPress = (chat: ChatUser) => {
+  const handleChatPress = useCallback((chat: ChatUser) => {
     navigation.navigate('ChatDetail', {
       id: chat._id,
       name: chat.name,
       avatar: chat.profilePic,
       user: chat
     });
-  };
+  }, [navigation]);
   
   // Navigate to new chat screen
-  const handleNewChat = () => {
+  const handleNewChat = useCallback(() => {
     navigation.navigate('Contacts');
-  };
+  }, [navigation]);
   
-  // Render a chat item
-  const renderItem = ({ item }: { item: ChatUser }) => (
+  // Render a chat item - memoized to prevent unnecessary rerenders
+  const renderItem = useCallback(({ item }: { item: ChatUser }) => (
     <ChatItem 
       chat={item} 
       onPress={() => handleChatPress(item)} 
     />
-  );
+  ), [handleChatPress]);
+  
+  // Optimize list rendering
+  const keyExtractor = useCallback((item: ChatUser) => item._id, []);
   
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -219,12 +245,21 @@ const ChatsScreen = () => {
       ) : (
         <FlatList
           data={recentChats}
-          keyExtractor={(item) => item._id}
+          keyExtractor={keyExtractor}
           renderItem={renderItem}
           contentContainerStyle={styles.chatsList}
           ListEmptyComponent={<EmptyChats />}
           refreshing={loading}
           onRefresh={loadChats}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS === 'android'}
+          getItemLayout={(data, index) => ({
+            length: 80, // Approximate height of each item
+            offset: 80 * index,
+            index,
+          })}
         />
       )}
     </SafeAreaView>

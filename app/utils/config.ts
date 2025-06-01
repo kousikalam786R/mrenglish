@@ -135,4 +135,11 @@ export const SOCKET_EVENTS = {
   USER_TYPING: 'user-typing',
   TYPING_STOPPED: 'typing-stopped',
   USER_STATUS: 'user-status',
+};
+
+// Other configuration settings
+export const APP_CONFIG = {
+  apiRequestTimeout: 30000, // 30 seconds
+  socketReconnectionAttempts: 5,
+  defaultLanguage: 'en',
 }; 

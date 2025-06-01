@@ -29,6 +29,8 @@ import EditProfileScreen from '../screens/EditProfileScreen';
 import ChatDetailScreen from '../screens/ChatDetailScreen';
 import CallScreen from '../screens/CallScreen';
 import UserProfileScreen from '../screens/UserProfileScreen';
+import AIChatScreen from '../screens/AIChatScreen';
+import NetworkDebugScreen from '../screens/NetworkDebugScreen';
 
 // Auth Screens
 import HomeScreen from '../screens/HomeScreen';
@@ -78,8 +80,15 @@ const TabScreen = ({ children }: { children: React.ReactNode }) => (
 
 // Simple stack navigators without animations
 const ChatStackNavigator = () => {
+  // Use platform-specific screen options to prevent UI frame errors on Android
+  const chatScreenOptions: NativeStackNavigationOptions = {
+    ...screenOptions,
+    animation: Platform.OS === 'ios' ? 'default' : 'none',
+    headerShown: false,
+  };
+
   return (
-    <ChatsStack.Navigator screenOptions={screenOptions}>
+    <ChatsStack.Navigator screenOptions={chatScreenOptions}>
       <ChatsStack.Screen 
         name="ChatsMain" 
         component={ChatsScreen}
@@ -113,8 +122,15 @@ const ChatStackNavigator = () => {
 };
 
 const ContactsStackNavigator = () => {
+  // Use platform-specific screen options to prevent UI frame errors on Android
+  const contactsScreenOptions: NativeStackNavigationOptions = {
+    ...screenOptions,
+    animation: Platform.OS === 'ios' ? 'default' : 'none',
+    headerShown: false,
+  };
+
   return (
-    <ContactsStack.Navigator screenOptions={screenOptions}>
+    <ContactsStack.Navigator screenOptions={contactsScreenOptions}>
       <ContactsStack.Screen 
         name="ContactsMain" 
         component={ContactsScreen}
@@ -155,28 +171,35 @@ const MainNavigator = () => {
         headerShown: false,
         tabBarIcon: ({ focused, color, size }) => {
           // Define icon names based on route name and focus state
-          const getIconName = () => {
-            switch (route.name) {
-              case 'Lobby':
-                return focused ? 'home' : 'home-outline';
-              case 'Chats':
-                return focused ? 'chatbubbles' : 'chatbubbles-outline';
-              case 'Ranking':
-                return focused ? 'trophy' : 'trophy-outline';
-              case 'Contacts':
-                return focused ? 'people' : 'people-outline';
-              case 'Profile':
-                return focused ? 'person' : 'person-outline';
-              default:
-                return 'circle';
-            }
-          };
+          let iconName = '';
           
-          const iconName = getIconName();
+          switch (route.name) {
+            case 'Home':
+              iconName = focused ? 'home' : 'home-outline';
+              break;
+            case 'Lobby':
+              iconName = focused ? 'people' : 'people-outline';
+              break;
+            case 'Chats':
+              iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
+              break;
+            case 'Ranking':
+              iconName = focused ? 'trophy' : 'trophy-outline';
+              break;
+            case 'Contacts':
+              iconName = focused ? 'person-add' : 'person-add-outline';
+              break;
+            default:
+              iconName = 'circle';
+              break;
+          }
+          
+          // Create a unique key for each icon to prevent reuse issues
+          const key = `${route.name}-${focused ? 'focused' : 'unfocused'}`;
           
           // Try-catch to handle potential icon loading issues
           try {
-            return <Ionicons name={iconName} size={size} color={color} />;
+            return <Ionicons key={key} name={iconName} size={size} color={color} />;
           } catch (error) {
             console.error('Icon error:', error);
             return <View style={{ width: size, height: size, backgroundColor: color, borderRadius: size/2 }} />;
@@ -184,14 +207,28 @@ const MainNavigator = () => {
         },
         tabBarActiveTintColor: '#4A90E2',
         tabBarInactiveTintColor: 'gray',
-        tabBarStyle: { elevation: 5 }
+        tabBarStyle: { elevation: 5 },
+        // Disable animations on Android to prevent UI frame errors
+        tabBarItemStyle: Platform.OS === 'android' ? { marginTop: 0, paddingTop: 0 } : undefined,
       })}
     >
+      <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Lobby" component={LobbyScreen} />
-      <Tab.Screen name="Chats" component={ChatStackNavigator} />
+      <Tab.Screen 
+        name="Chats" 
+        component={ChatStackNavigator} 
+        options={{
+          unmountOnBlur: Platform.OS === 'android', // Unmount component on tab switch on Android
+        }}
+      />
       <Tab.Screen name="Ranking" component={RankingScreen} />
-      <Tab.Screen name="Contacts" component={ContactsStackNavigator} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen 
+        name="Contacts" 
+        component={ContactsStackNavigator}
+        options={{
+          unmountOnBlur: Platform.OS === 'android', // Unmount component on tab switch on Android
+        }}
+      />
     </Tab.Navigator>
   );
 };
@@ -199,8 +236,11 @@ const MainNavigator = () => {
 // Auth navigator
 const AuthNavigator = () => {
   return (
-    <AuthStack.Navigator screenOptions={screenOptions}>
-      <AuthStack.Screen name="Home" component={HomeScreen} />
+    <AuthStack.Navigator 
+      screenOptions={screenOptions}
+      initialRouteName="SignIn"
+    >
+      <AuthStack.Screen name="Welcome" component={HomeScreen} />
       <AuthStack.Screen name="SignIn" component={SignInScreen} />
       <AuthStack.Screen name="SignUp" component={SignUpScreen} />
       <AuthStack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
@@ -225,56 +265,87 @@ const RootNavigator = () => {
   }, [callState.status]);
 
   return (
-    <Stack.Navigator screenOptions={screenOptions}>
-      {status === 'loading' ? (
-        // Only show splash while loading
-        <Stack.Screen name="Splash" component={SplashScreen} options={{ headerShown: false }} />
-      ) : isSignedIn ? (
-        // Authenticated flow
-        <>
-          <Stack.Screen name="Main" component={MainNavigator} />
-          <Stack.Screen 
-            name="Call" 
-            component={CallScreen} 
-            options={{
-              headerShown: false,
-              presentation: 'fullScreenModal',
-              animation: 'slide_from_bottom'
-            }}
-          />
-          <Stack.Screen 
-            name="EditProfile" 
-            component={EditProfileScreen} 
-            options={{
-              headerShown: false,
-              presentation: 'modal',
-              animation: 'slide_from_bottom'
-            }}
-          />
-          <Stack.Screen 
-            name="UserProfile" 
-            component={UserProfileScreen} 
-            options={{
-              headerShown: false,
-              presentation: 'card',
-              animation: 'slide_from_right'
-            }}
-          />
-          <Stack.Screen 
-            name="ChatDetail" 
-            component={ChatDetailScreen} 
-            options={{
-              headerShown: false,
-              presentation: 'card',
-              animation: 'slide_from_right'
-            }}
-          />
-        </>
-      ) : (
-        // Auth flow
-        <Stack.Screen name="Auth" component={AuthNavigator} />
-      )}
-    </Stack.Navigator>
+    <>
+      <Stack.Navigator screenOptions={screenOptions}>
+        {status === 'loading' ? (
+          // Only show splash while loading
+          <Stack.Screen name="Splash" component={SplashScreen} options={{ headerShown: false }} />
+        ) : isSignedIn ? (
+          // Authenticated flow
+          <>
+            <Stack.Screen name="Main" component={MainNavigator} />
+            <Stack.Screen 
+              name="Call" 
+              component={CallScreen} 
+              options={{
+                headerShown: false,
+                presentation: 'fullScreenModal',
+                animation: 'slide_from_bottom'
+              }}
+            />
+            <Stack.Screen 
+              name="Profile" 
+              component={ProfileScreen} 
+              options={{
+                headerShown: false,
+                presentation: 'card',
+                animation: 'slide_from_right'
+              }}
+            />
+            <Stack.Screen 
+              name="EditProfile" 
+              component={EditProfileScreen} 
+              options={{
+                headerShown: false,
+                presentation: 'modal',
+                animation: 'slide_from_bottom'
+              }}
+            />
+            <Stack.Screen 
+              name="UserProfile" 
+              component={UserProfileScreen} 
+              options={{
+                headerShown: false,
+                presentation: 'card',
+                animation: 'slide_from_right'
+              }}
+            />
+            <Stack.Screen 
+              name="ChatDetail" 
+              component={ChatDetailScreen} 
+              options={{
+                headerShown: false,
+                presentation: 'card',
+                animation: 'slide_from_right'
+              }}
+            />
+            <Stack.Screen 
+              name="AIChat" 
+              component={AIChatScreen} 
+              options={{
+                headerShown: false,
+                presentation: 'card',
+                animation: 'slide_from_right'
+              }}
+            />
+            <Stack.Screen 
+              name="NetworkDebug" 
+              component={NetworkDebugScreen} 
+              options={{
+                headerShown: false,
+                presentation: 'card',
+                animation: 'slide_from_right'
+              }}
+            />
+          </>
+        ) : (
+          // Auth flow
+          <Stack.Screen name="Auth" component={AuthNavigator} />
+        )}
+      </Stack.Navigator>
+      {/* Incoming call modal now outside Stack.Navigator but inside the fragment */}
+      <IncomingCallModal visible={showIncomingCall} />
+    </>
   );
 };
 
@@ -289,17 +360,7 @@ GoogleSignin.configure({
 // App navigator with auth context
 const AppNavigator = () => {
   const { isSignedIn, status } = useSelector((state: any) => state.auth);
-  const callState = useSelector((state: RootState) => state.call.activeCall);
-  const [showIncomingCall, setShowIncomingCall] = useState(false);
-  
-  // Show incoming call modal when call status is RINGING
-  useEffect(() => {
-    if (callState.status === CallStatus.RINGING) {
-      setShowIncomingCall(true);
-    } else {
-      setShowIncomingCall(false);
-    }
-  }, [callState.status]);
+  const dispatch = useAppDispatch();
   
   // Show loading screen while authentication status is being determined
   if (status === 'loading') {
@@ -316,8 +377,6 @@ const AppNavigator = () => {
       }}
     >
       <RootNavigator />
-      {/* Incoming call modal - now inside NavigationContainer */}
-      <IncomingCallModal visible={showIncomingCall} />
     </NavigationContainer>
   );
 };

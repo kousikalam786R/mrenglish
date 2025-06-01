@@ -1428,4 +1428,6 @@ class CallService {
   }
 }
 
-export default CallService.getInstance(); 
+// Create and export a singleton instance
+const callService = CallService.getInstance();
+export default callService; 

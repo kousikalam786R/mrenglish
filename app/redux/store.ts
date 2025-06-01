@@ -1,15 +1,17 @@
 import { configureStore } from '@reduxjs/toolkit';
-import userReducer from './slices/userSlice';
 import authReducer from './slices/authSlice';
-import messageReducer from './slices/messageSlice';
+import userReducer from './slices/userSlice';
+import aiReducer from './slices/aiSlice';
 import callReducer from './slices/callSlice';
+import messageReducer from './slices/messageSlice';
 
 export const store = configureStore({
   reducer: {
-    user: userReducer,
     auth: authReducer,
-    message: messageReducer,
+    user: userReducer,
+    ai: aiReducer,
     call: callReducer,
+    message: messageReducer,
   },
   middleware: (getDefaultMiddleware) => 
     getDefaultMiddleware({

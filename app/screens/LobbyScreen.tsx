@@ -260,11 +260,11 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         console.log('Socket already connected:', socketService.getSocket()?.id);
       }
       
-      // Set up initial ready status
-      setCurrentUserReady(socketService.isUserReady());
+      // Set current user ready status to false by default
+      setCurrentUserReady(false);
       
       // Listen for user status updates
-      socketService.onUserStatus((data) => {
+      socketService.socketOn('user_status', (data: any) => {
         if (data && data.userId) {
           console.log(`Updating user ${data.userId} status to ${data.status}`);
           updateUserStatus(data.userId, data.status === 'online');
@@ -272,7 +272,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       });
       
       // Listen for user ready-to-talk status updates
-      socketService.onUserReadyStatus((data) => {
+      socketService.socketOn('user_ready_status', (data: any) => {
         if (data && data.userId) {
           console.log(`Updating user ${data.userId} ready status to ${data.isReady}`);
           updateUserReadyStatus(data.userId, data.isReady, data.userData);
@@ -280,7 +280,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       });
       
       // Listen for ready status updates for current user
-      socketService.onReadyStatusUpdated((data) => {
+      socketService.socketOn('ready_status_updated', (data: any) => {
         console.log('Ready status updated:', data);
         if (data.success) {
           setCurrentUserReady(data.isReady);
@@ -288,7 +288,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       });
       
       // Listen for ready users list updates
-      socketService.onReadyUsersList((data) => {
+      socketService.socketOn('ready_users_list', (data: any) => {
         if (data.users && Array.isArray(data.users)) {
           console.log(`Received ${data.users.length} ready users`);
           updateReadyUsersList(data.users);
@@ -296,7 +296,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       });
       
       // Listen for partner found notifications
-      socketService.onPartnerFound((data) => {
+      socketService.socketOn('partner_found', (data: any) => {
         if (data.partner) {
           // Close the partner search screen if it's open
           setShowPartnerSearch(false);
@@ -322,8 +322,8 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         }
       });
       
-      // Request a list of ready users
-      socketService.getReadyToTalkUsers();
+      // Request a list of ready users - emit the event instead of calling a non-existent method
+      socketService.socketEmit('get_ready_users', {});
       
     } catch (error) {
       console.error('Error initializing socket connection:', error);
@@ -431,8 +431,8 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         return;
       }
       
-      // Store the remote user ID for future ICE candidate sharing
-      socketService.setRemoteUserId(user._id);
+      // Instead, store the ID in the local service
+      socketService.socketEmit('set_remote_user', { userId: user._id });
       
       // Check if socket is connected
       const socket = socketService.getSocket();
@@ -549,8 +549,8 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         return;
       }
       
-      // Store the remote user ID for future ICE candidate sharing
-      socketService.setRemoteUserId(user._id);
+      // Instead, store the ID in the local service
+      socketService.socketEmit('set_remote_user', { userId: user._id });
       
       // Check if socket is connected
       const socket = socketService.getSocket();
@@ -652,7 +652,9 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     try {
       // If not ready, set status to ready
       if (!currentUserReady) {
-        socketService.setReadyToTalk(true);
+        // socketService.setReadyToTalk(true); // This method doesn't exist
+        socketService.socketEmit('set_ready_to_talk', { isReady: true });
+        setCurrentUserReady(true);
       }
       
       // Pick a random emoji for the search screen
@@ -664,10 +666,11 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       setFindingPartner(true);
       
       // Request a random partner
-      socketService.findRandomPartner();
+      // socketService.findRandomPartner(); // This method doesn't exist
+      socketService.socketEmit('find_random_partner', {});
       
       // Set a timeout to avoid waiting too long
-    setTimeout(() => {
+      setTimeout(() => {
         if (findingPartner) {
           setFindingPartner(false);
           setShowPartnerSearch(false);
@@ -695,7 +698,9 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     setFindingPartner(false);
     setShowPartnerSearch(false);
     // If the user cancels, set them as not ready to talk
-    socketService.setReadyToTalk(false);
+    // socketService.setReadyToTalk(false); // This method doesn't exist
+    socketService.socketEmit('set_ready_to_talk', { isReady: false });
+    setCurrentUserReady(false);
   };
 
   // Handle search settings
@@ -739,7 +744,14 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     
     // Clean up socket listeners when component unmounts
     return () => {
-      socketService.removeAllListeners();
+      // socketService.removeAllListeners(); // This method doesn't exist
+      
+      // Instead, remove each event listener individually
+      socketService.socketOff('user_status');
+      socketService.socketOff('user_ready_status');
+      socketService.socketOff('ready_status_updated');
+      socketService.socketOff('ready_users_list');
+      socketService.socketOff('partner_found');
     };
   }, []);
 
@@ -763,7 +775,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
           onPress={() => {
             // Toggle ready status when settings button is pressed
             const newStatus = !currentUserReady;
-            socketService.setReadyToTalk(newStatus);
+            socketService.socketEmit('set_ready_to_talk', { isReady: newStatus });
             setCurrentUserReady(newStatus);
             Alert.alert(
               'Status Updated',

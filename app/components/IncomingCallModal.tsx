@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Vibration,
   Dimensions,
   Platform,
+  BackHandler,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -28,15 +29,47 @@ interface IncomingCallModalProps {
 const IncomingCallModal: React.FC<IncomingCallModalProps> = ({ visible }) => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const dispatch = useDispatch<AppDispatch>();
+  const [modalVisible, setModalVisible] = useState(false);
   
   // Get call state from Redux
   const callState = useSelector((state: RootState) => state.call.activeCall);
+  
+  // Control modal visibility with delay to prevent UI frame errors
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+    
+    if (visible) {
+      // Small delay to prevent UI conflicts during transitions
+      timeoutId = setTimeout(() => {
+        setModalVisible(true);
+      }, 100);
+    } else {
+      setModalVisible(false);
+    }
+    
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [visible]);
+  
+  // Handle back button press
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (modalVisible) {
+        handleRejectCall();
+        return true;
+      }
+      return false;
+    });
+    
+    return () => backHandler.remove();
+  }, [modalVisible]);
   
   // Start vibration pattern when modal is visible
   React.useEffect(() => {
     let vibrateInterval: NodeJS.Timeout | null = null;
     
-    if (visible && callState.status === CallStatus.RINGING) {
+    if (modalVisible && callState.status === CallStatus.RINGING) {
       // Create repeating vibration pattern
       vibrateInterval = setInterval(() => {
         Vibration.vibrate(500);
@@ -49,23 +82,30 @@ const IncomingCallModal: React.FC<IncomingCallModalProps> = ({ visible }) => {
       }
       Vibration.cancel();
     };
-  }, [visible, callState.status]);
+  }, [modalVisible, callState.status]);
   
   // Handle accepting a call
   const handleAcceptCall = () => {
+    setModalVisible(false);
     void dispatch(acceptIncomingCall({ audio: true, video: callState.isVideoEnabled }));
     
-    // Navigate to call screen
-    navigation.navigate('Call', {
-      id: callState.remoteUserId,
-      name: callState.remoteUserName,
-      isVideoCall: callState.isVideoEnabled,
-    });
+    // Small delay to prevent UI conflicts during transitions
+    setTimeout(() => {
+      // Navigate to call screen
+      navigation.navigate('Call', {
+        id: callState.remoteUserId,
+        name: callState.remoteUserName,
+        isVideoCall: callState.isVideoEnabled,
+      });
+    }, 100);
   };
   
   // Handle rejecting a call
   const handleRejectCall = () => {
-    void dispatch(rejectIncomingCall());
+    setModalVisible(false);
+    setTimeout(() => {
+      void dispatch(rejectIncomingCall());
+    }, 100);
   };
   
   // If modal is not visible or not in ringing state, return null
@@ -75,10 +115,11 @@ const IncomingCallModal: React.FC<IncomingCallModalProps> = ({ visible }) => {
   
   return (
     <Modal
-      visible={visible}
+      visible={modalVisible}
       transparent
-      animationType="slide"
+      animationType="fade"
       onRequestClose={handleRejectCall}
+      supportedOrientations={['portrait', 'landscape']}
     >
       <View style={styles.modalContainer}>
         <View style={styles.modalContent}>

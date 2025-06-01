@@ -4,7 +4,7 @@ import { ChatUser } from '../types/Message';
 
 // Auth stack parameter list
 export type AuthStackParamList = {
-  Home: undefined;
+  Welcome: undefined;
   SignIn: undefined;
   SignUp: undefined;
   ForgotPassword: undefined;
@@ -12,6 +12,7 @@ export type AuthStackParamList = {
 
 // Main app navigation parameter list
 export type AppStackParamList = {
+  Home: undefined;
   Lobby: undefined;
   Chats: undefined;
   Ranking: undefined;
@@ -19,6 +20,9 @@ export type AppStackParamList = {
   Profile: undefined;
   EditProfile: { userData: any };
   UserProfile: { userId: string; userName: string };
+  AIChat: { conversationId?: string; topic?: string; level?: string };
+  AIConversations: undefined;
+  NetworkDebug: undefined;
 };
 
 // Stack parameter lists for nested navigators
