@@ -11,7 +11,8 @@ import {
   ScrollView,
   StatusBar,
   Platform,
-  Dimensions
+  Dimensions,
+  Modal
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -40,10 +41,12 @@ const HomeScreen = () => {
   const userData = useAppSelector(state => state.user);
   const [activeTab, setActiveTab] = useState('general');
   const [messages, setMessages] = useState([
-    { id: 1, text: "Hello! I'm ARYA AI. How can I help you practice today?", isAI: true },
+    { id: 1, text: "Hello! I'm RAHA AI. How can I help you practice today?", isAI: true },
   ]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   
   const handleSend = async () => {
     if (inputText.trim() === '') return;
@@ -71,11 +74,45 @@ const HomeScreen = () => {
   };
 
   const handleTopicSelect = (topic: Topic) => {
-    // Navigate to the AI Chat screen with the selected topic
-    navigation.navigate('AIChat', {
-      topic: topic.title.toLowerCase().replace(/\s+/g, '-'),
-      level: userData?.level || 'intermediate'
-    });
+    // Set selected topic and show modal instead of direct navigation
+    setSelectedTopic(topic);
+    setModalVisible(true);
+  };
+
+  const handlePracticeMode = (mode: 'voiceChat' | 'call') => {
+    // Close the modal
+    setModalVisible(false);
+    
+    if (!selectedTopic) return;
+    
+    // Common parameters
+    const topicParam = selectedTopic.title.toLowerCase().replace(/\s+/g, '-');
+    const levelParam = userData?.level || 'intermediate';
+    
+    if (mode === 'voiceChat') {
+      // Navigate to AIChat screen with voice chat flag
+      navigation.navigate('AIChat', { 
+        topic: topicParam,
+        level: levelParam,
+        isVoiceChat: true
+      });
+    } else if (mode === 'call') {
+      // Navigate to AICallScreen screen with adapted parameters
+      navigation.navigate('AICallScreen', {
+        id: `topic-${selectedTopic.id}`,
+        name: selectedTopic.title,
+        topic: topicParam,
+        level: levelParam
+      });
+      
+      // Log the navigation for debugging
+      console.log('Navigating to AICallScreen with params:', {
+        id: `topic-${selectedTopic.id}`,
+        name: selectedTopic.title,
+        topic: topicParam,
+        level: levelParam
+      });
+    }
   };
 
   const navigateToUserProfile = () => {
@@ -259,6 +296,75 @@ const HomeScreen = () => {
     );
   };
 
+  // Practice Mode Selection Modal
+  const renderPracticeModeModal = () => {
+    return (
+      <Modal
+        visible={modalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <TouchableOpacity 
+              style={styles.closeButton} 
+              onPress={() => setModalVisible(false)}
+            >
+              <Icon name="close" size={24} color="#333" />
+            </TouchableOpacity>
+            
+            <Text style={styles.modalTitle}>Select mode of Practice</Text>
+            
+            {/* Progress bar */}
+            <View style={styles.progressContainer}>
+              <View style={styles.progressBar}>
+                <View style={styles.progressFill} />
+              </View>
+              <Text style={styles.timerText}>18:05 minutes remaining of free trial</Text>
+            </View>
+            
+            {/* Voice Chat Option */}
+            <TouchableOpacity 
+              style={styles.practiceOption}
+              onPress={() => handlePracticeMode('voiceChat')}
+            >
+              <View style={styles.optionIconContainer}>
+                <Icon name="chatbubble-ellipses" size={28} color="#fff" />
+              </View>
+              <View style={styles.optionTextContainer}>
+                <Text style={styles.optionTitle}>Voice Chat</Text>
+                <Text style={styles.optionDescription}>Voice chat with RAHA AI</Text>
+              </View>
+            </TouchableOpacity>
+            
+            {/* Call Option */}
+            <TouchableOpacity 
+              style={styles.practiceOption}
+              onPress={() => handlePracticeMode('call')}
+            >
+              <View style={styles.optionIconContainer}>
+                <Icon name="call" size={28} color="#fff" />
+              </View>
+              <View style={styles.optionTextContainer}>
+                <Text style={styles.optionTitle}>Call</Text>
+                <Text style={styles.optionDescription}>Talk to RAHA AI in a call-like experience</Text>
+              </View>
+            </TouchableOpacity>
+            
+            {/* Start Practice Button */}
+            <TouchableOpacity 
+              style={styles.startPracticeButton}
+              onPress={() => handlePracticeMode('voiceChat')} // Default to voice chat
+            >
+              <Text style={styles.startPracticeText}>Start Practice with RAHA</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
@@ -334,7 +440,8 @@ const HomeScreen = () => {
       {/* Tab Content */}
       {activeTab === 'general' ? renderGeneralTopics() : renderInterviewTopics()}
       
-  
+      {/* Practice Mode Selection Modal */}
+      {renderPracticeModeModal()}
     </SafeAreaView>
   );
 };
@@ -504,6 +611,104 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#888',
     textAlign: 'center',
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    width: '90%',
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  progressContainer: {
+    width: '100%',
+    marginBottom: 30,
+  },
+  progressBar: {
+    height: 8,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 4,
+    marginBottom: 10,
+    width: '100%',
+  },
+  progressFill: {
+    height: '100%',
+    width: '20%',
+    backgroundColor: '#FF9B42',
+    borderRadius: 4,
+  },
+  timerText: {
+    color: '#666',
+    fontSize: 14,
+  },
+  practiceOption: {
+    flexDirection: 'row',
+    width: '100%',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  optionIconContainer: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#4A90E2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  optionTextContainer: {
+    flex: 1,
+  },
+  optionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  optionDescription: {
+    fontSize: 14,
+    color: '#666',
+  },
+  startPracticeButton: {
+    width: '100%',
+    backgroundColor: '#4A90E2',
+    borderRadius: 30,
+    paddingVertical: 15,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  startPracticeText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
   },
   promotionalBanner: {
     flexDirection: 'row',

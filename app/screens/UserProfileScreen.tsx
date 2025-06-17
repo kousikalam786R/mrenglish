@@ -263,7 +263,7 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
       return;
     }
     
-    navigation.navigate('Call', { 
+    navigation.navigate('CallScreen', { 
       id: userId, 
       name: userName, 
       isVideoCall: false 
@@ -278,7 +278,7 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
       return;
     }
     
-    navigation.navigate('Call', { 
+    navigation.navigate('CallScreen', { 
       id: userId, 
       name: userName, 
       isVideoCall: true 

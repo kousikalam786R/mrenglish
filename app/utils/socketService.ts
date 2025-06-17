@@ -8,6 +8,26 @@ import { getAuthToken } from './authUtils';
 let socket: Socket | null = null;
 let isInitializing = false;
 
+// Type definitions for event data
+interface UserStatusData {
+  userId: string;
+  status: 'online' | 'offline';
+}
+
+interface TypingData {
+  userId: string;
+  chatId?: string;
+}
+
+interface MessageData {
+  _id: string;
+  sender: string;
+  receiver: string;
+  content: string;
+  createdAt: string;
+  read: boolean;
+}
+
 /**
  * Initialize the socket connection
  */
@@ -141,6 +161,61 @@ export const storeUserData = (userData: any): void => {
     .catch(err => console.error('Error storing user data:', err));
 };
 
+/**
+ * Listen for user status changes
+ */
+export const onUserStatus = (callback: (data: UserStatusData) => void): void => {
+  socketOn('user_status', callback);
+};
+
+/**
+ * Listen for typing indicators
+ */
+export const onUserTyping = (callback: (data: TypingData) => void): void => {
+  socketOn('typing', callback);
+};
+
+/**
+ * Listen for typing stopped indicators
+ */
+export const onTypingStopped = (callback: (data: TypingData) => void): void => {
+  socketOn('typing_stopped', callback);
+};
+
+/**
+ * Listen for new messages
+ */
+export const onNewMessage = (callback: (data: MessageData) => void): void => {
+  socketOn('new_message', callback);
+};
+
+/**
+ * Send typing indicator to server
+ */
+export const startTyping = (receiverId: string): void => {
+  socketEmit('typing', { receiverId });
+};
+
+/**
+ * Send typing stopped indicator to server
+ */
+export const stopTyping = (receiverId: string): void => {
+  socketEmit('typing_stopped', { receiverId });
+};
+
+/**
+ * Remove all socket event listeners
+ */
+export const removeAllListeners = (): void => {
+  if (!socket) return;
+  
+  // Remove common event listeners
+  socket.off('user_status');
+  socket.off('typing');
+  socket.off('typing_stopped');
+  socket.off('new_message');
+};
+
 // Default export for backward compatibility
 export default {
   initialize,
@@ -149,5 +224,12 @@ export default {
   socketEmit,
   socketOn,
   socketOff,
-  storeUserData
+  storeUserData,
+  onUserStatus,
+  onUserTyping,
+  onTypingStopped,
+  onNewMessage,
+  startTyping,
+  stopTyping,
+  removeAllListeners
 }; 

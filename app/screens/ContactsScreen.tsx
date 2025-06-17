@@ -291,7 +291,7 @@ const ContactsScreen = () => {
     }));
     
     // Navigate to call screen
-    navigation.navigate('Call', { 
+    navigation.navigate('CallScreen', { 
       id: userId, 
       name: userName, 
       isVideoCall: false 

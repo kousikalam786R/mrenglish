@@ -463,7 +463,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       
       // Navigate to call screen first so UI is ready
       console.log('Navigating to call screen');
-      navigation.navigate('Call', { 
+      navigation.navigate('CallScreen', { 
         id: user._id, 
         name: user.name, 
         isVideoCall: false 
@@ -581,7 +581,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       
       // Navigate to call screen first so UI is ready
       console.log('Navigating to call screen');
-      navigation.navigate('Call', { 
+      navigation.navigate('CallScreen', { 
         id: user._id, 
         name: user.name, 
         isVideoCall: true 

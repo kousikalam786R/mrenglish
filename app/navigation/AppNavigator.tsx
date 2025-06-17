@@ -28,6 +28,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
 import ChatDetailScreen from '../screens/ChatDetailScreen';
 import CallScreen from '../screens/CallScreen';
+import AICallScreen from '../screens/AICallScreen';
 import UserProfileScreen from '../screens/UserProfileScreen';
 import AIChatScreen from '../screens/AIChatScreen';
 import NetworkDebugScreen from '../screens/NetworkDebugScreen';
@@ -117,6 +118,30 @@ const ChatStackNavigator = () => {
           };
         }}
       />
+      <ChatsStack.Screen 
+        name="AICallScreen" 
+        component={AICallScreen} 
+        options={({ route }) => {
+          // Safe access to params with fallback
+          const name = route.params?.name || 'AI Call';
+          return { 
+            title: name,
+            headerBackTitle: 'Back',
+          };
+        }}
+      />
+      <ChatsStack.Screen 
+        name="CallScreen" 
+        component={CallScreen} 
+        options={({ route }) => {
+          // Safe access to params with fallback
+          const name = route.params?.name || 'Call';
+          return { 
+            title: name,
+            headerBackTitle: 'Back',
+          };
+        }}
+      />
     </ChatsStack.Navigator>
   );
 };
@@ -149,6 +174,30 @@ const ContactsStackNavigator = () => {
       />
       <ContactsStack.Screen 
         name="Call" 
+        component={CallScreen} 
+        options={({ route }) => {
+          // Safe access to params with fallback
+          const name = route.params?.name || 'Call';
+          return { 
+            title: name,
+            headerBackTitle: 'Back',
+          };
+        }}
+      />
+      <ContactsStack.Screen 
+        name="AICallScreen" 
+        component={AICallScreen} 
+        options={({ route }) => {
+          // Safe access to params with fallback
+          const name = route.params?.name || 'AI Call';
+          return { 
+            title: name,
+            headerBackTitle: 'Back',
+          };
+        }}
+      />
+      <ContactsStack.Screen 
+        name="CallScreen" 
         component={CallScreen} 
         options={({ route }) => {
           // Safe access to params with fallback
@@ -276,6 +325,24 @@ const RootNavigator = () => {
             <Stack.Screen name="Main" component={MainNavigator} />
             <Stack.Screen 
               name="Call" 
+              component={AICallScreen} 
+              options={{
+                headerShown: false,
+                presentation: 'fullScreenModal',
+                animation: 'slide_from_bottom'
+              }}
+            />
+            <Stack.Screen 
+              name="AICallScreen" 
+              component={AICallScreen} 
+              options={{
+                headerShown: false,
+                presentation: 'fullScreenModal',
+                animation: 'slide_from_bottom'
+              }}
+            />
+            <Stack.Screen 
+              name="CallScreen" 
               component={CallScreen} 
               options={{
                 headerShown: false,

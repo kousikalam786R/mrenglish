@@ -92,7 +92,7 @@ const IncomingCallModal: React.FC<IncomingCallModalProps> = ({ visible }) => {
     // Small delay to prevent UI conflicts during transitions
     setTimeout(() => {
       // Navigate to call screen
-      navigation.navigate('Call', {
+      navigation.navigate('CallScreen', {
         id: callState.remoteUserId,
         name: callState.remoteUserName,
         isVideoCall: callState.isVideoEnabled,

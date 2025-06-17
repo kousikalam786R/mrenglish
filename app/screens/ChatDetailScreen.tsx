@@ -338,7 +338,7 @@ const ChatDetailScreen = () => {
   
   // Handle call button press
   const handleCall = () => {
-    navigation.navigate('Call', {
+    navigation.navigate('CallScreen', {
       id: id,
       name: partnerDetails.name,
       isVideoCall: false
@@ -398,15 +398,19 @@ const ChatDetailScreen = () => {
       senderId === currentUserIdValue ||
       (currentUserIdValue.includes(senderId) || senderId.includes(currentUserIdValue));
     
+    // Use key to ensure unique component instances
     return (
-      <MessageBubble
-        content={item.content}
-        time={formatTime(item.createdAt)}
-        isSender={isSender}
-        read={item.read}
-        username={partnerDetails.name}
-        avatar={partnerDetails.avatar}
-      />
+      <View key={`message-${item._id}`}>
+        <MessageBubble
+          content={item.content}
+          time={formatTime(item.createdAt)}
+          isSender={isSender}
+          read={item.read}
+          username={partnerDetails.name}
+          avatar={partnerDetails.avatar}
+          showAvatar={false} // Disable avatar to prevent UI hierarchy issues
+        />
+      </View>
     );
   };
   

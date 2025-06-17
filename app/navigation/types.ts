@@ -20,7 +20,8 @@ export type AppStackParamList = {
   Profile: undefined;
   EditProfile: { userData: any };
   UserProfile: { userId: string; userName: string };
-  AIChat: { conversationId?: string; topic?: string; level?: string };
+  AIChat: { conversationId?: string; topic?: string; level?: string; isVoiceChat?: boolean };
+  VoiceChat: { conversationId?: string; topic?: string; level?: string };
   AIConversations: undefined;
   NetworkDebug: undefined;
 };
@@ -29,13 +30,17 @@ export type AppStackParamList = {
 export type ChatsStackParamList = {
   ChatsMain: undefined;
   ChatDetail: { id: string; name: string; avatar?: string; user?: ChatUser };
-  Call: { id: string; name: string; isVideoCall?: boolean };
+  Call: { id: string; name: string; isVideoCall?: boolean; topic?: string; level?: string };
+  AICallScreen: { id: string; name: string; isVideoCall?: boolean; topic?: string; level?: string };
+  CallScreen: { id: string; name: string; isVideoCall?: boolean; avatar?: string };
 };
 
 export type ContactsStackParamList = {
   ContactsMain: undefined;
   ChatDetail: { id: string; name: string; avatar?: string; user?: ChatUser };
-  Call: { id: string; name: string; isVideoCall?: boolean };
+  Call: { id: string; name: string; isVideoCall?: boolean; topic?: string; level?: string };
+  AICallScreen: { id: string; name: string; isVideoCall?: boolean; topic?: string; level?: string };
+  CallScreen: { id: string; name: string; isVideoCall?: boolean; avatar?: string };
 };
 
 // Combined parameter list for root navigation
@@ -55,4 +60,7 @@ export type RootScreenNavigationProp = NativeStackNavigationProp<RootStackParamL
 // Route prop types
 export type ChatDetailRouteProp = RouteProp<RootStackParamList, 'ChatDetail'>;
 export type CallRouteProp = RouteProp<RootStackParamList, 'Call'>;
-export type UserProfileRouteProp = RouteProp<RootStackParamList, 'UserProfile'>; 
+export type AICallScreenRouteProp = RouteProp<RootStackParamList, 'AICallScreen'>;
+export type CallScreenRouteProp = RouteProp<RootStackParamList, 'CallScreen'>;
+export type UserProfileRouteProp = RouteProp<RootStackParamList, 'UserProfile'>;
+export type VoiceChatRouteProp = RouteProp<RootStackParamList, 'VoiceChat'>; 
