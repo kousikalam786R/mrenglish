@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { API_ENDPOINTS, API_URL, DIRECT_IP } from './config';
+import { API_ENDPOINTS, API_URL, DIRECT_IP, DEV } from './config';
 import { getAuthToken } from './authUtils';
 import axios from 'axios';
 
@@ -37,7 +37,7 @@ const getApiUrl = (endpoint: string): string => {
     // Fallback for Android emulators
     if (Platform.OS === 'android') {
       // Try the direct IP that has been working
-      const directIpUrl = `http://192.168.29.151:5000/api/${endpoint.replace(/^\/+/, '')}`;
+      const directIpUrl = DEV ? `http://${DIRECT_IP}:5000/api/${endpoint.replace(/^\/+/, '')}` : `${DIRECT_IP}/api/${endpoint.replace(/^\/+/, '')}`;
       console.log(`Falling back to direct IP URL: ${directIpUrl}`);
       return directIpUrl;
     }
@@ -149,7 +149,7 @@ export const getUserProfile = async (): Promise<UserProfile | null> => {
     
     // Try direct LAN IP as fallback
     try {
-      const directUrl = `http://192.168.29.151:5000/api/auth/me`;
+      const directUrl = DEV ? `http://${DIRECT_IP}:5000/api/auth/me` : `${DIRECT_IP}/api/auth/me`;
       console.log('Trying direct LAN IP URL:', directUrl);
       const response = await fetchFromUrl(directUrl, token);
       if (response) return response;
@@ -228,7 +228,7 @@ export const getUserProfileAlternate = async () => {
     // Try different URLs with axios
     const urls = [
       getApiUrl('/auth/me'),
-      'http://192.168.29.151:5000/api/auth/me',
+      DEV ? `http://${DIRECT_IP}:5000/api/auth/me` : `${DIRECT_IP}/api/auth/me`,
       'http://10.0.2.2:5000/api/auth/me',
       'http://localhost:5000/api/auth/me'
     ];
@@ -449,23 +449,29 @@ const testApiConnection = async (): Promise<string | null> => {
   try {
     // Set up URLs to try, prioritize direct IP for Android
     const urlsToTry: string[] = [];
-    const DIRECT_IP = '192.168.29.151'; // Direct IP that seems to work
 
-    // Add the direct IP first for Android
-    if (Platform.OS === 'android') {
-      urlsToTry.push(`http://${DIRECT_IP}:5000`);
-    }
-    
-    // Then add the standard emulator URLs
-    urlsToTry.push(
-      'http://10.0.2.2:5000',  // Standard Android emulator
-      'http://10.0.3.2:5000',  // Genymotion
-      API_URL
-    );
+    if (DEV) {
+      // Development mode - use local URLs
+      // Add the direct IP first for Android
+      if (Platform.OS === 'android') {
+        urlsToTry.push(`http://${DIRECT_IP}:5000`);
+      }
+      
+      // Then add the standard emulator URLs
+      urlsToTry.push(
+        'http://10.0.2.2:5000',  // Standard Android emulator
+        'http://10.0.3.2:5000',  // Genymotion
+        API_URL
+      );
 
-    // Add the direct IP as a fallback for iOS as well
-    if (Platform.OS === 'ios' && !urlsToTry.includes(`http://${DIRECT_IP}:5000`)) {
-      urlsToTry.push(`http://${DIRECT_IP}:5000`);
+      // Add the direct IP as a fallback for iOS as well
+      if (Platform.OS === 'ios' && !urlsToTry.includes(`http://${DIRECT_IP}:5000`)) {
+        urlsToTry.push(`http://${DIRECT_IP}:5000`);
+      }
+    } else {
+      // Production mode - use deployed server
+      urlsToTry.push(DIRECT_IP);
+      urlsToTry.push(API_URL);
     }
 
     console.log('Testing connectivity to API URLs:', urlsToTry);

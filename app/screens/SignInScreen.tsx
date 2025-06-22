@@ -19,7 +19,7 @@ import auth from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { saveAuthData } from '../utils/authUtils';
-import { API_URL, API_ENDPOINTS, BASE_URL } from '../utils/config';
+import { API_URL, API_ENDPOINTS, BASE_URL, DIRECT_IP, DEV } from '../utils/config';
 import { getUserProfile } from '../utils/profileService';
 import { useAppDispatch } from '../redux/hooks';
 import { signInSuccess } from '../redux/slices/authSlice';
@@ -29,7 +29,6 @@ import { setUserData } from '../redux/slices/userSlice';
 // Server request timeout
 const SERVER_TIMEOUT_MS = 15000; // 15 seconds (reduced from 30 seconds for better UX)
 const DEBUG_MODE = true;
-const DIRECT_LAN_IP = '192.168.29.151'; // Use this for direct connections as it's most reliable
 
 const SignInScreen = () => {
   const [email, setEmail] = useState('');
@@ -52,10 +51,10 @@ const SignInScreen = () => {
       
       // Test only the endpoints that are known to work
       const testUrls = [
-        { name: 'LAN IP Root', url: 'http://192.168.29.151:5000' },
-        { name: 'LAN IP Test Endpoint', url: 'http://192.168.29.151:5000/test' },
-        { name: 'LAN IP API Root', url: 'http://192.168.29.151:5000/api' },
-        { name: 'LAN IP Google Auth', url: 'http://192.168.29.151:5000/api/auth/google' },
+        { name: 'Production Server', url: DEV ? `http://${DIRECT_IP}:5000` : DIRECT_IP },
+        { name: 'Test Endpoint', url: DEV ? `http://${DIRECT_IP}:5000/test` : `${DIRECT_IP}/test` },
+        { name: 'API Root', url: DEV ? `http://${DIRECT_IP}:5000/api` : `${DIRECT_IP}/api` },
+        { name: 'Google Auth', url: DEV ? `http://${DIRECT_IP}:5000/api/auth/google` : `${DIRECT_IP}/api/auth/google` },
       ];
       
       let results = '';
@@ -63,7 +62,7 @@ const SignInScreen = () => {
       // Add platform info to results
       results += `Device Platform: ${Platform.OS}\n`;
       results += `API URL configured as: ${API_URL}\n`;
-      results += `Using LAN IP: 192.168.29.151\n\n`;
+      results += `Using ${DEV ? 'Local' : 'Production'} Server: ${DIRECT_IP}\n\n`;
       
       for (const endpoint of testUrls) {
         try {
@@ -159,7 +158,7 @@ const SignInScreen = () => {
       const timeoutId = setTimeout(() => controller.abort(), 10000);
       
       // Use direct LAN IP since that's what our tests showed works
-      const directLanIpEndpoint = 'http://192.168.29.151:5000/api/auth/google';
+      const directLanIpEndpoint = DEV ? `http://${DIRECT_IP}:5000/api/auth/google` : `${DIRECT_IP}/api/auth/google`;
       
       // Try POST to the Google Auth endpoint
       console.log('Sending test POST to:', directLanIpEndpoint);
@@ -207,7 +206,7 @@ const SignInScreen = () => {
       setIsSigninInProgress(true);
       
       // Try login with direct IP first since it's most reliable from our tests
-      const loginEndpoint = `http://${DIRECT_LAN_IP}:5000/api/auth/login`;
+      const loginEndpoint = DEV ? `http://${DIRECT_IP}:5000/api/auth/login` : `${DIRECT_IP}/api/auth/login`;
       console.log('Attempting login with direct LAN IP:', loginEndpoint);
       
       // Use AbortController for more reliable timeout control
@@ -335,7 +334,7 @@ const SignInScreen = () => {
         // Send ID token to the server
         try {
           // Use direct LAN IP since that's what works
-          const googleAuthEndpoint = 'http://192.168.29.151:5000/api/auth/google';
+          const googleAuthEndpoint = DEV ? `http://${DIRECT_IP}:5000/api/auth/google` : `${DIRECT_IP}/api/auth/google`;
           console.log('Attempting server connection to:', googleAuthEndpoint);
           
           // Create a timeout promise to abort fetch if it takes too long

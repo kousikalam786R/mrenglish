@@ -3,6 +3,7 @@ import { authStart, signInSuccess, signOutSuccess, authFail } from '../slices/au
 import { clearUserData } from '../slices/userSlice';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { decode as atob } from 'base-64';
+import { DIRECT_IP, DEV } from '../../utils/config';
 
 // Helper function to decode JWT
 const decodeJWT = (token: string) => {
@@ -33,7 +34,7 @@ export const signIn = createAsyncThunk(
       // For now, we'll just simulate a successful sign in
       
       // Simulate API call
-      const response = await fetch('http://192.168.29.151:5000/api/auth/signin', {
+      const response = await fetch(DEV ? `http://${DIRECT_IP}:5000/api/auth/signin` : `${DIRECT_IP}/api/auth/signin`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

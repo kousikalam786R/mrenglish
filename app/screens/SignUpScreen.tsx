@@ -18,6 +18,7 @@ import CustomInput from '../components/CustomInput';
 import { saveAuthData } from '../utils/authUtils';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import auth from '@react-native-firebase/auth';
+import { API_URL, DIRECT_IP, DEV } from '../utils/config';
 
 // Server request timeout
 const SERVER_TIMEOUT_MS = 30000; // 30 seconds
@@ -53,7 +54,7 @@ const SignUpScreen = () => {
       setLoading(true);
       
       // Use direct server API for manual signup
-      const signupEndpoint = 'http://192.168.29.151:5000/api/auth/signup';
+      const signupEndpoint = DEV ? `http://${DIRECT_IP}:5000/api/auth/signup` : `${DIRECT_IP}/api/auth/signup`;
       console.log('Attempting manual signup with server:', signupEndpoint);
       
       // Create a timeout promise

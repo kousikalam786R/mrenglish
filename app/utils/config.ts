@@ -1,7 +1,10 @@
 import { Platform } from 'react-native';
 
 // Use different URLs for different environments
-const DEV = true; // Set to false for production
+export const DEV = false; // Set to false for production (deployed server)
+
+// Production server URL (Render)
+const PRODUCTION_URL = 'https://mrenglishserverside.onrender.com';
 
 // For actual device testing, use your computer's local network IP
 // For emulator, use 10.0.2.2 (Android) or localhost (iOS)
@@ -52,30 +55,36 @@ const isEmulator = (): boolean => {
 // Get correct base URL based on platform and environment
 let BASE_HOST = '';
 
-// Special handling for emulators vs physical devices
-if (Platform.OS === 'android' && __DEV__) {
-  if (isEmulator()) {
-    console.log('Detected Android emulator - using 10.0.2.2 to connect to host');
-    BASE_HOST = '10.0.2.2';
+if (DEV) {
+  // Development mode - use local URLs
+  if (Platform.OS === 'android' && __DEV__) {
+    if (isEmulator()) {
+      console.log('Detected Android emulator - using 10.0.2.2 to connect to host');
+      BASE_HOST = '10.0.2.2';
+    } else {
+      console.log('Detected Android physical device - using LOCAL_IP:', LOCAL_IP);
+      BASE_HOST = LOCAL_IP;
+    }
+  } else if (Platform.OS === 'ios' && __DEV__) {
+    if (isEmulator()) {
+      console.log('Detected iOS simulator - using localhost');
+      BASE_HOST = 'localhost';
+    } else {
+      console.log('Detected iOS physical device - using LOCAL_IP:', LOCAL_IP);
+      BASE_HOST = LOCAL_IP;
+    }
   } else {
-    console.log('Detected Android physical device - using LOCAL_IP:', LOCAL_IP);
-    BASE_HOST = LOCAL_IP;
-  }
-} else if (Platform.OS === 'ios' && __DEV__) {
-  if (isEmulator()) {
-    console.log('Detected iOS simulator - using localhost');
-    BASE_HOST = 'localhost';
-  } else {
-    console.log('Detected iOS physical device - using LOCAL_IP:', LOCAL_IP);
+    console.log('Using LOCAL_IP as fallback:', LOCAL_IP);
     BASE_HOST = LOCAL_IP;
   }
 } else {
-  console.log('Using LOCAL_IP as fallback:', LOCAL_IP);
-  BASE_HOST = LOCAL_IP;
+  // Production mode - use deployed server
+  console.log('Using production server:', PRODUCTION_URL);
+  BASE_HOST = PRODUCTION_URL;
 }
 
 // Base API URL without the /api suffix
-export const BASE_URL = `http://${BASE_HOST}:5000`;
+export const BASE_URL = DEV ? `http://${BASE_HOST}:5000` : BASE_HOST;
 console.log('BASE_URL configured as:', BASE_URL);
 
 // API URL with /api suffix
@@ -83,33 +92,39 @@ export const API_URL = `${BASE_URL}/api`;
 console.log('API_URL configured as:', API_URL);
 
 // Export the direct IP for use in other files that need it
-export const DIRECT_IP = LOCAL_IP;
+export const DIRECT_IP = DEV ? LOCAL_IP : PRODUCTION_URL;
 
 // Function to get alternate URLs in case of connection issues
 export const getAlternateUrls = (): string[] => {
   const urls = [];
 
-  // For physical Android devices, try all real device IPs first
-  if (Platform.OS === 'android' && !isEmulator()) {
-    // Try all potential real device IPs - NEVER use /api for socket connections
-    REAL_DEVICE_IPS.forEach(ip => {
-      // Add URLs without /api first (better for Socket.IO)
-      urls.push(`http://${ip}:5000`);
-      // Then add with /api as fallback for REST API
-      urls.push(`http://${ip}:5000/api`);
-    });
-    
-    // Also try without specific IP (might work on some networks)
-    urls.push(`http://localhost:5000`);
-    urls.push(`http://localhost:5000/api`);
+  if (DEV) {
+    // Development mode - use local URLs
+    if (Platform.OS === 'android' && !isEmulator()) {
+      // Try all potential real device IPs - NEVER use /api for socket connections
+      REAL_DEVICE_IPS.forEach(ip => {
+        // Add URLs without /api first (better for Socket.IO)
+        urls.push(`http://${ip}:5000`);
+        // Then add with /api as fallback for REST API
+        urls.push(`http://${ip}:5000/api`);
+      });
+      
+      // Also try without specific IP (might work on some networks)
+      urls.push(`http://localhost:5000`);
+      urls.push(`http://localhost:5000/api`);
+    } else {
+      // For emulators, use the standard backup IPs
+      BACKUP_IPS.forEach(ip => {
+        // Add URLs without /api first (better for Socket.IO)
+        urls.push(`http://${ip}:5000`);
+        // Then add with /api as fallback for REST API
+        urls.push(`http://${ip}:5000/api`);
+      });
+    }
   } else {
-    // For emulators, use the standard backup IPs
-    BACKUP_IPS.forEach(ip => {
-      // Add URLs without /api first (better for Socket.IO)
-      urls.push(`http://${ip}:5000`);
-      // Then add with /api as fallback for REST API
-      urls.push(`http://${ip}:5000/api`);
-    });
+    // Production mode - use deployed server
+    urls.push(PRODUCTION_URL);
+    urls.push(`${PRODUCTION_URL}/api`);
   }
 
   return urls;
