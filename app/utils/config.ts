@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 
 // Use different URLs for different environments
-export const DEV = false; // Set to false for production (deployed server)
+export const DEV = true; // Set to true for local development
 
 // Production server URL (Render)
 const PRODUCTION_URL = 'https://mrenglishserverside.onrender.com';
@@ -157,4 +157,13 @@ export const APP_CONFIG = {
   apiRequestTimeout: 30000, // 30 seconds
   socketReconnectionAttempts: 5,
   defaultLanguage: 'en',
+  // LibreTranslate settings
+  translation: {
+    enabled: true,
+    userLanguage: 'bn', // Bengali for this app's target users
+    showTranslations: true,
+    autoDetect: true,
+    cacheEnabled: true,
+    fallbackLanguage: 'en',
+  },
 }; 

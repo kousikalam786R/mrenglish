@@ -15,7 +15,10 @@ import {
 import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import Tts from 'react-native-tts';
 import { AICallScreenRouteProp } from '../navigation/types';
+import { translationService, SUPPORTED_LANGUAGES } from '../utils/libreTranslateService';
+import { APP_CONFIG } from '../utils/config';
 
 const { width, height } = Dimensions.get('window');
 
@@ -36,6 +39,16 @@ const AICallScreen = () => {
   const [showHintModal, setShowHintModal] = useState(false);
   const [currentCaption, setCurrentCaption] = useState("How was your weekend? Did you do anything interesting?");
   const [currentHint, setCurrentHint] = useState("Try describing what you did in detail using past tense verbs.");
+  const [isTtsInitialized, setIsTtsInitialized] = useState(false);
+  const [isTtsReady, setIsTtsReady] = useState(false);
+  
+  // Translation state
+  const [isTranslationEnabled, setIsTranslationEnabled] = useState(APP_CONFIG.translation.enabled);
+  const [currentTranslation, setCurrentTranslation] = useState("");
+  const [translationHint, setTranslationHint] = useState("");
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [translationLanguage, setTranslationLanguage] = useState(APP_CONFIG.translation.userLanguage);
+  const [isTranslationServiceReady, setIsTranslationServiceReady] = useState(false);
   
   // Animation for the audio waveform
   const audioAnimation = useRef(new Animated.Value(0)).current;
@@ -58,6 +71,193 @@ const AICallScreen = () => {
     "You could compare this experience to something similar you've done before.",
   ];
   
+  // Translation functions
+  const translateText = async (text: string, target?: string) => {
+    if (!isTranslationEnabled || !text.trim()) return text;
+
+    try {
+      setIsTranslating(true);
+      const result = await translationService.translateText(text, {
+        source: 'auto',
+        target: target || translationLanguage,
+      });
+      
+      if (result.error) {
+        console.error('Translation error:', result.error);
+        return text;
+      }
+      
+      return result.translatedText;
+    } catch (error) {
+      console.error('Translation failed:', error);
+      return text;
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
+  const updateTranslations = async (caption: string, hint: string) => {
+    if (!isTranslationEnabled) return;
+
+    try {
+      const [translatedCaption, translatedHint] = await Promise.all([
+        translateText(caption),
+        translateText(hint),
+      ]);
+      
+      setCurrentTranslation(translatedCaption);
+      setTranslationHint(translatedHint);
+    } catch (error) {
+      console.error('Failed to update translations:', error);
+    }
+  };
+
+  // Initialize TTS and Translation Service
+  useEffect(() => {
+    const initializeServices = async () => {
+      // Initialize Translation Service
+      if (isTranslationEnabled) {
+        try {
+          console.log('Initializing translation service...');
+          const translationInitialized = await translationService.initialize();
+          setIsTranslationServiceReady(translationInitialized);
+          
+          if (translationInitialized) {
+            console.log('Translation service ready');
+            // Translate initial content
+            await updateTranslations(currentCaption, currentHint);
+          }
+        } catch (error) {
+          console.error('Translation service initialization failed:', error);
+        }
+      }
+    };
+
+    const initializeTts = async () => {
+      try {
+        // Set default TTS settings
+        await Tts.setDefaultLanguage('en-US');
+        
+        // Set platform-specific voice settings
+        if (Platform.OS === 'ios') {
+          // iOS voices - try different voices if one fails
+          try {
+            await Tts.setDefaultVoice('com.apple.ttsbundle.Samantha-compact');
+          } catch {
+            try {
+              await Tts.setDefaultVoice('com.apple.ttsbundle.Moira-compact');
+            } catch {
+              // Use system default
+              console.log('Using system default voice');
+            }
+          }
+        }
+        
+        await Tts.setDefaultRate(0.5, true); // Slightly slower for learning
+        await Tts.setDefaultPitch(1.0); // Normal pitch
+        
+        // Add event listeners
+        Tts.addEventListener('tts-start', (event) => {
+          console.log('TTS started:', event);
+          setIsRobotSpeaking(true);
+          if (!isTtsReady) setIsTtsReady(true);
+        });
+        
+        Tts.addEventListener('tts-finish', (event) => {
+          console.log('TTS finished:', event);
+          setIsRobotSpeaking(false);
+        });
+        
+        Tts.addEventListener('tts-cancel', (event) => {
+          console.log('TTS cancelled:', event);
+          setIsRobotSpeaking(false);
+        });
+        
+        Tts.addEventListener('tts-error', (event) => {
+          console.error('TTS error:', event);
+          setIsRobotSpeaking(false);
+        });
+        
+        setIsTtsInitialized(true);
+        
+        // Speak the initial caption after a longer delay to ensure TTS is fully ready
+        setTimeout(async () => {
+          try {
+            // Test TTS readiness first
+            await Tts.speak(' '); // Speak a space character as a test
+            await Tts.stop();
+            
+            // Now speak the actual caption
+            setTimeout(() => {
+              speakText(currentCaption);
+            }, 500);
+          } catch (error) {
+            console.error('Initial TTS test failed:', error);
+            // Try again with just the caption
+            setTimeout(() => {
+              speakText(currentCaption);
+            }, 1000);
+          }
+        }, 2000);
+        
+      } catch (error) {
+        console.error('TTS initialization error:', error);
+        // Fall back to visual-only mode
+        setIsTtsInitialized(false);
+      }
+    };
+    
+    // Initialize both services
+    initializeServices();
+    initializeTts();
+    
+    // Cleanup function
+    return () => {
+      Tts.removeAllListeners('tts-start');
+      Tts.removeAllListeners('tts-finish');
+      Tts.removeAllListeners('tts-cancel');
+      Tts.removeAllListeners('tts-error');
+      Tts.stop();
+    };
+  }, []);
+  
+  // Function to speak text
+  const speakText = async (text: string) => {
+    if (!isTtsInitialized || isPaused || !text.trim()) return;
+    
+    try {
+      console.log('Speaking text:', text);
+      // Stop any current speech
+      await Tts.stop();
+      
+      // Small delay to ensure stop is processed
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Start speaking the new text
+      await Tts.speak(text);
+    } catch (error) {
+      console.error('TTS speak error:', error);
+      
+      // Retry once after a delay
+      setTimeout(async () => {
+        try {
+          await Tts.speak(text);
+        } catch (retryError) {
+          console.error('TTS retry failed:', retryError);
+        }
+      }, 500);
+    }
+  };
+  
+  // Function to stop speech
+  const stopSpeech = async () => {
+    try {
+      await Tts.stop();
+    } catch (error) {
+      console.error('TTS stop error:', error);
+    }
+  };
+  
   useEffect(() => {
     // Start call duration timer
     const timer = setInterval(() => {
@@ -69,17 +269,27 @@ const AICallScreen = () => {
     // Simulate back and forth conversation
     const speakingInterval = setInterval(() => {
       if (!isPaused && !isRecording) {
-        setIsRobotSpeaking(prev => !prev);
-        
-        // If switching to robot speaking, change the caption
+        // If robot was not speaking, now it will speak
         if (!isRobotSpeaking) {
           const randomIndex = Math.floor(Math.random() * sampleCaptions.length);
-          setCurrentCaption(sampleCaptions[randomIndex]);
+          const newCaption = sampleCaptions[randomIndex];
+          setCurrentCaption(newCaption);
           
           // Also update the hint
           const hintIndex = Math.floor(Math.random() * sampleHints.length);
-          setCurrentHint(sampleHints[hintIndex]);
+          const newHint = sampleHints[hintIndex];
+          setCurrentHint(newHint);
+          
+          // Update translations if enabled
+          if (isTranslationEnabled) {
+            updateTranslations(newCaption, newHint);
+          }
+          
+          // Speak the new caption
+          speakText(newCaption);
         }
+        
+        setIsRobotSpeaking(prev => !prev);
       }
     }, 8000);
     
@@ -128,7 +338,10 @@ const AICallScreen = () => {
     return topic.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   };
   
-  const handleEndCall = () => {
+  const handleEndCall = async () => {
+    // Stop TTS when ending call
+    await stopSpeech();
+    
     Alert.alert(
       "End Call",
       "Are you sure you want to end this call?",
@@ -146,8 +359,19 @@ const AICallScreen = () => {
     );
   };
   
-  const togglePause = () => {
-    setIsPaused(!isPaused);
+  const togglePause = async () => {
+    const newPausedState = !isPaused;
+    setIsPaused(newPausedState);
+    
+    if (newPausedState) {
+      // If pausing, stop TTS
+      await stopSpeech();
+    } else {
+      // If resuming and robot should be speaking, resume speech
+      if (isRobotSpeaking && currentCaption) {
+        await speakText(currentCaption);
+      }
+    }
   };
   
   const toggleCaptions = () => {
@@ -158,12 +382,22 @@ const AICallScreen = () => {
     setShowHintModal(!showHintModal);
   };
   
-  const toggleRecording = () => {
+  const toggleRecording = async () => {
     // If we're starting to record, make sure the robot isn't speaking
     if (!isRecording) {
       setIsRobotSpeaking(false);
+      // Stop any current TTS
+      await stopSpeech();
     }
     setIsRecording(!isRecording);
+  };
+
+  const toggleTranslation = () => {
+    setIsTranslationEnabled(!isTranslationEnabled);
+    if (!isTranslationEnabled && isTranslationServiceReady) {
+      // If turning on translation, update current translations
+      updateTranslations(currentCaption, currentHint);
+    }
   };
   
   // Generate random heights for audio waveform bars
@@ -295,11 +529,38 @@ const AICallScreen = () => {
                 <Icon name="chatbubble-ellipses-outline" size={18} color="#FFD700" />
                 <Text style={styles.captionTitle}>RAHA said:</Text>
               </View>
-              <TouchableOpacity onPress={toggleCaptions}>
-                <Icon name="close-circle" size={20} color="#fff" />
-              </TouchableOpacity>
+              <View style={styles.captionControls}>
+                {isTranslationServiceReady && (
+                  <TouchableOpacity onPress={toggleTranslation} style={styles.translationToggle}>
+                    <Icon 
+                      name="language" 
+                      size={18} 
+                      color={isTranslationEnabled ? "#FFD700" : "#999"} 
+                    />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity onPress={toggleCaptions}>
+                  <Icon name="close-circle" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
             </View>
             <Text style={styles.captionText}>{currentCaption}</Text>
+            
+            {/* Translation */}
+            {isTranslationEnabled && currentTranslation && (
+              <View style={styles.translationContainer}>
+                <View style={styles.translationHeader}>
+                  <Icon name="language" size={14} color="#4CAF50" />
+                  <Text style={styles.translationLabel}>
+                    {translationService.getLanguageName(translationLanguage)}:
+                  </Text>
+                  {isTranslating && (
+                    <Icon name="refresh" size={14} color="#4CAF50" />
+                  )}
+                </View>
+                <Text style={styles.translationText}>{currentTranslation}</Text>
+              </View>
+            )}
           </View>
         )}
         
@@ -311,13 +572,68 @@ const AICallScreen = () => {
                 <Icon name="bulb-outline" size={18} color="#FFD700" />
                 <Text style={styles.hintTitle}>HINT:</Text>
               </View>
-              <TouchableOpacity onPress={toggleHint}>
-                <Icon name="close-circle" size={20} color="#fff" />
-              </TouchableOpacity>
+              <View style={styles.captionControls}>
+                {isTranslationServiceReady && (
+                  <TouchableOpacity onPress={toggleTranslation} style={styles.translationToggle}>
+                    <Icon 
+                      name="language" 
+                      size={18} 
+                      color={isTranslationEnabled ? "#FFD700" : "#999"} 
+                    />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity onPress={toggleHint}>
+                  <Icon name="close-circle" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
             </View>
             <Text style={styles.hintText}>{currentHint}</Text>
+            
+            {/* Hint Translation */}
+            {isTranslationEnabled && translationHint && (
+              <View style={styles.translationContainer}>
+                <View style={styles.translationHeader}>
+                  <Icon name="language" size={14} color="#4CAF50" />
+                  <Text style={styles.translationLabel}>
+                    {translationService.getLanguageName(translationLanguage)}:
+                  </Text>
+                  {isTranslating && (
+                    <Icon name="refresh" size={14} color="#4CAF50" />
+                  )}
+                </View>
+                <Text style={styles.translationText}>{translationHint}</Text>
+              </View>
+            )}
           </View>
         )}
+        
+        {/* TTS Status Indicator */}
+        {!isTtsInitialized ? (
+          <View style={styles.ttsStatusContainer}>
+            <Icon name="warning-outline" size={16} color="#FFC107" />
+            <Text style={styles.ttsStatusText}>Voice disabled - Visual mode only</Text>
+          </View>
+        ) : !isTtsReady ? (
+          <View style={[styles.ttsStatusContainer, {backgroundColor: 'rgba(0, 191, 255, 0.2)', borderColor: 'rgba(0, 191, 255, 0.5)'}]}>
+            <Icon name="time-outline" size={16} color="#00BFFF" />
+            <Text style={[styles.ttsStatusText, {color: '#00BFFF'}]}>Voice loading...</Text>
+          </View>
+        ) : null}
+        
+        {/* Translation Status Indicator */}
+        {isTranslationEnabled && !isTranslationServiceReady ? (
+          <View style={[styles.ttsStatusContainer, {backgroundColor: 'rgba(255, 193, 7, 0.2)', borderColor: 'rgba(255, 193, 7, 0.5)'}]}>
+            <Icon name="language" size={16} color="#FFC107" />
+            <Text style={[styles.ttsStatusText, {color: '#FFC107'}]}>Translation loading...</Text>
+          </View>
+        ) : isTranslationEnabled && isTranslationServiceReady ? (
+          <View style={[styles.ttsStatusContainer, {backgroundColor: 'rgba(76, 175, 80, 0.2)', borderColor: 'rgba(76, 175, 80, 0.5)'}]}>
+            <Icon name="checkmark-circle" size={16} color="#4CAF50" />
+            <Text style={[styles.ttsStatusText, {color: '#4CAF50'}]}>
+              Translation ready ({translationService.getLanguageName(translationLanguage)})
+            </Text>
+          </View>
+        ) : null}
         
         {/* Bottom control bar */}
         <View style={styles.controlBar}>
@@ -330,6 +646,27 @@ const AICallScreen = () => {
             <Icon name="chatbubble-ellipses-outline" size={22} color="#fff" />
             <Text style={styles.controlText}>Caption</Text>
           </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.controlButton} 
+            onPress={() => isTtsInitialized ? speakText(currentCaption) : null}
+          >
+            <Icon name="volume-high-outline" size={22} color={isTtsInitialized ? "#fff" : "#666"} />
+            <Text style={[styles.controlText, {color: isTtsInitialized ? "#fff" : "#666"}]}>Speak</Text>
+          </TouchableOpacity>
+          
+          {isTranslationServiceReady && (
+            <TouchableOpacity style={styles.controlButton} onPress={toggleTranslation}>
+              <Icon 
+                name="language" 
+                size={22} 
+                color={isTranslationEnabled ? "#4CAF50" : "#666"} 
+              />
+              <Text style={[styles.controlText, {color: isTranslationEnabled ? "#4CAF50" : "#666"}]}>
+                Translate
+              </Text>
+            </TouchableOpacity>
+          )}
           
           <TouchableOpacity style={styles.controlButton} onPress={togglePause}>
             <Icon name={isPaused ? "play" : "pause"} size={22} color="#fff" />
@@ -564,6 +901,55 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     transform: [{ rotate: '135deg' }],
+  },
+  ttsStatusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 193, 7, 0.2)',
+    margin: 16,
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 193, 7, 0.5)',
+  },
+  ttsStatusText: {
+    color: '#FFC107',
+    fontSize: 12,
+    marginLeft: 6,
+    fontWeight: '500',
+  },
+  captionControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  translationToggle: {
+    marginRight: 12,
+    padding: 4,
+  },
+  translationContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  translationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  translationLabel: {
+    color: '#4CAF50',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginLeft: 4,
+    marginRight: 4,
+  },
+  translationText: {
+    color: '#E0E0E0',
+    fontSize: 15,
+    lineHeight: 22,
+    fontStyle: 'italic',
   },
 });
 
