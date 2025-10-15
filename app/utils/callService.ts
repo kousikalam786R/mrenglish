@@ -56,28 +56,51 @@ class CallService {
   private remoteStream: MediaStream | null = null;
   private listeners: Map<string, Set<(data: any) => void>> = new Map();
   private callState: CallState = { ...initialCallState };
+  private durationTimer: NodeJS.Timeout | null = null;
+
+  // Clear the duration timer
+  private clearDurationTimer(): void {
+    if (this.durationTimer) {
+      clearInterval(this.durationTimer);
+      this.durationTimer = null;
+    }
+  }
 
   // ICE server configuration for STUN/TURN
   private configuration = {
     iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      // Add free TURN servers
-      {
-        urls: 'turn:numb.viagenie.ca',
-        credential: 'muazkh',
-        username: 'webrtc@live.com'
+      { 
+        urls: [
+          'stun:stun.l.google.com:19302',
+          'stun:stun1.l.google.com:19302',
+          'stun:stun2.l.google.com:19302',
+          'stun:stun3.l.google.com:19302',
+          'stun:stun4.l.google.com:19302'
+        ]
       },
       {
-        urls: 'turn:openrelay.metered.ca:80',
-        username: 'openrelayproject',
-        credential: 'openrelayproject'
+        urls: 'turn:global.turn.twilio.com:3478?transport=udp',
+        username: 'your_twilio_username', // Replace with your Twilio credentials
+        credential: 'your_twilio_credential'
       }
-    ]
+    ],
+    iceCandidatePoolSize: 10,
+    iceTransportPolicy: 'all',
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require'
   };
 
-  private constructor() {}
+  // State sync interval in milliseconds
+  private syncInterval: number = 5000;
+  private syncTimer: NodeJS.Timeout | null = null;
+  private lastSyncAttempt: number = 0;
+  private syncRetryCount: number = 0;
+  private readonly MAX_SYNC_RETRIES: number = 3;
+
+  private constructor() {
+    // Load persisted call state on initialization
+    this.loadPersistedCallState();
+  }
 
   public static getInstance(): CallService {
     if (!CallService.instance) {
@@ -124,8 +147,14 @@ class CallService {
     socketService.getSocket()?.on('video-upgrade-accepted', this.handleVideoUpgradeAccepted);
     socketService.getSocket()?.on('video-upgrade-rejected', this.handleVideoUpgradeRejected);
     
+    // Register state sync listener
+    socketService.getSocket()?.on('call-state-sync', this.handleStateSync);
+    
     // Register internal event listeners
     this.addEventListener('call-connected', this.handleCallConnected);
+    
+    // Load any persisted state
+    this.loadPersistedCallState();
   }
 
   // Create an outgoing call
@@ -282,6 +311,9 @@ class CallService {
         throw new Error('No offer SDP available to accept call');
       }
 
+      // Start state sync for reliability
+      this.startStateSync();
+
       // Initialize WebRTC
       await this.initializeWebRTC(options);
 
@@ -309,24 +341,33 @@ class CallService {
       await this.pc.setLocalDescription(answer);
       console.log('Successfully set local description (answer)');
 
-      // Send answer to caller
-      console.log('Sending answer to caller:', this.callState.remoteUserId);
-      socketService.getSocket()?.emit('call-answer', {
+      // Set call start time and update state
+      const callStartTime = Date.now();
+      console.log('Setting and sending call start time:', callStartTime);
+
+      // Create the answer payload with all necessary data
+      const answerPayload = {
         targetUserId: this.callState.remoteUserId,
         sdp: answer.sdp,
         type: answer.type,
         accepted: true,
-        callHistoryId: this.callState.callHistoryId
-      });
+        callHistoryId: this.callState.callHistoryId,
+        callStartTime: callStartTime
+      };
 
-      // Update call state
+      // Send answer to caller first to ensure they get the start time
+      console.log('Sending answer to caller:', this.callState.remoteUserId, 'with payload:', answerPayload);
+      socketService.getSocket()?.emit('call-answer', answerPayload);
+
+      // Store call start time but don't set CONNECTED yet - let WebRTC connection handler do that
+      console.log('Storing receiver call start time:', callStartTime);
       this.callState = {
         ...this.callState,
-        status: CallStatus.CONNECTED,
-        callStartTime: Date.now(),
+        callStartTime: callStartTime,
+        callDuration: 0
       };
       
-      this.emitCallStateChange();
+      // Don't emit state change yet - wait for WebRTC connection to establish
 
     } catch (error) {
       console.error('Error accepting call:', error);
@@ -353,15 +394,17 @@ class CallService {
   // Handle call answer (accept/reject)
   private handleCallAnswer = async (data: any) => {
     try {
-      const { accepted, sdp, type, callHistoryId, renegotiation } = data;
+      console.log('Handling call answer:', data);
+      const { accepted, sdp, type, callHistoryId, renegotiation, callStartTime } = data;
 
       // Store callHistoryId if provided
       if (callHistoryId) {
+        console.log('Setting callHistoryId:', callHistoryId);
         this.callState.callHistoryId = callHistoryId;
       }
 
       if (!accepted) {
-        // Call was rejected
+        console.log('Call was rejected');
         this.emitEvent('call-rejected', data);
         this.resetCallState();
         return;
@@ -371,6 +414,17 @@ class CallService {
       if (!this.pc) {
         console.error("Cannot process answer: peer connection not initialized");
         return;
+      }
+
+      // Store call start time for the caller when we receive an answer (only once, not during renegotiation)
+      // Don't set CONNECTED status yet - let the WebRTC connection handler do that
+      if (!renegotiation && callStartTime) {
+        console.log("Storing call start time for caller:", callStartTime);
+        this.callState = {
+          ...this.callState,
+          callStartTime: callStartTime,
+          callDuration: 0
+        };
       }
 
       // Handle renegotiation answer (e.g., when adding video to an existing call)
@@ -443,19 +497,6 @@ class CallService {
       // Handle case where peer connection is in stable state - no need to set remote description again
       if (this.pc.signalingState === "stable") {
         console.log("Peer connection already in stable state, possibly already processed answer");
-        
-        // Update call state to connected if not already
-        if (this.callState.status !== CallStatus.CONNECTED) {
-          const currentTime = Date.now();
-          console.log("Setting call start time to:", currentTime);
-          this.callState = {
-            ...this.callState,
-            status: CallStatus.CONNECTED,
-            callStartTime: currentTime,
-          };
-          this.emitCallStateChange();
-          this.emitEvent('call-connected', { timestamp: currentTime });
-        }
         return;
       }
       
@@ -464,19 +505,11 @@ class CallService {
       if (currentState !== "have-local-offer") {
         console.error("Cannot set remote answer: invalid signaling state:", currentState);
          
-        // Handle specific invalid states - try to recover
+        // Handle specific invalid states
         console.log("Attempting to recover from invalid state...");
         if (currentState === "have-remote-offer") {
           console.log("We have a remote offer but received an answer - possible race condition");
-          // Just update the call state and hope for the best
-          const currentTime = Date.now();
-          this.callState = {
-            ...this.callState,
-            status: CallStatus.CONNECTED,
-            callStartTime: currentTime,
-          };
-          this.emitCallStateChange();
-          this.emitEvent('call-connected', { timestamp: currentTime });
+          // Don't update state here, let the connection state handler do it
           return;
         }
         
@@ -493,33 +526,14 @@ class CallService {
         console.log("Setting remote description (answer)...");
         await this.pc.setRemoteDescription(remoteDesc);
         console.log("Successfully set remote description (answer). New signaling state:", this.pc.signalingState);
-        
-        // Update call state
-        const currentTime = Date.now();
-        console.log("Setting call start time to:", currentTime);
-        this.callState = {
-          ...this.callState,
-          status: CallStatus.CONNECTED,
-          callStartTime: currentTime,
-        };
-        
-        this.emitCallStateChange();
-        this.emitEvent('call-connected', { timestamp: currentTime });
       } catch (err) {
         console.error("Error setting remote description:", err);
         
         // If we get a stable state error, it means the connection is established
         // This can happen if the answer was processed twice or we hit a race condition
-        if (err.toString().includes("Called in wrong state: stable")) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        if (errorMessage.includes("Called in wrong state: stable")) {
           console.log("Ignoring stable state error - connection appears to be established");
-          const currentTime = Date.now();
-          this.callState = {
-            ...this.callState,
-            status: CallStatus.CONNECTED,
-            callStartTime: currentTime,
-          };
-          this.emitCallStateChange();
-          this.emitEvent('call-connected', { timestamp: currentTime });
           return;
         }
         
@@ -528,51 +542,121 @@ class CallService {
 
     } catch (error: any) {
       console.error('Error handling call answer:', error);
-      // Don't end the call for SDP errors in this state, as the connection might still work
+      // Don't end the call for SDP errors related to stable state
       if (error && typeof error.toString === 'function' && !error.toString().includes("Failed to set remote answer sdp: Called in wrong state: stable")) {
         this.endCall();
       } else {
         console.log("Ignoring stable state error and attempting to continue the call");
-        // Try to continue with the call despite the error
-        const currentTime = Date.now();
-        if (this.callState.status !== CallStatus.CONNECTED) {
-          this.callState = {
-            ...this.callState,
-            status: CallStatus.CONNECTED,
-            callStartTime: currentTime,
-          };
-          this.emitCallStateChange();
-          this.emitEvent('call-connected', { timestamp: currentTime });
-        }
+        // Connection is likely already established, just continue
       }
     }
   }
+
+  // Handle state sync from remote peer
+  private handleStateSync = (data: any) => {
+    try {
+      const {
+        status,
+        callStartTime,
+        callDuration,
+        isVideoEnabled,
+        isAudioEnabled,
+        timestamp
+      } = data;
+
+      // Only accept updates that are newer than our last sync
+      if (timestamp <= this.lastSyncAttempt) {
+        console.log('Ignoring outdated state sync');
+        return;
+      }
+
+      // Update our state with remote values
+      const newState = {
+        ...this.callState,
+        status,
+        isVideoEnabled,
+        isAudioEnabled
+      };
+
+      // Use the earlier start time between local and remote
+      if (callStartTime && (!this.callState.callStartTime || callStartTime < this.callState.callStartTime)) {
+        newState.callStartTime = callStartTime;
+        newState.callDuration = callDuration;
+      }
+
+      this.callState = newState;
+      this.emitCallStateChange();
+      
+      // Reset sync retry count since we got an update
+      this.syncRetryCount = 0;
+    } catch (error) {
+      console.error('Error handling state sync:', error);
+    }
+  };
 
   // Handle ICE candidate from remote peer
   private handleIceCandidate = async (data: any) => {
     try {
       if (!this.pc || this.callState.status === CallStatus.IDLE) {
+        console.log('Cannot handle ICE candidate: no connection or idle state');
         return;
       }
 
       const { candidate, sdpMid, sdpMLineIndex } = data;
       
       if (candidate) {
-        const iceCandidate = new RTCIceCandidate({
-          candidate,
-          sdpMid,
-          sdpMLineIndex
+        // Log candidate information for network debugging
+        console.log('Processing ICE candidate:', {
+          type: candidate.includes('typ relay') ? 'relay' :
+                candidate.includes('typ srflx') ? 'srflx' :
+                candidate.includes('typ host') ? 'host' : 'unknown',
+          protocol: candidate.includes('udp') ? 'UDP' : 
+                   candidate.includes('tcp') ? 'TCP' : 'unknown',
+          address: candidate.match(/(?:\d{1,3}\.){3}\d{1,3}/)?.at(0) || 'unknown'
         });
-        
-        await this.pc.addIceCandidate(iceCandidate);
+
+        // If remote description isn't set yet, queue the candidate
+        if (!this.pc.remoteDescription) {
+          console.log('Remote description not set, queueing ICE candidate');
+          setTimeout(async () => {
+            if (this.pc && this.pc.remoteDescription) {
+              try {
+                const iceCandidate = new RTCIceCandidate({
+                  candidate,
+                  sdpMid,
+                  sdpMLineIndex
+                });
+                await this.pc.addIceCandidate(iceCandidate);
+                console.log('Added queued ICE candidate successfully');
+              } catch (error) {
+                console.error('Error adding queued ICE candidate:', error);
+              }
+            }
+          }, 1000);
+          return;
+        }
+
+        // Add the candidate immediately if we're ready
+        try {
+          const iceCandidate = new RTCIceCandidate({
+            candidate,
+            sdpMid,
+            sdpMLineIndex
+          });
+          
+          await this.pc.addIceCandidate(iceCandidate);
+          console.log('Added ICE candidate successfully');
+        } catch (error) {
+          console.error('Error adding ICE candidate:', error);
+        }
       }
     } catch (error) {
       console.error('Error handling ICE candidate:', error);
     }
-  }
+  };
 
   // Handle call end from remote peer
-  private handleCallEnd = () => {
+   handleCallEnd = () => {
     if (this.callState.status === CallStatus.IDLE) {
       return;
     }
@@ -581,18 +665,151 @@ class CallService {
     this.endCall();
   }
 
+  // Start tracking call duration with local fallback
+  private startDurationTracking(): void {
+    console.log('Starting duration tracking. Current state:', {
+      status: this.callState.status,
+      startTime: this.callState.callStartTime,
+      currentDuration: this.callState.callDuration
+    });
+    
+    // Clear any existing timer
+    if (this.durationTimer) {
+      console.log('Clearing existing timer');
+      clearInterval(this.durationTimer);
+      this.durationTimer = null;
+    }
+
+    // Ensure we have a valid start time
+    const now = Date.now();
+    if (!this.callState.callStartTime || this.callState.callStartTime > now) {
+      console.log('Invalid or missing start time, initializing with current time');
+      this.callState = {
+        ...this.callState,
+        callStartTime: now,
+        callDuration: 0
+      };
+      
+      // Store locally as fallback
+      try {
+        AsyncStorage.setItem('lastCallStartTime', now.toString());
+      } catch (error) {
+        console.error('Failed to save call start time to storage:', error);
+      }
+    } else {
+      // Verify stored time matches or use as fallback
+      AsyncStorage.getItem('lastCallStartTime')
+        .then(storedTime => {
+          if (storedTime) {
+            const parsedTime = parseInt(storedTime, 10);
+            if (!isNaN(parsedTime)) {
+              // If stored time is earlier, use it as the true start time
+              const currentStartTime = this.callState.callStartTime;
+              if (currentStartTime && parsedTime < currentStartTime) {
+                console.log('Using stored start time as it predates current time');
+                this.callState = {
+                  ...this.callState,
+                  callStartTime: parsedTime,
+                };
+                this.emitCallStateChange();
+              }
+            }
+          }
+        })
+        .catch(error => {
+          console.error('Error reading stored call start time:', error);
+        });
+    }
+
+    // Initialize duration immediately using the most accurate start time
+    // Initialize duration with null check
+    if (this.callState.callStartTime) {
+      const initialDuration = Math.floor((Date.now() - this.callState.callStartTime) / 1000);
+      this.callState = {
+        ...this.callState,
+        callDuration: initialDuration
+      };
+      this.emitCallStateChange();
+      console.log('Initial duration set to:', initialDuration, 'seconds');
+    }
+
+    // Start a new timer with drift compensation
+    let lastUpdate = Date.now();
+    this.durationTimer = setInterval(() => {
+      const now = Date.now();
+      const actualInterval = now - lastUpdate;
+      
+      // Compensate for timer drift
+      if (Math.abs(actualInterval - 1000) > 100) {
+        console.log('Timer drift detected:', actualInterval - 1000, 'ms');
+      }
+      
+      if (this.callState.callStartTime) {
+        const currentDuration = Math.floor((now - this.callState.callStartTime) / 1000);
+        if (currentDuration !== this.callState.callDuration) {
+          this.callState = {
+            ...this.callState,
+            callDuration: currentDuration
+          };
+          this.emitCallStateChange();
+        }
+      } else {
+        // Try to recover from AsyncStorage if we lost the start time
+        AsyncStorage.getItem('lastCallStartTime')
+          .then(storedTime => {
+            if (storedTime) {
+              const parsedTime = parseInt(storedTime, 10);
+              if (!isNaN(parsedTime)) {
+                console.log('Recovered call start time from storage');
+                this.callState = {
+                  ...this.callState,
+                  callStartTime: parsedTime,
+                  callDuration: Math.floor((now - parsedTime) / 1000)
+                };
+                this.emitCallStateChange();
+              } else {
+                this.clearDurationTimer();
+              }
+            } else {
+              this.clearDurationTimer();
+            }
+          })
+          .catch(error => {
+            console.error('Failed to recover call start time:', error);
+            this.clearDurationTimer();
+          });
+      }
+      
+      lastUpdate = now;
+    }, 1000);
+  }
+
   // End the current call
   public endCall(): void {
     console.log("Ending call with state:", this.callState.status);
     
+    // Stop duration tracking
+    if (this.durationTimer) {
+      clearInterval(this.durationTimer);
+      this.durationTimer = null;
+    }
+    
     // Send call end to remote user if we're in a call
     if (this.callState.status !== CallStatus.IDLE && this.callState.remoteUserId) {
       try {
+        // Calculate final duration
+        const finalDuration = this.callState.callStartTime 
+          ? Math.floor((Date.now() - this.callState.callStartTime) / 1000)
+          : this.callState.callDuration;
+
         socketService.getSocket()?.emit('call-end', {
           targetUserId: this.callState.remoteUserId,
-          callHistoryId: this.callState.callHistoryId
+          callHistoryId: this.callState.callHistoryId,
+          duration: finalDuration
         });
-        console.log("Sent call-end signal to:", this.callState.remoteUserId, "with callHistoryId:", this.callState.callHistoryId);
+        console.log("Sent call-end signal to:", this.callState.remoteUserId, 
+                    "with callHistoryId:", this.callState.callHistoryId,
+                    "duration:", finalDuration);
       } catch (error) {
         console.error("Error sending call-end signal:", error);
       }
@@ -666,6 +883,13 @@ class CallService {
 
   // Reset call state to idle
   private resetCallState(): void {
+    // Stop duration tracking
+    if (this.durationTimer) {
+      clearInterval(this.durationTimer);
+      this.durationTimer = null;
+    }
+
+    // Reset state
     this.callState = { ...initialCallState };
     this.emitCallStateChange();
   }
@@ -694,20 +918,52 @@ class CallService {
 
       try {
         // Get local media stream
-        const mediaConstraints = {
-          audio: options.audio !== false, // Default to true
+        const mediaConstraints: any = {
+          audio: options.audio === false ? false : {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+            sampleRate: 48000,
+            sampleSize: 16
+          },
           video: options.video || false
         };
         
         console.log('Requesting media with constraints:', mediaConstraints);
         this.localStream = await mediaDevices.getUserMedia(mediaConstraints);
         console.log('Media stream obtained successfully');
+        
+        // Verify audio tracks
+        const audioTracks = this.localStream.getAudioTracks();
+        console.log('Audio tracks obtained:', audioTracks.length);
+        audioTracks.forEach(track => {
+          console.log('Audio track:', track.id, 'enabled:', track.enabled, 'muted:', track.muted);
+          // Ensure track is enabled
+          track.enabled = true;
+        });
 
         // Add local tracks to peer connection
         this.localStream.getTracks().forEach((track) => {
-          console.log('Adding track to peer connection:', track.kind, track.id);
+          console.log('Adding track to peer connection:', track.kind, track.id, 'enabled:', track.enabled);
+          
+          // Ensure audio track is enabled
+          if (track.kind === 'audio') {
+            track.enabled = true;
+            console.log('Ensuring audio track is enabled');
+          }
+          
           if (this.pc && this.localStream) {
-            this.pc.addTrack(track, this.localStream);
+            // Check if track is already added
+            const senders = this.pc.getSenders();
+            const existingSender = senders.find(sender => sender.track?.id === track.id);
+            
+            if (!existingSender) {
+              this.pc.addTrack(track, this.localStream);
+              console.log('Added track to peer connection');
+            } else {
+              console.log('Track already exists in peer connection');
+            }
           }
         });
 
@@ -717,93 +973,210 @@ class CallService {
 
         // Handle incoming tracks with type assertion for TypeScript
         (this.pc as any).ontrack = (event: any) => {
-          console.log('Received remote track:', event.track.kind, event.track.id);
-          if (event.streams && event.streams.length > 0) {
-            event.streams[0].getTracks().forEach((track: any) => {
-              if (this.remoteStream) {
-                this.remoteStream.addTrack(track);
-                console.log('Added remote track to remote stream:', track.kind);
+          console.log('Received remote track:', event.track.kind, event.track.id, 'enabled:', event.track.enabled);
+          
+          // Ensure track is enabled and unmuted
+          event.track.enabled = true;
+          if (event.track.kind === 'audio') {
+            event.track.enabled = true;
+            console.log('Ensuring remote audio track is enabled:', event.track.id);
+            // Try to set audio output to speaker
+            try {
+              const audioEl = new Audio();
+              if (typeof audioEl.setSinkId === 'function') {
+                audioEl.setSinkId('default').then(() => {
+                  console.log('Set audio output to system default');
+                }).catch(err => {
+                  console.warn('Could not set audio output:', err);
+                });
               }
+            } catch (err) {
+              console.warn('Audio output device selection not supported');
+            }
+          }
+          
+          if (event.streams && event.streams.length > 0) {
+            // Get the remote stream from the event
+            const remoteStream = event.streams[0];
+            console.log('Remote stream tracks before adding:', this.remoteStream?.getTracks().length || 0);
+            
+            // Create new MediaStream if it doesn't exist
+            if (!this.remoteStream) {
+              this.remoteStream = new MediaStream();
+              console.log('Created new remote MediaStream');
+            }
+            
+            // Check if track already exists
+            const existingTrack = this.remoteStream.getTracks().find(
+              (t: any) => t.id === event.track.id
+            );
+            
+            if (!existingTrack) {
+              this.remoteStream.addTrack(event.track);
+              console.log('Added new remote track:', event.track.kind, 'enabled:', event.track.enabled);
+            } else {
+              console.log('Track already exists:', event.track.kind);
+            }
+            
+            // Log all tracks for debugging
+            this.remoteStream.getTracks().forEach((track: any) => {
+              console.log('Current remote track:', track.kind, 'enabled:', track.enabled);
             });
+            
             this.emitEvent('remote-stream-updated', this.remoteStream);
+          } else {
+            console.warn('Received track without stream');
           }
         };
 
-        // Handle ICE candidates with type assertion for TypeScript
+        // Enhanced ICE candidate handling with retry logic
         (this.pc as any).onicecandidate = (event: any) => {
           if (event.candidate) {
-            console.log('Generated ICE candidate for', this.callState.remoteUserId);
-            socketService.getSocket()?.emit('call-ice-candidate', {
-              targetUserId: this.callState.remoteUserId,
-              candidate: event.candidate.candidate,
-              sdpMid: event.candidate.sdpMid,
-              sdpMLineIndex: event.candidate.sdpMLineIndex
+            console.log('Generated ICE candidate:', {
+              type: event.candidate.type,
+              protocol: event.candidate.protocol,
+              address: event.candidate.address,
+              port: event.candidate.port
             });
+
+            const sendCandidate = (retryCount = 0) => {
+              if (!this.pc || this.callState.status === CallStatus.ENDED) {
+                console.log('Call ended, not sending ICE candidate');
+                return;
+              }
+
+              const socket = socketService.getSocket();
+              if (!socket?.connected) {
+                if (retryCount < 3) {
+                  console.log('Socket not connected, retrying ICE candidate send in 1s');
+                  setTimeout(() => sendCandidate(retryCount + 1), 1000);
+                  return;
+                }
+                console.error('Failed to send ICE candidate after retries - socket not connected');
+                return;
+              }
+
+              socket.emit('call-ice-candidate', {
+                targetUserId: this.callState.remoteUserId,
+                candidate: event.candidate.candidate,
+                sdpMid: event.candidate.sdpMid,
+                sdpMLineIndex: event.candidate.sdpMLineIndex
+              }, (acknowledgement: any) => {
+                if (!acknowledgement?.received) {
+                  if (retryCount < 3) {
+                    console.log('ICE candidate not acknowledged, retrying');
+                    setTimeout(() => sendCandidate(retryCount + 1), 1000);
+                  } else {
+                    console.error('Failed to send ICE candidate after retries');
+                  }
+                } else {
+                  console.log('ICE candidate acknowledged by server');
+                }
+              });
+            };
+
+            // Start sending with retry logic
+            sendCandidate();
           } else {
-            console.log('All ICE candidates gathered');
+            console.log('Finished gathering ICE candidates');
           }
         };
 
         // Handle connection state changes with type assertion for TypeScript
         (this.pc as any).onconnectionstatechange = () => {
-          console.log('Connection state changed to:', this.pc?.connectionState);
+          if (!this.pc) return;
           
-          if (this.pc?.connectionState === 'connected') {
-            console.log('WebRTC connection established successfully!');
-            
-            // Update call state if not already connected
-            if (this.callState.status !== CallStatus.CONNECTED) {
-              console.log("Updating call state to CONNECTED");
+          const connectionState = this.pc.connectionState;
+          console.log('Connection state changed to:', connectionState);
+          
+          switch (connectionState) {
+            case 'connected':
+              console.log('WebRTC connection established successfully!');
+              
+              // Update call state to CONNECTED when connection is actually established
+              if (this.callState.status === CallStatus.CALLING || 
+                  this.callState.status === CallStatus.RINGING ||
+                  this.callState.status === CallStatus.RECONNECTING) {
+                console.log("Updating call state to CONNECTED");
+                
+                // Use stored call start time or create one if not available
+                const startTime = this.callState.callStartTime || Date.now();
+                
+                this.callState = {
+                  ...this.callState,
+                  status: CallStatus.CONNECTED,
+                  callStartTime: startTime,
+                  callDuration: 0
+                };
+                
+                // Start duration tracking now that connection is established
+                console.log('Starting duration tracking on connection with start time:', startTime);
+                this.startDurationTracking();
+                
+                this.emitCallStateChange();
+                
+                // Notify about connection for timer sync
+                this.emitEvent('call-connected', {
+                  remoteUserId: this.callState.remoteUserId,
+                  timestamp: startTime
+                });
+              }
+              break;
+
+            case 'disconnected':
+              console.log('WebRTC connection temporarily disconnected');
               this.callState = {
                 ...this.callState,
-                status: CallStatus.CONNECTED,
-                callStartTime: this.callState.callStartTime || Date.now()
+                status: CallStatus.RECONNECTING
+              };
+              this.emitCallStateChange();
+              break;
+
+            case 'failed':
+              console.log('WebRTC connection failed - attempting restart');
+              this.callState = {
+                ...this.callState,
+                status: CallStatus.RECONNECTING
               };
               this.emitCallStateChange();
               
-              // Notify about connection - this is important for the timer on both sides
-              this.emitEvent('call-connected', {
-                remoteUserId: this.callState.remoteUserId,
-                timestamp: Date.now()
-              });
-            }
-          } else if (this.pc?.connectionState === 'disconnected' || 
-                    this.pc?.connectionState === 'failed' ||
-                    this.pc?.connectionState === 'closed') {
-            console.log('WebRTC connection ended:', this.pc?.connectionState);
-            // Don't immediately end the call - let the ICE connection handler manage reconnection
-            if (this.pc?.connectionState === 'closed') {
-              this.endCall();
-            } else if (this.pc?.connectionState === 'failed') {
-              // Connection failed - try one last restart
-              console.log("Connection failed - attempting last restart...");
               setTimeout(() => {
                 if (this.pc && this.pc.connectionState === 'failed') {
                   try {
-                    (this.pc as any).restartIce?.();
-                    console.log("Attempted restart for failed connection");
+                    this.pc.restartIce();
+                    console.log('Attempted ICE restart for failed connection');
                     
-                    // Set a timeout to end the call if reconnection fails
                     setTimeout(() => {
                       if (this.pc?.connectionState !== 'connected') {
-                        console.log("Failed to reconnect after timeout - ending call");
+                        console.log('Failed to reconnect after timeout - ending call');
                         this.endCall();
                       }
                     }, 8000);
                   } catch (err) {
-                    console.error("Error restarting failed connection:", err);
+                    console.error('Error restarting failed connection:', err);
                     this.endCall();
                   }
                 }
               }, 1000);
-            }
-          } else if (this.pc?.connectionState === 'connecting') {
-            console.log('WebRTC connection is connecting...');
-            this.callState = {
-              ...this.callState,
-              status: CallStatus.RECONNECTING
-            };
-            this.emitCallStateChange();
+              break;
+
+            case 'closed':
+              console.log('WebRTC connection closed');
+              this.endCall();
+              break;
+            
+            case 'connecting':
+              console.log('WebRTC connection in progress...');
+              this.callState = {
+                ...this.callState,
+                status: CallStatus.RECONNECTING
+              };
+              this.emitCallStateChange();
+              break;
+              
+            default:
+              console.log('Unhandled WebRTC connection state:', connectionState);
+              break;
           }
         };
 
@@ -960,9 +1333,136 @@ class CallService {
     }
   }
 
-  // Emit call state change event
+  // Emit call state change event and persist state
   private emitCallStateChange(): void {
     this.emitEvent('call-state-changed', { ...this.callState });
+    this.persistCallState();
+  }
+
+  // Persist call state to AsyncStorage
+  private async persistCallState(): Promise<void> {
+    try {
+      const stateToStore = {
+        ...this.callState,
+        lastUpdated: Date.now()
+      };
+      await AsyncStorage.setItem('callState', JSON.stringify(stateToStore));
+      // Only log for important state changes, not every duration update
+      if (this.callState.status !== 'connected' || !this.callState.callStartTime) {
+        console.log('Call state persisted:', this.callState.status);
+      }
+    } catch (error) {
+      console.error('Failed to persist call state:', error);
+    }
+  }
+
+  // Load persisted call state from AsyncStorage
+  private async loadPersistedCallState(): Promise<void> {
+    try {
+      const storedState = await AsyncStorage.getItem('callState');
+      if (storedState) {
+        const parsedState = JSON.parse(storedState);
+        const lastUpdated = parsedState.lastUpdated || 0;
+        const now = Date.now();
+        
+        // Only restore state if it's recent (within last 5 minutes) and we're not in an active call
+        if (now - lastUpdated < 300000 && this.callState.status === CallStatus.IDLE) {
+          delete parsedState.lastUpdated;
+          this.callState = {
+            ...parsedState,
+            // Ensure we don't restore ended calls
+            status: parsedState.status === CallStatus.ENDED ? CallStatus.IDLE : parsedState.status
+          };
+          console.log('Restored persisted call state:', this.callState);
+          this.emitCallStateChange();
+          
+          // If we restored an active call state, start sync
+          if (this.callState.status !== CallStatus.IDLE) {
+            this.startStateSync();
+          }
+        } else {
+          console.log('Persisted state too old or call active, not restoring');
+          await AsyncStorage.removeItem('callState');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load persisted call state:', error);
+    }
+  }
+
+  // Start state synchronization
+  private startStateSync(): void {
+    if (this.syncTimer) {
+      clearInterval(this.syncTimer);
+    }
+
+    this.lastSyncAttempt = Date.now();
+    this.syncRetryCount = 0;
+
+    this.syncTimer = setInterval(() => {
+      this.syncCallState();
+    }, this.syncInterval);
+
+    // Initial sync
+    this.syncCallState();
+  }
+
+  // Stop state synchronization
+  private stopStateSync(): void {
+    if (this.syncTimer) {
+      clearInterval(this.syncTimer);
+      this.syncTimer = null;
+    }
+    this.syncRetryCount = 0;
+  }
+
+  // Synchronize call state with server
+  private async syncCallState(): Promise<void> {
+    if (this.callState.status === CallStatus.IDLE || 
+        this.callState.status === CallStatus.ENDED) {
+      this.stopStateSync();
+      return;
+    }
+
+    // Don't sync too frequently
+    const now = Date.now();
+    if (now - this.lastSyncAttempt < 2000) {
+      return;
+    }
+
+    this.lastSyncAttempt = now;
+
+    try {
+      // Send state update to remote peer through socket
+      socketService.getSocket()?.emit('call-state-sync', {
+        targetUserId: this.callState.remoteUserId,
+        callHistoryId: this.callState.callHistoryId,
+        status: this.callState.status,
+        callStartTime: this.callState.callStartTime,
+        callDuration: this.callState.callDuration,
+        isVideoEnabled: this.callState.isVideoEnabled,
+        isAudioEnabled: this.callState.isAudioEnabled,
+        timestamp: now
+      });
+
+      // Reset retry count on successful sync
+      this.syncRetryCount = 0;
+    } catch (error) {
+      console.error('Failed to sync call state:', error);
+      this.syncRetryCount++;
+
+      if (this.syncRetryCount >= this.MAX_SYNC_RETRIES) {
+        console.log('Max sync retries reached, falling back to local state');
+        // Keep the call alive but mark as potentially disconnected
+        if (this.callState.status === CallStatus.CONNECTED) {
+          this.callState = {
+            ...this.callState,
+            status: CallStatus.RECONNECTING
+          };
+          this.emitCallStateChange();
+        }
+      }
+    }
   }
 
   // Handle ICE connection state changes
@@ -1038,20 +1538,27 @@ class CallService {
   private handleCallConnected = (data: any) => {
     console.log("Call connected event received:", data);
     
-    // Only update if we're not already connected
-    if (this.callState.status !== CallStatus.CONNECTED as CallStatus) {
-      console.log("Setting call state to CONNECTED from event");
-      
-      // Use the timestamp from the event if available, otherwise use current time
-      const callStartTime = data?.timestamp || Date.now();
-      console.log("Setting synchronized call start time to:", callStartTime);
-      
+    // Use the timestamp from the event if available, otherwise use current time
+    const callStartTime = data?.timestamp || Date.now();
+    console.log("Setting synchronized call start time to:", callStartTime);
+    
+    // Update the call state with synchronized time
+    if (this.callState.status === CallStatus.CALLING || 
+        this.callState.status === CallStatus.RINGING) {
       this.callState = {
         ...this.callState,
         status: CallStatus.CONNECTED,
-        callStartTime: callStartTime
+        callStartTime: callStartTime,
+        callDuration: 0
       };
+      
+      // Start or restart duration tracking with synchronized time
+      this.startDurationTracking();
+      
       this.emitCallStateChange();
+      console.log("Call state updated with synchronized time");
+    } else {
+      console.log("Ignoring call connected event in current state:", this.callState.status);
     }
   }
 
@@ -1108,7 +1615,9 @@ class CallService {
     }
     
     // Send video upgrade request via socket
-    socketService.requestVideoUpgrade(this.callState.remoteUserId);
+    socketService.getSocket()?.emit('video-upgrade-request', {
+      targetUserId: this.callState.remoteUserId
+    });
     
     // Notify UI about pending request
     this.emitEvent('video-upgrade-requested', { userId: this.callState.remoteUserId });
@@ -1130,7 +1639,9 @@ class CallService {
     }
     
     // Send acceptance via socket first, so remote side can start showing UI immediately
-    socketService.acceptVideoUpgrade(this.callState.remoteUserId);
+    socketService.getSocket()?.emit('video-upgrade-accepted', {
+      targetUserId: this.callState.remoteUserId
+    });
     
     // Check if we already have a local video track before enabling video
     const existingVideoTracks = this.localStream?.getVideoTracks() || [];
@@ -1171,7 +1682,9 @@ class CallService {
     if (!this.callState.remoteUserId) return;
     
     // Send rejection via socket
-    socketService.rejectVideoUpgrade(this.callState.remoteUserId);
+    socketService.getSocket()?.emit('video-upgrade-rejected', {
+      targetUserId: this.callState.remoteUserId
+    });
   }
 
   // Enable video without toggling (for upgrade flow)

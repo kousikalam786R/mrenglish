@@ -26,6 +26,8 @@ import RankingScreen from '../screens/RankingScreen';
 import ContactsScreen from '../screens/ContactsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
+import PostCallFeedbackScreen from '../screens/PostCallFeedbackScreen';
+import PostCallFlowScreen from '../screens/PostCallFlowScreen';
 import ChatDetailScreen from '../screens/ChatDetailScreen';
 import CallScreen from '../screens/CallScreen';
 import AICallScreen from '../screens/AICallScreen';
@@ -362,6 +364,24 @@ const RootNavigator = () => {
             <Stack.Screen 
               name="EditProfile" 
               component={EditProfileScreen} 
+              options={{
+                headerShown: false,
+                presentation: 'modal',
+                animation: 'slide_from_bottom'
+              }}
+            />
+            <Stack.Screen 
+              name="PostCallFeedback" 
+              component={PostCallFeedbackScreen} 
+              options={{
+                headerShown: false,
+                presentation: 'modal',
+                animation: 'slide_from_bottom'
+              }}
+            />
+            <Stack.Screen 
+              name="PostCallFlow" 
+              component={PostCallFlowScreen} 
               options={{
                 headerShown: false,
                 presentation: 'modal',

@@ -18,8 +18,10 @@ export type AppStackParamList = {
   Ranking: undefined;
   Contacts: undefined;
   Profile: undefined;
-  EditProfile: { userData: any };
+  EditProfile: undefined;
   UserProfile: { userId: string; userName: string };
+  PostCallFeedback: { userId: string; userName: string; userAvatar?: string; callDuration?: number; interactionId?: string };
+  PostCallFlow: { userId: string; userName: string; userAvatar?: string; callDuration?: number; interactionId?: string };
   AIChat: { conversationId?: string; topic?: string; level?: string; isVoiceChat?: boolean };
   VoiceChat: { conversationId?: string; topic?: string; level?: string };
   AIConversations: undefined;

@@ -29,6 +29,7 @@ import {
 } from '../redux/thunks/callThunks';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Toast from 'react-native-toast-message';
+import apiClient from '../utils/apiClient';
 
 const CallScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -48,6 +49,7 @@ const CallScreen = () => {
   
   // Local state
   const [callDuration, setCallDuration] = useState(0);
+  const [serverStartTime, setServerStartTime] = useState<Date | null>(null);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [localStream, setLocalStream] = useState<any>(null);
@@ -75,15 +77,86 @@ const CallScreen = () => {
   
   // Initialize call status when the component mounts
   useEffect(() => {
+    const syncCallStatus = async () => {
+      try {
+        // Check if we have a local call start time first
+        const currentCallState = callService.getCallState();
+        if (currentCallState.callStartTime) {
+          console.log('Using local call start time:', currentCallState.callStartTime);
+          const currentDuration = Math.floor((Date.now() - currentCallState.callStartTime) / 1000);
+          setCallDuration(currentDuration);
+          
+          // Start a timer with local time
+          if (durationTimerRef.current) {
+            clearInterval(durationTimerRef.current);
+          }
+          
+          durationTimerRef.current = setInterval(() => {
+            const updatedDuration = Math.floor((Date.now() - (currentCallState.callStartTime || Date.now())) / 1000);
+            setCallDuration(updatedDuration);
+          }, 1000);
+          
+          return; // Skip server sync if we have local time
+        }
+
+        // If no local time, try server sync
+        console.log('Syncing call status with server for call ID:', id);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+        
+        try {
+          const response = await fetch(`/api/calls/${id}/details`, {
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          
+          const callDetails = await response.json();
+          console.log('Received call details from server:', callDetails);
+          
+          if (callDetails?.status === 'answered' && callDetails.startTime) {
+            const serverStartTime = new Date(callDetails.startTime);
+            console.log('Setting server start time:', serverStartTime);
+            setServerStartTime(serverStartTime);
+            
+            const currentDuration = Math.floor((Date.now() - serverStartTime.getTime()) / 1000);
+            console.log('Setting initial duration to:', currentDuration, 'seconds');
+            setCallDuration(currentDuration);
+            
+            if (durationTimerRef.current) {
+              clearInterval(durationTimerRef.current);
+            }
+            
+            durationTimerRef.current = setInterval(() => {
+              const updatedDuration = Math.floor((Date.now() - serverStartTime.getTime()) / 1000);
+              setCallDuration(updatedDuration);
+            }, 1000);
+          }
+        } catch (fetchError) {
+          console.log('Server sync failed, using local timing:', fetchError);
+          // Just continue with local timing
+        }
+      } catch (error) {
+        console.error('Error in syncCallStatus:', error);
+        // Continue with local timing
+      }
+    };
+
     // Get the current call state directly from the service
     const currentCallState = callService.getCallState();
+    console.log('Current call state:', currentCallState);
     
-    // If we're already connected, initialize the timer
-    if (currentCallState.status === CallStatus.CONNECTED && currentCallState.callStartTime) {
-      const currentDuration = Math.floor((Date.now() - currentCallState.callStartTime) / 1000);
-      setCallDuration(currentDuration);
+    // If we're already connected, initialize the timer and sync with server
+    if (currentCallState.status === CallStatus.CONNECTED) {
+      syncCallStatus();
     }
-  }, []);
+    
+    // Clean up timer on unmount
+    return () => {
+      if (durationTimerRef.current) {
+        clearInterval(durationTimerRef.current);
+      }
+    };
+  }, [id]);
   
   // Set up event listeners when the component mounts
   useEffect(() => {
@@ -99,17 +172,74 @@ const CallScreen = () => {
     };
     
     const handleCallEnded = (data: any) => {
-      console.log('Call ended', data);
+      console.log('Call ended event data:', data);
+      console.log('Current callDuration state:', callDuration);
+      console.log('Current callState:', callState);
+      
+      // Get the latest call state directly from callService before it's reset
+      const serviceCallState = callService.getCallState();
+      console.log('Service call state:', serviceCallState);
+      
+      // Capture call state values IMMEDIATELY before they get reset
+      const capturedUserId = callState.remoteUserId || serviceCallState.remoteUserId;
+      const capturedUserName = callState.remoteUserName || serviceCallState.remoteUserName;
+      const capturedCallHistoryId = callState.callHistoryId || serviceCallState.callHistoryId;
+      
+      // Calculate final duration from callStartTime if available
+      let finalDuration = 0;
+      if (serviceCallState.callStartTime) {
+        finalDuration = Math.floor((Date.now() - serviceCallState.callStartTime) / 1000);
+        console.log('Calculated duration from callStartTime:', finalDuration);
+      }
+      
+      // Try to get duration from multiple sources (use calculated first)
+      const capturedDuration = finalDuration ||          // Calculated from callStartTime
+                               data?.duration ||         // From event data
+                               callDuration ||           // From local state
+                               serviceCallState.callDuration || // From service
+                               callState.callDuration || // From Redux
+                               0;
+      
+      console.log('Captured call data:', {
+        userId: capturedUserId,
+        userName: capturedUserName,
+        duration: capturedDuration,
+        durationSources: {
+          calculated: finalDuration,
+          fromEvent: data?.duration,
+          fromLocal: callDuration,
+          fromService: serviceCallState.callDuration,
+          fromRedux: callState.callDuration
+        },
+        callHistoryId: capturedCallHistoryId
+      });
       
       // Use a small delay before navigating back to avoid state conflicts
       setTimeout(() => {
         try {
-          // First check if we can go back to prevent the GO_BACK error
-          if (navigation.canGoBack()) {
-            navigation.goBack();
+          // Use captured values instead of callState (which gets reset)
+          if (capturedUserId && capturedUserName && capturedDuration > 10) {
+            console.log('Navigating to PostCallFlow with duration:', capturedDuration);
+            navigation.navigate('PostCallFlow' as any, {
+              userId: capturedUserId,
+              userName: capturedUserName,
+              userAvatar: undefined, // Not available in CallState
+              callDuration: capturedDuration,
+              interactionId: capturedCallHistoryId || 'unknown'
+            });
           } else {
-            // If we can't go back, try to navigate to the main screen instead
-            navigation.navigate('Main');
+            console.log('Not showing feedback - conditions not met:', {
+              hasUserId: !!capturedUserId,
+              hasUserName: !!capturedUserName,
+              duration: capturedDuration,
+              durationCheck: capturedDuration > 10
+            });
+            if (navigation.canGoBack()) {
+              navigation.goBack();
+            } else {
+              // If we can't go back, try to navigate to the main screen instead
+              navigation.navigate('Main');
+            }
           }
         } catch (error) {
           console.error('Navigation error after call ended:', error);
@@ -123,15 +253,45 @@ const CallScreen = () => {
     };
     
     // Define handler for call state changes
-    const handleCallStateChanged = (state: any) => {
+    const handleCallStateChanged = async (state: any) => {
       console.log('Call state changed:', state);
       
-      // If connected, ensure timer is running and start time is set
-      if (state.status === CallStatus.CONNECTED && state.callStartTime) {
-        // Calculate current duration since start time
-        const currentDuration = Math.floor((Date.now() - state.callStartTime) / 1000);
-        console.log('Setting call duration to:', currentDuration, 'seconds from start time:', state.callStartTime);
-        setCallDuration(currentDuration);
+      // If connected, use local time for duration tracking
+      // Server sync is optional and will fallback to local time on error
+      if (state.status === CallStatus.CONNECTED) {
+        // Always use local time first
+        if (state.callStartTime) {
+          const currentDuration = Math.floor((Date.now() - state.callStartTime) / 1000);
+          console.log('Setting duration from local time:', currentDuration);
+          setCallDuration(currentDuration);
+        }
+        
+        // Try to sync with server in background (non-critical)
+        // Use callHistoryId from call state, not the user id from route params
+        const callHistoryId = state.callHistoryId;
+        if (callHistoryId && callHistoryId !== 'unknown') {
+          try {
+            const callDetails = await apiClient.get(`/calls/details/${callHistoryId}`);
+            
+            if (callDetails.data && callDetails.data.startTime) {
+              const serverStartTime = new Date(callDetails.data.startTime);
+              console.log('Got server start time for verification:', serverStartTime);
+              setServerStartTime(serverStartTime);
+              
+              // Update duration based on server time if available
+              const serverDuration = Math.floor((Date.now() - serverStartTime.getTime()) / 1000);
+              console.log('Server duration:', serverDuration, 'vs local duration:', callDuration);
+              
+              // Only update if server time is reasonable (within 10 seconds of local)
+              if (Math.abs(serverDuration - callDuration) < 10) {
+                setCallDuration(serverDuration);
+              }
+            }
+          } catch (error: any) {
+            // Server sync is not critical, just log the error
+            console.log('Could not sync with server (using local time):', error.response?.status || error.message);
+          }
+        }
       }
     };
     
@@ -142,11 +302,24 @@ const CallScreen = () => {
     callService.addEventListener('call-state-changed', handleCallStateChanged);
     
     // Start a timer to update call duration
+    if (durationTimerRef.current) {
+      clearInterval(durationTimerRef.current);
+    }
+    
     durationTimerRef.current = setInterval(() => {
-      if (callState.status === CallStatus.CONNECTED && callState.callStartTime) {
-        // Calculate duration based on start time for more accuracy
-        const currentDuration = Math.floor((Date.now() - callState.callStartTime) / 1000);
-        setCallDuration(currentDuration);
+      if (callState.status === CallStatus.CONNECTED) {
+        // Always prefer server start time
+        const startTime = serverStartTime?.getTime();
+        if (startTime) {
+          const currentDuration = Math.floor((Date.now() - startTime) / 1000);
+          console.log('Updating duration to:', currentDuration, 'seconds');
+          setCallDuration(currentDuration);
+        } else if (callState.callStartTime) {
+          // Fallback to local time if server time not available
+          const currentDuration = Math.floor((Date.now() - callState.callStartTime) / 1000);
+          console.log('Using local time, updating duration to:', currentDuration, 'seconds');
+          setCallDuration(currentDuration);
+        }
       }
     }, 1000);
     

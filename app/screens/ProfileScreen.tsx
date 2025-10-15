@@ -10,123 +10,183 @@ import {
   Platform,
   StatusBar,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { UserProfile } from '../utils/profileService';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { useAppSelector, useAppDispatch } from '../redux/hooks';
-import { fetchUserProfile } from '../redux/thunks/userThunks';
-import { setUserData } from '../redux/slices/userSlice';
 import { signOut } from '../redux/thunks/authThunks';
+import apiClient from '../utils/apiClient';
+import Toast from 'react-native-toast-message';
 
 // Define types for better type checking
 interface Activity {
   text: string;
   time: string;
+  timestamp: Date;
 }
 
-// Default interests to use if user doesn't have any
-const DEFAULT_INTERESTS = ['Travel', 'Movies', 'Technology', 'Sports', 'Food'];
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  bio?: string;
+  age?: number;
+  gender?: string;
+  country?: string;
+  nativeLanguage?: string;
+  englishLevel?: string;
+  interests?: string[];
+  profilePic?: string;
+  createdAt: Date;
+  lastLoginAt: Date;
+}
 
-type GetUserProfileResponse = {
-  success: boolean;
-  user: UserProfile;
-};
+interface UserStats {
+  totalCalls: number;
+  totalMinutes: number;
+  totalHours: number;
+  averageCallDuration: number;
+  points: number;
+  streak: number;
+  recentActivity: Activity[];
+  // Rating and feedback stats
+  totalRatings: number;
+  averageRating: number;
+  positiveFeedback: number;
+  negativeFeedback: number;
+  satisfactionPercentage: number;
+}
+
+interface Rating {
+  _id: string;
+  rating: number;
+  comment?: string;
+  ratedBy: {
+    _id: string;
+    name: string;
+    profilePic?: string;
+  };
+  createdAt: string;
+}
+
+interface Feedback {
+  _id: string;
+  feedbackType: 'positive' | 'negative';
+  message?: string;
+  feedbackBy: {
+    _id: string;
+    name: string;
+    profilePic?: string;
+  };
+  createdAt: string;
+}
+
+interface Compliment {
+  _id: string;
+  count: number;
+}
+
+interface Advice {
+  _id: string;
+  count: number;
+}
 
 const ProfileScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [activeTab, setActiveTab] = useState<'stats' | 'about'>('stats');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [stats, setStats] = useState<UserStats | null>(null);
+  const [ratings, setRatings] = useState<Rating[]>([]);
+  const [feedback, setFeedback] = useState<Feedback[]>([]);
+  const [compliments, setCompliments] = useState<Compliment[]>([]);
+  const [advice, setAdvice] = useState<Advice[]>([]);
+  const [complimentsExpanded, setComplimentsExpanded] = useState(false);
+  const [adviceExpanded, setAdviceExpanded] = useState(false);
   
   const dispatch = useAppDispatch();
-  const userData = useAppSelector(state => state.user);
   const { isSignedIn } = useAppSelector(state => state.auth);
   
-  // Debug user data sources
+  // Fetch profile data when screen loads
   useEffect(() => {
-    const debugUserData = async () => {
-      console.log('Redux user data:', userData);
-      
-      try {
-        const cachedUser = await AsyncStorage.getItem('user');
-        console.log('Cached user:', cachedUser ? JSON.parse(cachedUser) : null);
-        
-        const userId = await AsyncStorage.getItem('userId');
-        console.log('User ID from storage:', userId);
-        
-        const token = await AsyncStorage.getItem('token');
-        console.log('Token exists:', !!token);
-      } catch (e) {
-        console.error('Error debugging user data:', e);
-      }
-    };
-    
-    debugUserData();
-  }, [userData]);
-  
-  // Fetch full user profile when screen loads
-  useEffect(() => {
-    fetchUserProfileData();
+    fetchProfileData();
   }, []);
-  
-  const fetchUserProfileData = async () => {
+
+  // Refresh data when screen comes into focus (after submitting feedback)
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('ProfileScreen focused - refreshing data');
+      // Don't show loading spinner when refreshing on focus
+      fetchProfileData(false);
+    }, [])
+  );
+
+  const fetchProfileData = async (showLoading = true) => {
     try {
-      setLoading(true);
-      
-      // Try to load cached user data first for immediate display
-      try {
-        const cachedUser = await AsyncStorage.getItem('user');
-        if (cachedUser) {
-          const userData = JSON.parse(cachedUser);
-          console.log('Loaded user data from cache:', userData.name || 'Unknown');
-          
-          // Immediately update Redux with cached data to show something
-          dispatch(setUserData(userData));
-          
-          // Only show loading if we don't have cached data
-          setLoading(false);
-        }
-      } catch (cacheError) {
-        console.error('Error loading cached user data:', cacheError);
+      if (showLoading) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
       }
       
-      // Fetch fresh data in background
-      console.log('Fetching fresh user profile data from API...');
-      dispatch(fetchUserProfile())
-        .unwrap()
-        .then(data => {
-          console.log('Successfully refreshed user profile');
-        })
-        .catch(error => {
-          console.error('Error fetching user profile:', error);
-          // Show error only if we don't have any cached data
-          if (!userData && error) {
-            Alert.alert(
-              'Connection Error',
-              'Could not load your profile data. Please check your internet connection.',
-              [{ text: 'Retry', onPress: fetchUserProfileData }]
-            );
-          }
-        })
-        .finally(() => {
-          setLoading(false);
+      // First fetch profile to get user ID
+      const profileResponse = await apiClient.get('/profile');
+      
+      if (!profileResponse.data.success) {
+        throw new Error('Failed to fetch profile');
+      }
+      
+      const currentUser = profileResponse.data.user;
+      setUser(currentUser);
+      
+      // Then fetch stats and rating data
+      const [statsResponse, ratingResponse] = await Promise.all([
+        apiClient.get('/profile/stats'),
+        apiClient.get('/ratings/summary/me').catch(() => null)
+      ]);
+
+      if (statsResponse.data.success) {
+        setStats(statsResponse.data.stats);
+      }
+
+      if (ratingResponse?.data?.success) {
+        console.log('Updated compliments:', ratingResponse.data.data.compliments);
+        console.log('Updated advice:', ratingResponse.data.data.advice);
+        setRatings(ratingResponse.data.data.recentRatings || []);
+        setFeedback(ratingResponse.data.data.recentFeedback || []);
+        setCompliments(ratingResponse.data.data.compliments || []);
+        setAdvice(ratingResponse.data.data.advice || []);
+      }
+    } catch (error: any) {
+      console.error('Error fetching profile data:', error);
+      if (showLoading) {
+        Toast.show({
+          type: 'error',
+          text1: 'Error loading profile',
+          text2: error.response?.data?.message || 'Please try again later'
         });
-    } catch (error) {
-      console.error('Error in profile data loading:', error);
-      setLoading(false);
+      }
+    } finally {
+      if (showLoading) {
+        setLoading(false);
+      } else {
+        setRefreshing(false);
+      }
     }
+  };
+
+  const handleRefresh = () => {
+    fetchProfileData(false);
   };
   
   const handleEditProfile = () => {
     // Navigate to edit profile screen
-    if (userData) {
-      navigation.navigate('EditProfile', { userData });
-    } else {
-      Alert.alert('Error', 'Unable to edit profile. Please try again later.');
-    }
+    navigation.navigate('EditProfile' as any);
   };
   
   const handleLogout = () => {
@@ -147,143 +207,277 @@ const ProfileScreen = () => {
   };
   
   const renderProfileHeader = () => {
-    if (!userData) return null;
+    if (!user) return null;
     
     return (
       <View style={styles.profileHeader}>
-        <Image 
-          source={{ 
-            uri: userData.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg' 
-          }} 
-          style={styles.avatar} 
-        />
-        <Text style={styles.userName}>{userData.name || 'User'}</Text>
-        <View style={styles.levelContainer}>
-          <Text style={styles.levelText}>{userData.level || 'Beginner'}</Text>
+        <View style={styles.profileImageContainer}>
+          <Image 
+            source={{ 
+              uri: user.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg' 
+            }} 
+            style={styles.avatar} 
+          />
+          <View style={styles.levelBadge}>
+            <Text style={styles.levelBadgeText}>{user.englishLevel || 'A2'}</Text>
+          </View>
+          <View style={styles.crownIcon}>
+            <Text style={styles.crownText}>👑</Text>
+          </View>
         </View>
-        <Text style={styles.countryText}>{userData.country || 'Unknown'}</Text>
+        
+        <Text style={styles.userName}>{user.name || 'User'}</Text>
+        
+        {user.bio && (
+          <Text style={styles.bioText}>"{user.bio}"</Text>
+        )}
         
         <TouchableOpacity 
           style={styles.editButton}
           onPress={handleEditProfile}
         >
-          <Text style={styles.editButtonText}>Edit Profile</Text>
+          <Text style={styles.editButtonText}>Edit profile</Text>
         </TouchableOpacity>
       </View>
     );
   };
-  
-  const renderTabs = () => {
-    return (
-      <View style={styles.tabContainer}>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'stats' && styles.activeTab]} 
-          onPress={() => setActiveTab('stats')}
-        >
-          <Text style={[styles.tabText, activeTab === 'stats' && styles.activeTabText]}>Stats</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'about' && styles.activeTab]} 
-          onPress={() => setActiveTab('about')}
-        >
-          <Text style={[styles.tabText, activeTab === 'about' && styles.activeTabText]}>About</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  };
-  
-  const renderStatsContent = () => {
-    if (!userData) return null;
+
+  const renderStatsRow = () => {
+    if (!stats) return null;
     
     return (
-      <View style={styles.statsContainer}>
-        <View style={styles.statsRow}>
-          <View style={styles.statBox}>
-            <Text style={styles.statValue}>{userData.points || 0}</Text>
-            <Text style={styles.statLabel}>Total Points</Text>
-          </View>
-          
-          <View style={styles.statBox}>
-            <Text style={styles.statValue}>{userData.streak || 0}</Text>
-            <Text style={styles.statLabel}>Day Streak</Text>
-          </View>
+      <View style={styles.statsRow}>
+        <View style={styles.statItem}>
+          <Text style={styles.statIcon}>💬</Text>
+          <Text style={styles.statNumber}>{stats.positiveFeedback + stats.negativeFeedback}</Text>
+          <Text style={styles.statLabel}>Feedback</Text>
         </View>
         
-        <View style={styles.statsRow}>
-          <View style={styles.statBox}>
-            <Text style={styles.statValue}>{userData.calls || 0}</Text>
-            <Text style={styles.statLabel}>Calls Made</Text>
-          </View>
-          
-          <View style={styles.statBox}>
-            <Text style={styles.statValue}>{userData.minutes || 0}</Text>
-            <Text style={styles.statLabel}>Minutes</Text>
-          </View>
+        <View style={styles.statItem}>
+          <Text style={styles.statIcon}>📞</Text>
+          <Text style={styles.statNumber}>{stats.totalCalls}</Text>
+          <Text style={styles.statLabel}>Talks</Text>
         </View>
         
-        <View style={styles.activityContainer}>
-          <Text style={styles.sectionTitle}>Recent Activity</Text>
-          {userData.recentActivity && userData.recentActivity.length > 0 ? (
-            userData.recentActivity.map((activity: Activity, index: number) => (
-              <View key={index} style={styles.activityItem}>
-                <View style={styles.activityDot} />
-                <Text style={styles.activityText}>{activity.text}</Text>
-                <Text style={styles.activityTime}>{activity.time}</Text>
-              </View>
-            ))
-          ) : (
-            <>
-              <View style={styles.activityItem}>
-                <View style={styles.activityDot} />
-                <Text style={styles.activityText}>No recent activity</Text>
-                <Text style={styles.activityTime}></Text>
-              </View>
-            </>
-          )}
+        <View style={styles.statItem}>
+          <Text style={styles.statIcon}>⏰</Text>
+          <Text style={styles.statNumber}>{stats.totalHours}</Text>
+          <Text style={styles.statLabel}>Hours</Text>
         </View>
       </View>
     );
   };
-  
-  const renderAboutContent = () => {
-    if (!userData) return null;
-    
-    const interests = userData.interests || DEFAULT_INTERESTS;
+
+  const renderInformationSection = () => {
+    if (!user) return null;
     
     return (
-      <View style={styles.aboutContainer}>
-        <View style={styles.bioContainer}>
-          <Text style={styles.sectionTitle}>Bio</Text>
-          <Text style={styles.bioText}>{userData.bio || 'No bio yet.'}</Text>
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Information</Text>
+        
+        <View style={styles.infoItem}>
+          <View style={styles.infoIcon}>
+            <Text style={styles.infoIconText}>Aa</Text>
+          </View>
+          <Text style={styles.infoLabel}>Native language</Text>
+          <Text style={styles.infoValue}>{user.nativeLanguage || 'Not specified'}</Text>
         </View>
         
-        <View style={styles.interestsContainer}>
-          <Text style={styles.sectionTitle}>Interests</Text>
-          <View style={styles.interestsWrapper}>
-            {interests.map((interest: string, index: number) => (
-              <View key={index} style={styles.interestItem}>
+        <View style={styles.infoItem}>
+          <View style={styles.infoIcon}>
+            <Text style={styles.infoIconText}>ENG</Text>
+          </View>
+          <Text style={styles.infoLabel}>English level</Text>
+          <Text style={styles.infoValue}>{user.englishLevel || 'A2'} (Upper intermediate)</Text>
+        </View>
+        
+        <View style={styles.infoItem}>
+          <View style={styles.infoIcon}>
+            <Text style={styles.infoIconText}>♂</Text>
+          </View>
+          <Text style={styles.infoLabel}>Gender</Text>
+          <Text style={styles.infoValue}>{user.gender || 'Not specified'}</Text>
+        </View>
+        
+        <View style={styles.infoItem}>
+          <View style={styles.infoIcon}>
+            <Text style={styles.infoIconText}>📅</Text>
+          </View>
+          <Text style={styles.infoLabel}>Age</Text>
+          <Text style={styles.infoValue}>{user.age ? `${user.age} years old` : 'Not specified'}</Text>
+        </View>
+      </View>
+    );
+  };
+
+  const renderInterestsSection = () => {
+    if (!user) return null;
+    
+    return (
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Interests</Text>
+        
+        {user.interests && user.interests.length > 0 ? (
+          <View style={styles.interestsGrid}>
+            {user.interests.map((interest, index) => (
+              <View key={index} style={styles.interestChip}>
                 <Text style={styles.interestText}>{interest}</Text>
               </View>
             ))}
+            <TouchableOpacity style={styles.addInterestButton}>
+              <Text style={styles.addInterestText}>Add +</Text>
+            </TouchableOpacity>
           </View>
+        ) : (
+          <View style={styles.noInterestsContainer}>
+            <Text style={styles.noInterestsText}>No interests added yet</Text>
+            <TouchableOpacity style={styles.addInterestButton}>
+              <Text style={styles.addInterestText}>Add +</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderRatingSection = () => {
+    if (!stats) return null;
+    
+    return (
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Rating</Text>
+        
+        <View style={styles.ratingCard}>
+          <Text style={styles.satisfactionPercentage}>{stats.satisfactionPercentage}%</Text>
+          <Text style={styles.satisfactionText}>of users are satisfied with this conversation partner</Text>
         </View>
         
-        <View style={styles.goalsContainer}>
-          <Text style={styles.sectionTitle}>Learning Goals</Text>
-          <View style={styles.goalItem}>
-            <View style={styles.goalCheckbox} />
-            <Text style={styles.goalText}>Have 30-minute conversations</Text>
+        <View style={styles.ratingStats}>
+          <View style={styles.ratingStatItem}>
+            <Text style={styles.ratingIcon}>👍</Text>
+            <Text style={styles.ratingNumber}>{stats.positiveFeedback}</Text>
           </View>
-          <View style={styles.goalItem}>
-            <View style={[styles.goalCheckbox, styles.goalCompleted]} />
-            <Text style={[styles.goalText, styles.goalCompletedText]}>Speak with 5 different partners</Text>
-          </View>
-          <View style={styles.goalItem}>
-            <View style={styles.goalCheckbox} />
-            <Text style={styles.goalText}>Maintain a 14-day streak</Text>
+          
+          <View style={styles.ratingStatItem}>
+            <Text style={styles.ratingIcon}>👎</Text>
+            <Text style={styles.ratingNumber}>{stats.negativeFeedback}</Text>
           </View>
         </View>
+      </View>
+    );
+  };
+
+  const renderComplimentsSection = () => {
+    return (
+      <View style={styles.section}>
+        <TouchableOpacity 
+          style={styles.sectionHeader}
+          onPress={() => setComplimentsExpanded(!complimentsExpanded)}
+        >
+          <Text style={styles.sectionTitle}>Compliments</Text>
+          <Text style={[styles.chevronIcon, complimentsExpanded && styles.chevronRotated]}>
+            {complimentsExpanded ? '⌄' : '›'}
+          </Text>
+        </TouchableOpacity>
+        
+        {complimentsExpanded && (
+          <View style={styles.complimentsList}>
+            {compliments.map((compliment, index) => (
+              <View key={index} style={styles.complimentItem}>
+                <View style={[
+                  styles.complimentBadge,
+                  compliment.count === 0 && styles.complimentBadgeEmpty
+                ]}>
+                  <Text style={styles.complimentCount}>{compliment.count}</Text>
+                </View>
+                <Text style={[
+                  styles.complimentText,
+                  compliment.count === 0 && styles.complimentTextEmpty
+                ]}>
+                  {compliment._id}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderAdviceSection = () => {
+    return (
+      <View style={styles.section}>
+        <TouchableOpacity 
+          style={styles.sectionHeader}
+          onPress={() => setAdviceExpanded(!adviceExpanded)}
+        >
+          <Text style={styles.sectionTitle}>Advice</Text>
+          <Text style={[styles.chevronIcon, adviceExpanded && styles.chevronRotated]}>
+            {adviceExpanded ? '⌄' : '›'}
+          </Text>
+        </TouchableOpacity>
+        
+        {adviceExpanded && (
+          <View style={styles.adviceList}>
+            {advice.map((adviceItem, index) => (
+              <View key={index} style={styles.adviceItem}>
+                <View style={[
+                  styles.adviceBadge,
+                  adviceItem.count === 0 && styles.adviceBadgeEmpty
+                ]}>
+                  <Text style={styles.adviceCount}>{adviceItem.count}</Text>
+                </View>
+                <Text style={[
+                  styles.adviceText,
+                  adviceItem.count === 0 && styles.adviceTextEmpty
+                ]}>
+                  {adviceItem._id}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderFeedbackSection = () => {
+    if (!feedback || feedback.length === 0) return null;
+    
+    return (
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Feedback</Text>
+          <TouchableOpacity>
+            <Text style={styles.chevronIcon}>›</Text>
+          </TouchableOpacity>
+        </View>
+        
+        {feedback.slice(0, 3).map((item, index) => (
+          <View key={index} style={styles.feedbackItem}>
+            <Image 
+              source={{ 
+                uri: item.feedbackBy.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg' 
+              }} 
+              style={styles.feedbackAvatar} 
+            />
+            <View style={styles.feedbackContent}>
+              <Text style={styles.feedbackName}>{item.feedbackBy.name}</Text>
+              <Text style={styles.feedbackDate}>
+                {new Date(item.createdAt).toLocaleDateString('en-US', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })}
+              </Text>
+            </View>
+            <View style={styles.feedbackIcon}>
+              <Text style={styles.feedbackEmoji}>
+                {item.feedbackType === 'positive' ? '👍' : '👎'}
+              </Text>
+            </View>
+          </View>
+        ))}
       </View>
     );
   };
@@ -297,13 +491,41 @@ const ProfileScreen = () => {
   }
   
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={['#4A90E2']}
+            tintColor="#4A90E2"
+          />
+        }
+      >
         {renderProfileHeader()}
-        {renderTabs()}
         
-        {activeTab === 'stats' ? renderStatsContent() : renderAboutContent()}
+        {/* Stats Row */}
+        {renderStatsRow()}
+        
+        {/* Information Section */}
+        {renderInformationSection()}
+        
+        {/* Interests Section */}
+        {renderInterestsSection()}
+        
+        {/* Rating Section */}
+        {renderRatingSection()}
+        
+        {/* Compliments Section */}
+        {renderComplimentsSection()}
+        
+        {/* Advice Section */}
+        {renderAdviceSection()}
+        
+        {/* Feedback Section */}
+        {renderFeedbackSection()}
         
         <View style={styles.buttonContainer}>
           <TouchableOpacity 
@@ -317,22 +539,6 @@ const ProfileScreen = () => {
             <Text style={styles.settingsButtonText}>Settings</Text>
           </TouchableOpacity>
         </View>
-        
-        {/* Add connection retry button */}
-        <TouchableOpacity 
-          style={styles.retryButton}
-          onPress={() => Alert.alert('Connection Test', 'This feature is currently disabled')}
-        >
-          <Text style={styles.retryButtonText}>Test Server Connection</Text>
-        </TouchableOpacity>
-        
-        {/* Add manual fetch button */}
-        <TouchableOpacity 
-          style={[styles.retryButton, { marginTop: 10, backgroundColor: '#2E7D32' }]}
-          onPress={fetchUserProfileData}
-        >
-          <Text style={styles.retryButtonText}>Fetch User Data</Text>
-        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -341,187 +547,205 @@ const ProfileScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F5F5F5',
   },
   profileHeader: {
     alignItems: 'center',
     paddingVertical: 24,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
-  },
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    marginBottom: 12,
-  },
-  userName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333333',
-    marginBottom: 6,
-  },
-  levelContainer: {
-    backgroundColor: '#4A90E2',
     paddingHorizontal: 16,
-    paddingVertical: 4,
-    borderRadius: 50,
-    marginBottom: 6,
-  },
-  levelText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  countryText: {
-    fontSize: 16,
-    color: '#666666',
-    marginBottom: 16,
-  },
-  editButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 50,
-    borderWidth: 1,
-    borderColor: '#4A90E2',
-  },
-  editButtonText: {
-    color: '#4A90E2',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  tabContainer: {
-    flexDirection: 'row',
     backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  activeTab: {
-    borderBottomWidth: 3,
-    borderBottomColor: '#4A90E2',
-  },
-  tabText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666666',
-  },
-  activeTabText: {
-    color: '#4A90E2',
-  },
-  statsContainer: {
-    padding: 20,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  statBox: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
     borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginHorizontal: 6,
+    marginTop: 8,
+    marginBottom: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
   },
-  statValue: {
+  profileImageContainer: {
+    position: 'relative',
+    marginBottom: 16,
+  },
+  avatar: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 3,
+    borderColor: '#FF8C00',
+  },
+  levelBadge: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    backgroundColor: '#666666',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  levelBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  crownIcon: {
+    position: 'absolute',
+    top: -8,
+    right: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  crownText: {
+    fontSize: 12,
+  },
+  userName: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#4A90E2',
+    color: '#333333',
+    marginBottom: 8,
+  },
+  bioText: {
+    fontSize: 16,
+    color: '#333333',
+    textAlign: 'center',
+    marginBottom: 16,
+    paddingHorizontal: 20,
+    fontStyle: 'italic',
+  },
+  editButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 25,
+    backgroundColor: '#F5F5F5',
+    marginTop: 8,
+  },
+  editButtonText: {
+    color: '#333333',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 20,
+    marginHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    marginVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statIcon: {
+    fontSize: 24,
+    marginBottom: 8,
+  },
+  statNumber: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333333',
     marginBottom: 4,
   },
   statLabel: {
     fontSize: 14,
     color: '#666666',
   },
-  activityContainer: {
+  section: {
     backgroundColor: '#FFFFFF',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    marginHorizontal: 16,
     borderRadius: 12,
-    padding: 16,
-    marginTop: 8,
+    marginVertical: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333333',
-    marginBottom: 12,
+    marginBottom: 16,
   },
-  activityItem: {
+  chevronIcon: {
+    fontSize: 20,
+    color: '#666666',
+    transform: [{ rotate: '0deg' }],
+  },
+  chevronRotated: {
+    transform: [{ rotate: '90deg' }],
+  },
+  complimentsList: {
+    marginTop: 8,
+  },
+  adviceList: {
+    marginTop: 8,
+  },
+  noDataText: {
+    fontSize: 14,
+    color: '#999999',
+    textAlign: 'center',
+    paddingVertical: 16,
+    fontStyle: 'italic',
+  },
+  infoItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
   },
-  activityDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+  infoIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#4A90E2',
-    marginRight: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
-  activityText: {
-    flex: 1,
-    fontSize: 14,
-    color: '#333333',
-  },
-  activityTime: {
+  infoIconText: {
+    color: '#FFFFFF',
     fontSize: 12,
-    color: '#999999',
+    fontWeight: 'bold',
   },
-  aboutContainer: {
-    padding: 20,
-  },
-  bioContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  bioText: {
-    fontSize: 15,
+  infoLabel: {
+    fontSize: 16,
     color: '#333333',
-    lineHeight: 22,
+    flex: 1,
   },
-  interestsContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+  infoValue: {
+    fontSize: 16,
+    color: '#666666',
   },
-  interestsWrapper: {
+  interestsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    gap: 8,
   },
-  interestItem: {
-    backgroundColor: '#F2F2F2',
-    borderRadius: 50,
-    paddingHorizontal: 14,
+  interestChip: {
+    backgroundColor: '#F5F5F5',
+    paddingHorizontal: 12,
     paddingVertical: 8,
+    borderRadius: 20,
     marginRight: 8,
     marginBottom: 8,
   },
@@ -529,46 +753,175 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333333',
   },
-  goalsContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+  addInterestButton: {
+    backgroundColor: '#E5E5E5',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 8,
+    marginBottom: 8,
   },
-  goalItem: {
-    flexDirection: 'row',
+  addInterestText: {
+    fontSize: 14,
+    color: '#666666',
+  },
+  noInterestsContainer: {
     alignItems: 'center',
+    paddingVertical: 20,
+  },
+  noInterestsText: {
+    fontSize: 14,
+    color: '#999999',
     marginBottom: 12,
   },
-  goalCheckbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-    borderWidth: 2,
-    borderColor: '#4A90E2',
-    marginRight: 10,
+  ratingCard: {
+    backgroundColor: '#E8F5E8',
+    padding: 20,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 16,
   },
-  goalCompleted: {
-    backgroundColor: '#4A90E2',
+  satisfactionPercentage: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#2E7D32',
+    marginBottom: 8,
   },
-  goalText: {
+  satisfactionText: {
     fontSize: 14,
     color: '#333333',
+    textAlign: 'center',
   },
-  goalCompletedText: {
-    textDecorationLine: 'line-through',
+  ratingStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  ratingStatItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+  },
+  ratingIcon: {
+    fontSize: 16,
+    marginRight: 8,
+  },
+  ratingNumber: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333333',
+  },
+  feedbackItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  feedbackAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+  },
+  feedbackContent: {
+    flex: 1,
+  },
+  feedbackName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 4,
+  },
+  feedbackDate: {
+    fontSize: 14,
+    color: '#666666',
+  },
+  feedbackIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#E3F2FD',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  feedbackEmoji: {
+    fontSize: 16,
+  },
+  complimentItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  complimentBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#4CAF50',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  complimentCount: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  complimentText: {
+    fontSize: 14,
+    color: '#333333',
+    flex: 1,
+  },
+  complimentBadgeEmpty: {
+    backgroundColor: '#E0E0E0',
+  },
+  complimentTextEmpty: {
+    color: '#999999',
+  },
+  adviceItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  adviceBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#9C27B0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  adviceCount: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  adviceText: {
+    fontSize: 14,
+    color: '#333333',
+    flex: 1,
+  },
+  adviceBadgeEmpty: {
+    backgroundColor: '#E0E0E0',
+  },
+  adviceTextEmpty: {
     color: '#999999',
   },
   buttonContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    padding: 20,
-    paddingTop: 0,
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    marginHorizontal: 16,
     marginBottom: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    marginTop: 8,
   },
   logoutButton: {
     flex: 1,
@@ -579,13 +932,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logoutButtonText: {
-    color: '#333333',
+    color: '#666666',
     fontWeight: '600',
     fontSize: 16,
   },
   settingsButton: {
     flex: 1,
-    backgroundColor: '#333333',
+    backgroundColor: '#4A90E2',
     paddingVertical: 12,
     borderRadius: 50,
     marginLeft: 8,
@@ -600,19 +953,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  retryButton: {
-    backgroundColor: '#4A90E2',
-    paddingVertical: 12,
-    borderRadius: 50,
-    margin: 20,
-    marginTop: 0,
-    alignItems: 'center',
-  },
-  retryButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 16,
+    backgroundColor: '#F5F5F5',
   },
 });
 
