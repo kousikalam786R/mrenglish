@@ -5,9 +5,11 @@ import {
   setCallState,
   setCallStatus,
   setRemoteUser,
-  resetCallState
+  resetCallState,
+  setCallHistory
 } from '../slices/callSlice';
 import { RootState } from '../store';
+import apiClient from '../../utils/apiClient';
 
 // Thunk to initiate a call
 export const initiateCall = createAsyncThunk(
@@ -156,6 +158,97 @@ export const toggleVideoStream = createAsyncThunk(
     } catch (error) {
       console.error('Error toggling video stream:', error);
       return { success: false, isVideoEnabled: false, error: String(error) };
+    }
+  }
+);
+
+// Interface for backend call history response
+interface BackendCallHistory {
+  _id: string;
+  caller: {
+    _id: string;
+    name: string;
+    profilePic?: string;
+  };
+  receiver: {
+    _id: string;
+    name: string;
+    profilePic?: string;
+  };
+  startTime: string;
+  endTime?: string;
+  duration: number;
+  isVideoCall: boolean;
+  status: string;
+  createdAt: string;
+}
+
+// Thunk to fetch call history from backend
+export const fetchCallHistory = createAsyncThunk(
+  'call/fetchCallHistory',
+  async (_, { dispatch, getState, rejectWithValue }) => {
+    try {
+      console.log('Fetching call history from backend...');
+      
+      const response = await apiClient.get('/calls/history');
+      
+      if (!response.data) {
+        return rejectWithValue('No data returned from server');
+      }
+      
+      // Get current user ID from state
+      const state = getState() as RootState;
+      const currentUserId = state.auth.userId;
+      
+      if (!currentUserId) {
+        console.error('Current user ID not found in state');
+        return rejectWithValue('User not authenticated');
+      }
+      
+      console.log('Current user ID:', currentUserId);
+      
+      // Transform backend data to match the frontend interface
+      const callHistory = response.data
+        .filter((call: BackendCallHistory) => {
+          // Only include calls that lasted 60 seconds (1 minute) or more
+          return call.duration >= 60 && call.status === 'answered';
+        })
+        .map((call: BackendCallHistory) => {
+          console.log(`Processing call - Caller: ${call.caller._id}, Receiver: ${call.receiver._id}, Current User: ${currentUserId}`);
+          
+          // Determine if this was an incoming call (current user is receiver)
+          // Compare as strings to avoid type mismatch issues
+          const wasIncoming = String(call.receiver._id) === String(currentUserId);
+          
+          // Get the other user (not the current user)
+          const otherUser = wasIncoming ? call.caller : call.receiver;
+          
+          console.log(`Selected other user: ${otherUser.name} (${otherUser._id}), wasIncoming: ${wasIncoming}`);
+          
+          // Double check we're getting the right user
+          if (String(otherUser._id) === String(currentUserId)) {
+            console.error('ERROR: otherUser is the same as currentUser!');
+            console.error('Call details:', JSON.stringify(call, null, 2));
+          }
+          
+          return {
+            userId: otherUser._id,
+            userName: otherUser.name,
+            timestamp: new Date(call.startTime).getTime(),
+            duration: call.duration,
+            wasVideoCall: call.isVideoCall || false,
+            wasIncoming: wasIncoming,
+          };
+        });
+      
+      // Update Redux state with the call history
+      dispatch(setCallHistory(callHistory));
+      
+      console.log(`Successfully fetched ${callHistory.length} call history items (filtered for 1+ minute calls)`);
+      return callHistory;
+    } catch (error: any) {
+      console.error('Error fetching call history:', error);
+      return rejectWithValue(error.response?.data?.message || 'Failed to fetch call history');
     }
   }
 ); 

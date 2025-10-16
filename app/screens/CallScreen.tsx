@@ -220,7 +220,8 @@ const CallScreen = () => {
           // Use captured values instead of callState (which gets reset)
           if (capturedUserId && capturedUserName && capturedDuration > 10) {
             console.log('Navigating to PostCallFlow with duration:', capturedDuration);
-            navigation.navigate('PostCallFlow' as any, {
+            // Use replace instead of navigate to completely remove CallScreen from stack
+            navigation.replace('PostCallFlow' as any, {
               userId: capturedUserId,
               userName: capturedUserName,
               userAvatar: undefined, // Not available in CallState

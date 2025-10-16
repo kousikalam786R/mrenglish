@@ -90,7 +90,7 @@ const EditProfileScreen = () => {
       setLoading(false);
     }
   };
-
+  
   const handleSave = async () => {
     if (!user) return;
 
@@ -268,7 +268,7 @@ const EditProfileScreen = () => {
       </Modal>
     );
   };
-
+  
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -288,24 +288,24 @@ const EditProfileScreen = () => {
       </View>
     );
   }
-
+  
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
       
       {/* Header */}
-      <View style={styles.header}>
+          <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={24} color="#333333" />
-        </TouchableOpacity>
+            </TouchableOpacity>
         <Text style={styles.headerTitle}>Edit profile</Text>
         <View style={styles.headerRight} />
-      </View>
-
+          </View>
+          
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Profile Picture */}
         <View style={styles.profilePictureContainer}>
-          <Image 
+            <Image
             source={{ 
               uri: user.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg' 
             }} 
@@ -313,12 +313,12 @@ const EditProfileScreen = () => {
           />
           <TouchableOpacity style={styles.cameraButton}>
             <Icon name="camera" size={20} color="#FFFFFF" />
-          </TouchableOpacity>
+            </TouchableOpacity>
           <View style={styles.crownIcon}>
             <Icon name="star" size={16} color="#FFD700" />
           </View>
-        </View>
-
+          </View>
+          
         {/* Profile Fields */}
         <View style={styles.fieldsContainer}>
           {renderProfileField(
@@ -433,21 +433,21 @@ const EditProfileScreen = () => {
             () => showSelectionModal('interests'),
             true
           )}
-        </View>
-
+          </View>
+          
         {/* Save Button */}
-        <TouchableOpacity 
+          <TouchableOpacity
           style={[styles.saveButton, saving && styles.saveButtonDisabled]} 
           onPress={handleSave}
           disabled={saving}
-        >
+          >
           {saving ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
             <Text style={styles.saveButtonText}>Save Changes</Text>
           )}
-        </TouchableOpacity>
-      </ScrollView>
+          </TouchableOpacity>
+        </ScrollView>
 
       {renderModal()}
     </SafeAreaView>
@@ -641,4 +641,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default EditProfileScreen;
+export default EditProfileScreen; 

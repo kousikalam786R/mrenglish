@@ -72,6 +72,10 @@ const callSlice = createSlice({
     
     clearCallHistory: (state) => {
       state.callHistory = [];
+    },
+    
+    setCallHistory: (state, action: PayloadAction<CallSliceState['callHistory']>) => {
+      state.callHistory = action.payload;
     }
   }
 });
@@ -84,7 +88,8 @@ export const {
   toggleVideo,
   resetCallState,
   setPermissionsGranted,
-  clearCallHistory
+  clearCallHistory,
+  setCallHistory
 } = callSlice.actions;
 
 export default callSlice.reducer; 

@@ -9,13 +9,14 @@ import {
   Platform,
   Image,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { ContactsStackNavigationProp } from '../navigation/types';
 import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '../redux/store';
-import { initiateCall } from '../redux/thunks/callThunks';
+import { initiateCall, fetchCallHistory } from '../redux/thunks/callThunks';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/Ionicons';
 
@@ -164,6 +165,7 @@ const ContactsScreen = () => {
   const [activeTab, setActiveTab] = useState<ContactTab>('calls');
   const [friends, setFriends] = useState<Friend[]>([]);
   const [blockedUsers, setBlockedUsers] = useState<Friend[]>([]);
+  const [loading, setLoading] = useState(false);
   const navigation = useNavigation<ContactsStackNavigationProp>();
   const dispatch = useDispatch<AppDispatch>();
   const callHistory = useSelector((state: RootState) => state.call.callHistory);
@@ -191,17 +193,32 @@ const ContactsScreen = () => {
     }
   }, []);
   
+  // Fetch call history from backend
+  const loadCallHistory = useCallback(async () => {
+    try {
+      setLoading(true);
+      await dispatch(fetchCallHistory()).unwrap();
+    } catch (error) {
+      console.error('Error loading call history:', error);
+      // Don't show alert, just log the error
+    } finally {
+      setLoading(false);
+    }
+  }, [dispatch]);
+  
   // Reload data when screen focuses
   useFocusEffect(
     useCallback(() => {
       loadStoredUsersData();
-    }, [loadStoredUsersData])
+      loadCallHistory();
+    }, [loadStoredUsersData, loadCallHistory])
   );
   
   // Initial load
   useEffect(() => {
     loadStoredUsersData();
-  }, [loadStoredUsersData]);
+    loadCallHistory();
+  }, [loadStoredUsersData, loadCallHistory]);
   
   // Simple tab navigation
   const renderTabs = () => {
@@ -261,6 +278,15 @@ const ContactsScreen = () => {
   
   // Simple empty state component
   const EmptyList = () => {
+    if (loading) {
+      return (
+        <View style={styles.emptyContainer}>
+          <ActivityIndicator size="large" color="#673AB7" />
+          <Text style={[styles.emptyText, { marginTop: 16 }]}>Loading...</Text>
+        </View>
+      );
+    }
+    
     return (
       <View style={styles.emptyContainer}>
         <Text style={styles.emptyText}>{getEmptyMessage()}</Text>
