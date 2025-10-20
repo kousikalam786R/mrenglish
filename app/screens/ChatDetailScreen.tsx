@@ -24,7 +24,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { isValidObjectId } from '../utils/validationUtils';
 import { useAppDispatch, useAppSelector } from '../redux/hooks';
-import { fetchMessages, sendNewMessage } from '../redux/thunks/messageThunks';
+import { fetchMessages, sendNewMessage, handleSocketMessage } from '../redux/thunks/messageThunks';
 import { setCurrentChat, setTypingStatus } from '../redux/slices/messageSlice';
 import MessageBubble from '../components/MessageBubble';
 import DateSeparator from '../components/DateSeparator';
@@ -87,12 +87,26 @@ const ChatDetailScreen = () => {
   // Get messages for this chat
   const chatMessages = messages[id] || [];
   
-  // Debug logs to see what we're working with
+  // Debug logs and controlled auto-scroll
+  const prevMessageCountRef = useRef(0);
+  
   useEffect(() => {
     console.log('Chat ID:', id);
     console.log('Current messages count:', chatMessages.length);
     console.log('Messages state keys:', Object.keys(messages));
-  }, [id, messages, chatMessages]);
+    
+    // Only auto-scroll when message count increases (new message added)
+    if (chatMessages.length > prevMessageCountRef.current && chatMessages.length > 0) {
+      console.log(`📜 New message detected, scrolling to bottom (${prevMessageCountRef.current} -> ${chatMessages.length})`);
+      setTimeout(() => {
+        if (flatListRef.current) {
+          flatListRef.current.scrollToEnd({ animated: true });
+        }
+      }, 150);
+    }
+    
+    prevMessageCountRef.current = chatMessages.length;
+  }, [id, chatMessages]);
   
   // Format time string for messages
   const formatTime = (dateString: string) => {
@@ -229,8 +243,17 @@ const ChatDetailScreen = () => {
   // Set current chat and fetch messages when ID changes
   useEffect(() => {
     if (id && id !== '0') {
+      console.log(`💾 Loading messages for chat: ${id}`);
       dispatch(setCurrentChat(id));
       loadMessages();
+      
+      // If this is a fresh navigation (like from notification), 
+      // scroll to bottom after a short delay to show latest messages
+      setTimeout(() => {
+        if (flatListRef.current && chatMessages.length > 0) {
+          flatListRef.current.scrollToEnd({ animated: true });
+        }
+      }, 500);
     }
   }, [id, dispatch]);
   
@@ -285,9 +308,58 @@ const ChatDetailScreen = () => {
     
     // Listen for new messages
     socketService.onNewMessage((data) => {
-      // Refresh messages when we receive a new one
-      if (data && (data.sender === id || data.receiver === id)) {
-        loadMessages();
+      console.log('📨 Real-time message received:', data);
+      
+      // Check if this message is for this chat
+      if (data && data.message) {
+        const message = data.message;
+        const senderId = typeof message.sender === 'object' ? message.sender._id : message.sender;
+        const receiverId = typeof message.receiver === 'object' ? message.receiver._id : message.receiver;
+        const currentUserIdValue = currentUserId.current;
+        
+        console.log(`📨 Message details:`, {
+          from: senderId,
+          to: receiverId, 
+          currentUser: currentUserIdValue,
+          currentChat: id,
+          messageId: message._id
+        });
+        
+        // Only add message if it's for this chat AND not sent by current user
+        // (to avoid duplicates with optimistic updates)
+        const isForThisChat = senderId === id || receiverId === id;
+        const isFromCurrentUser = senderId === currentUserIdValue;
+        
+        if (isForThisChat && !isFromCurrentUser) {
+          console.log('✅ Adding real-time incoming message to current chat');
+          
+          // Check if we already have this message (prevent duplicates)
+          const existingMessage = chatMessages.find(msg => 
+            msg._id === message._id || 
+            (msg.content === message.content && 
+             Math.abs(new Date(msg.createdAt).getTime() - new Date(message.createdAt).getTime()) < 1000)
+          );
+          
+          if (!existingMessage) {
+            // Add message directly to Redux state
+            dispatch(handleSocketMessage(message));
+            
+            // Scroll to bottom to show new message
+            setTimeout(() => {
+              if (flatListRef.current) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            }, 100);
+          } else {
+            console.log('⚠️  Duplicate message detected, skipping');
+          }
+        } else if (isFromCurrentUser) {
+          console.log('⚠️  Skipping own message (already added optimistically)');
+        } else {
+          console.log('⚠️  Message not for this chat, ignoring');
+        }
+      } else {
+        console.log('⚠️  Invalid message data structure:', data);
       }
     });
     
@@ -298,20 +370,45 @@ const ChatDetailScreen = () => {
   }, [id, dispatch]);
   
   // Handle sending a message
-  const handleSend = () => {
+  const handleSend = async () => {
     if (message.trim().length === 0) return;
     
-    dispatch(sendNewMessage({ receiverId: id, content: message.trim() }));
+    const messageContent = message.trim();
+    const currentUserIdValue = currentUserId.current;
     
-    // Clear input
+    // Clear input immediately for better UX
     setMessage('');
     
-    // Scroll to bottom
+    // Create optimistic message for immediate display
+    const optimisticMessage = {
+      _id: `local_${Date.now()}_${Math.random()}`, // Unique local ID
+      content: messageContent,
+      sender: currentUserIdValue,
+      receiver: id,
+      createdAt: new Date().toISOString(),
+      read: false
+    };
+    
+    console.log('📤 Sending optimistic message:', optimisticMessage);
+    
+    // Add optimistic message immediately to Redux state
+    dispatch(handleSocketMessage(optimisticMessage));
+    
+    // Scroll to bottom immediately
     setTimeout(() => {
       if (flatListRef.current) {
         flatListRef.current.scrollToEnd({ animated: true });
       }
-    }, 100);
+    }, 50);
+    
+    // Send actual message via socket/API
+    try {
+      await dispatch(sendNewMessage({ receiverId: id, content: messageContent }));
+      console.log('✅ Message sent successfully');
+    } catch (error) {
+      console.error('❌ Failed to send message:', error);
+      // TODO: Handle message send failure (could remove optimistic message)
+    }
   };
   
   // Handle typing indicators
@@ -392,15 +489,19 @@ const ChatDetailScreen = () => {
       return <DateSeparator date={item.date || new Date()} />;
     }
     
-    // Check if the current user is the sender
+    // Check if the current user is the sender (improved logic)
     const isSender = 
-      item._id.startsWith('local_') || 
-      senderId === currentUserIdValue ||
-      (currentUserIdValue.includes(senderId) || senderId.includes(currentUserIdValue));
+      item._id.startsWith('local_') || // Local optimistic messages
+      senderId === currentUserIdValue || // Direct ID match
+      (senderId && currentUserIdValue && senderId.toString() === currentUserIdValue.toString()); // String comparison
     
-    // Use key to ensure unique component instances
+    // Create a stable key that handles both local and server IDs
+    const messageKey = item._id.startsWith('local_') 
+      ? item._id 
+      : `server-${item._id}`;
+    
     return (
-      <View key={`message-${item._id}`}>
+      <View key={messageKey}>
         <MessageBubble
           content={item.content}
           time={formatTime(item.createdAt)}

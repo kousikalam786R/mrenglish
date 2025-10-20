@@ -13,6 +13,7 @@ import {
 export interface CallOptions {
   audio?: boolean;
   video?: boolean;
+  isPartnerMatching?: boolean;
 }
 
 export enum CallStatus {
@@ -166,6 +167,11 @@ class CallService {
       }
 
       console.log(`Starting call to ${userName} (${userId}) with options:`, options);
+      
+      // Mark if this is a partner matching call
+      if (options.isPartnerMatching) {
+        console.log('🤝 This is a partner matching call - will auto-accept on receiver end');
+      }
 
       // Update call state
       this.callState = {
@@ -207,7 +213,8 @@ class CallService {
         targetUserId: userId,
         sdp: offer.sdp,
         type: offer.type,
-        isVideo: options.video || false
+        isVideo: options.video || false,
+        isPartnerMatching: options.isPartnerMatching || false
       });
 
       // Set a timeout for call answer
@@ -228,8 +235,27 @@ class CallService {
   // Handle incoming call
   private handleCallOffer = async (data: any) => {
     try {
-      console.log('Received call offer:', data);
-      const { callerId, callerName, sdp, type, isVideo, callHistoryId, renegotiation } = data;
+      console.log('🔍 CALL OFFER RECEIVED:', JSON.stringify(data, null, 2));
+      const { callerId, callerName, sdp, type, isVideo, callHistoryId, renegotiation, isPartnerMatching } = data;
+      
+      console.log('🔍 EXTRACTED VALUES:', {
+        callerId,
+        callerName,
+        isVideo,
+        callHistoryId,
+        renegotiation,
+        isPartnerMatching: isPartnerMatching,
+        isPartnerMatchingType: typeof isPartnerMatching
+      });
+      
+      // Check if this is a partner matching call (auto-accept)
+      if (isPartnerMatching) {
+        console.log('🤝 Partner matching call detected - auto-accepting');
+        console.log('🤝 PARTNER MATCHING FLOW ACTIVATED');
+      } else {
+        console.log('📞 Regular call detected - showing incoming call modal');
+        console.log('📞 isPartnerMatching value:', isPartnerMatching);
+      }
       
       // Handle renegotiation during an active call
       if (renegotiation === true && this.pc && this.callState.status === CallStatus.CONNECTED) {
@@ -290,7 +316,40 @@ class CallService {
       
       console.log('Updated call state with offer SDP data and callHistoryId:', callHistoryId);
       this.emitCallStateChange();
-      this.emitEvent('incoming-call', data);
+      
+      // Auto-accept partner matching calls
+      if (isPartnerMatching) {
+        console.log('🤝 Auto-accepting partner matching call');
+        (this as any).wasPartnerMatchingCall = true; // Mark as partner matching call
+        setTimeout(async () => {
+          try {
+            await this.acceptCall({ audio: true, video: isVideo || false });
+            console.log('✅ Partner matching call auto-accepted');
+            
+            // Emit navigation event for partner matching calls
+            console.log('📤 EMITTING partner-call-auto-accepted event with data:', {
+              callerId,
+              callerName,
+              isVideo: isVideo || false,
+              callHistoryId
+            });
+            
+            this.emitEvent('partner-call-auto-accepted', {
+              callerId,
+              callerName,
+              isVideo: isVideo || false,
+              callHistoryId
+            });
+            
+            console.log('📤 partner-call-auto-accepted event EMITTED');
+          } catch (error) {
+            console.error('❌ Error auto-accepting partner matching call:', error);
+          }
+        }, 500); // Small delay to ensure state is set
+      } else {
+        // Only emit incoming-call event for regular calls
+        this.emitEvent('incoming-call', data);
+      }
 
     } catch (error) {
       console.error('Error handling call offer:', error);
@@ -892,6 +951,17 @@ class CallService {
     // Reset state
     this.callState = { ...initialCallState };
     this.emitCallStateChange();
+    
+    // Clear partner matching session if this was a partner matching call
+    if ((this as any).wasPartnerMatchingCall) {
+      console.log('🤝 Clearing partner matching session');
+      (this as any).wasPartnerMatchingCall = false;
+      
+      // Emit event to clear matched pairs on server
+      socketService.getSocket()?.emit('call-ended', {
+        wasPartnerMatching: true
+      });
+    }
   }
 
   // Initialize WebRTC peer connection and media streams

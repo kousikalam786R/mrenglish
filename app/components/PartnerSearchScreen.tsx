@@ -38,6 +38,15 @@ const PartnerSearchScreen: React.FC<PartnerSearchScreenProps> = ({
     return `${formattedMinutes}:${formattedSeconds}`;
   };
   
+  // Reset timer when modal opens/closes
+  useEffect(() => {
+    if (visible) {
+      // Reset timer when opening
+      setSeconds(0);
+      setMinutes(0);
+    }
+  }, [visible]);
+  
   // Set up the timer
   useEffect(() => {
     let interval: NodeJS.Timeout;

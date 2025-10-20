@@ -23,6 +23,7 @@ import { requestMicrophonePermission, showPermissionExplanation, checkMicrophone
 import ProgressDialog from '../components/ProgressDialog';
 import Icon from 'react-native-vector-icons/Ionicons';
 import IconMaterial from 'react-native-vector-icons/MaterialIcons';
+import ConnectingScreen from '../components/ConnectingScreen';
 import PartnerSearchScreen from '../components/PartnerSearchScreen';
 import { mediaDevices } from 'react-native-webrtc';
 
@@ -139,6 +140,8 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   const [findingPartner, setFindingPartner] = useState(false);
   const [showPartnerSearch, setShowPartnerSearch] = useState(false);
   const [searchEmoji, setSearchEmoji] = useState('👨‍🍳');
+  const [showConnecting, setShowConnecting] = useState(false);
+  const [connectingPartner, setConnectingPartner] = useState<User | null>(null);
 
   // Check microphone permission on component mount
   useEffect(() => {
@@ -295,35 +298,85 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         }
       });
       
-      // Listen for partner found notifications
-      socketService.socketOn('partner_found', (data: any) => {
-        if (data.partner) {
-          // Close the partner search screen if it's open
-          setShowPartnerSearch(false);
+      // Partner found events are now handled by the global handler
+      // This prevents duplicate event listeners
+
+      // Additional mechanism: Listen for force close command
+      socketService.socketOn('force-close-search', () => {
+        console.log('🚨 BACKUP EVENT: force-close-search received');
+        console.log('🚨 BACKUP: Current showPartnerSearch:', showPartnerSearch);
+        console.log('🚨 BACKUP: Current findingPartner:', findingPartner);
+        setShowPartnerSearch(false);
+        setFindingPartner(false);
+        console.log('🚨 BACKUP: Search screen force closed');
+      });
+
+      // Listen for partner search screen close command (backup mechanism)
+      socketService.socketOn('close-partner-search', () => {
+        console.log('🔄 BACKUP EVENT: close-partner-search received');
+        console.log('🔄 BACKUP: Current findingPartner state:', findingPartner);
+        console.log('🔄 BACKUP: Current showPartnerSearch state:', showPartnerSearch);
+        setShowPartnerSearch(false);
+        setFindingPartner(false);
+        console.log('🔄 BACKUP: Search screen closed via backup');
+      });
+
+      // Additional robust mechanism - force close on any partner event
+      socketService.socketOn('partner-search-force-close', () => {
+        console.log('🚨 ULTIMATE BACKUP: partner-search-force-close received');
+        console.log('🚨 ULTIMATE: Current showPartnerSearch:', showPartnerSearch);
+        console.log('🚨 ULTIMATE: Current findingPartner:', findingPartner);
+        setShowPartnerSearch(false);
+        setFindingPartner(false);
+        console.log('🚨 ULTIMATE: Search screen force closed');
+      });
+
+      // Debug: Listen for all socket events to see what's happening
+      socketService.socketOn('debug-socket-events', (data: any) => {
+        console.log('🔍 Debug socket event:', data);
+      });
+
+      // Listen for partner search errors
+      socketService.socketOn('partner-search-error', (data: any) => {
+        console.log('❌ Partner search error:', data);
+        setFindingPartner(false);
+        setShowPartnerSearch(false);
+        Alert.alert('Partner Search Error', data.error || 'Failed to search for partner');
+      });
+
+      // Listen for random partner result (first user gets this event)
+      socketService.socketOn('random-partner-result', (data: any) => {
+        console.log('🎯 Random partner result received:', JSON.stringify(data, null, 2));
+        if (data.success && data.partner) {
+          // Treat this the same as partner-found
+          globalPartnerFoundHandler({ partner: data.partner });
+        } else {
+          console.log('❌ No partner found:', data.error);
           setFindingPartner(false);
-          
-          console.log('You were matched with:', data.partner.name);
-          Alert.alert(
-            'Partner Found',
-            `${data.partner.name} is looking for a partner and matched with you!`,
-            [
-              { 
-                text: 'Decline', 
-                style: 'cancel',
-                onPress: () => console.log('Partner match declined')
-              },
-              { 
-                text: 'Call Now', 
-                style: 'default',
-                onPress: () => handleCallPress(data.partner)
-              },
-            ]
-          );
+          setShowPartnerSearch(false);
+          if (data.error) {
+            Alert.alert('No Partner Found', data.error);
+          }
         }
       });
+
+      // Test event listener (for debugging)
+      socketService.socketOn('test-event-response', (data: any) => {
+        console.log('🔍 Test event response received:', data);
+      });
+
+      // Add call service event listeners
+      console.log('🔧 SETUP: Adding call service event listeners');
+      console.log('🔧 SETUP: handlePartnerCallAutoAccepted function exists:', typeof handlePartnerCallAutoAccepted);
+      callService.addEventListener('call-state-changed', handleCallStateChange);
+      callService.addEventListener('partner-call-auto-accepted', handlePartnerCallAutoAccepted);
+      console.log('🔧 SETUP: Event listeners added - call-state-changed & partner-call-auto-accepted');
       
       // Request a list of ready users - emit the event instead of calling a non-existent method
       socketService.socketEmit('get_ready_users', {});
+      
+      // Partner matching calls now use regular call service
+      // No need for separate partner call event listeners
       
     } catch (error) {
       console.error('Error initializing socket connection:', error);
@@ -463,6 +516,10 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       
       // Navigate to call screen first so UI is ready
       console.log('Navigating to call screen');
+      // Hide connecting screen if it's showing
+      setShowConnecting(false);
+      setConnectingPartner(null);
+      
       navigation.navigate('CallScreen', { 
         id: user._id, 
         name: user.name, 
@@ -581,6 +638,10 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       
       // Navigate to call screen first so UI is ready
       console.log('Navigating to call screen');
+      // Hide connecting screen if it's showing
+      setShowConnecting(false);
+      setConnectingPartner(null);
+      
       navigation.navigate('CallScreen', { 
         id: user._id, 
         name: user.name, 
@@ -647,13 +708,56 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     fetchUsers();
   };
 
+  // Store timeout reference
+  const searchTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  
+  // Handle partner call auto-accepted (navigate receiving user to CallScreen)
+  const handlePartnerCallAutoAccepted = (data: any) => {
+    console.log('🤝 NAVIGATION EVENT: Partner call auto-accepted - navigating to CallScreen');
+    console.log('🤝 NAVIGATION DATA:', JSON.stringify(data, null, 2));
+    console.log('🤝 CURRENT SCREEN STATE:', {
+      showConnecting,
+      connectingPartner: connectingPartner?.name,
+      showPartnerSearch,
+      findingPartner
+    });
+    
+    // Close connecting screen
+    setShowConnecting(false);
+    setConnectingPartner(null);
+    
+    // Navigate to CallScreen
+    console.log('🤝 NAVIGATING TO CALLSCREEN with params:', {
+      id: data.callerId,
+      name: data.callerName,
+      isVideoCall: data.isVideo || false,
+      avatar: "https://randomuser.me/api/portraits/men/32.jpg"
+    });
+    
+    navigation.navigate('CallScreen', {
+      id: data.callerId,
+      name: data.callerName,
+      isVideoCall: data.isVideo || false,
+      avatar: "https://randomuser.me/api/portraits/men/32.jpg" // Default avatar
+    });
+    
+    console.log('🤝 NAVIGATION COMPLETED');
+  };
+  
   // Handle random call with the new functionality
   const handleRandomCall = async () => {
     try {
+      console.log('🔍 Starting partner search...');
+      
+      // Clear any existing timeout
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+        searchTimeoutRef.current = null;
+      }
+      
       // If not ready, set status to ready
       if (!currentUserReady) {
-        // socketService.setReadyToTalk(true); // This method doesn't exist
-        socketService.socketEmit('set_ready_to_talk', { isReady: true });
+        socketService.socketEmit('set-ready-to-talk', { status: true });
         setCurrentUserReady(true);
       }
       
@@ -665,26 +769,34 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       setShowPartnerSearch(true);
       setFindingPartner(true);
       
+      // Ensure socket connection is active
+      const socket = socketService.getSocket();
+      if (!socket || !socket.connected) {
+        console.log('Socket not connected, reconnecting...');
+        await socketService.initialize();
+      }
+      
       // Request a random partner
-      // socketService.findRandomPartner(); // This method doesn't exist
-      socketService.socketEmit('find_random_partner', {});
+      console.log('📡 Emitting find-random-partner event');
+      socketService.socketEmit('find-random-partner', {
+        preferences: {} // Can add preferences here later
+      });
       
       // Set a timeout to avoid waiting too long
-      setTimeout(() => {
+      searchTimeoutRef.current = setTimeout(() => {
+        console.log('⏰ Search timeout reached');
         if (findingPartner) {
-          setFindingPartner(false);
-          setShowPartnerSearch(false);
+          handleCancelSearch();
           Alert.alert(
-            'Taking Too Long',
-            'Finding a partner is taking longer than expected. Please try again later.',
+            'No Partners Found',
+            'No partners available right now. Please try again later.',
             [{ text: 'OK', style: 'default' }]
           );
         }
-      }, 60000); // 60 second timeout (increased from 15 seconds)
+      }, 60000); // 60 second timeout
     } catch (error) {
       console.error('Error finding random partner:', error);
-      setFindingPartner(false);
-      setShowPartnerSearch(false);
+      handleCancelSearch();
       Alert.alert(
         'Error',
         'Failed to find a partner. Please try again later.',
@@ -695,12 +807,26 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
 
   // Cancel partner search
   const handleCancelSearch = () => {
+    console.log('❌ Canceling partner search');
+    
+    // Clear timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+      searchTimeoutRef.current = null;
+    }
+    
+    // Notify server to remove from queue
+    socketService.socketEmit('cancel-partner-search', {});
+    
+    // Reset UI state
     setFindingPartner(false);
     setShowPartnerSearch(false);
-    // If the user cancels, set them as not ready to talk
-    // socketService.setReadyToTalk(false); // This method doesn't exist
-    socketService.socketEmit('set_ready_to_talk', { isReady: false });
+    
+    // Set as not ready to talk
+    socketService.socketEmit('set-ready-to-talk', { status: false });
     setCurrentUserReady(false);
+    
+    console.log('✅ Partner search cancelled successfully');
   };
 
   // Handle search settings
@@ -727,6 +853,196 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     );
   };
 
+  // Handle cancel connecting
+  const handleCancelConnecting = () => {
+    console.log('❌ Canceling connection');
+    setShowConnecting(false);
+    setConnectingPartner(null);
+    // Set as not ready
+    socketService.socketEmit('set-ready-to-talk', { status: false });
+    setCurrentUserReady(false);
+  };
+
+  // Force close search screen (for debugging)
+  const forceCloseSearchScreen = () => {
+    console.log('🔄 Force closing search screen');
+    setShowPartnerSearch(false);
+    setFindingPartner(false);
+  };
+
+  // Get current user ID from AsyncStorage
+  const getCurrentUserId = async () => {
+    try {
+      const userData = await AsyncStorage.getItem('user');
+      if (userData) {
+        const user = JSON.parse(userData);
+        return user._id || user.id || '';
+      }
+      return '';
+    } catch (error) {
+      console.error('Error getting current user ID:', error);
+      return '';
+    }
+  };
+
+  // Handle call state changes to close connecting screen
+  const handleCallStateChange = (callState: any) => {
+    console.log('📞 Call state changed:', callState.status);
+    if (callState.status === 'connected' || callState.status === 'ringing') {
+      // Close connecting screen when call starts
+      console.log('📞 Call started - closing connecting screen');
+      setShowConnecting(false);
+      setConnectingPartner(null);
+    }
+  };
+
+
+  // Global partner found handler (always active)
+  const globalPartnerFoundHandler = (data: any) => {
+    console.log('🌍 GLOBAL: Partner found event received:', JSON.stringify(data, null, 2));
+    console.log('🌍 GLOBAL: Current showPartnerSearch state:', showPartnerSearch);
+    console.log('🌍 GLOBAL: Current findingPartner state:', findingPartner);
+    console.log('🌍 GLOBAL: Component mounted and ready');
+    
+    if (data.partner || data.success) {
+      const partner = data.partner;
+
+      // Clear timeout
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+        searchTimeoutRef.current = null;
+      }
+
+      console.log('🌍 GLOBAL: Forcing search screen close');
+      setShowPartnerSearch(false);
+      setFindingPartner(false);
+      
+      console.log('🤝 Matched with:', partner.name);
+
+      // Show connecting screen for BOTH users
+      setConnectingPartner(partner);
+      setShowConnecting(true);
+
+      // Both users should see the connecting screen, but only one should initiate the call
+      const initializeCall = async () => {
+        try {
+          const currentUserId = await getCurrentUserId();
+          const shouldInitiateCall = currentUserId < partner._id; // Consistent ordering
+          
+          console.log(`🎯 Should initiate call: ${shouldInitiateCall} (current: ${currentUserId}, partner: ${partner._id})`);
+
+          if (shouldInitiateCall) {
+            console.log('🚀 This user will initiate the call');
+            await handleAutomaticCall(partner);
+          } else {
+            console.log('⏳ This user will wait for incoming call');
+            // Just wait for the incoming call - the other user will initiate
+            // The connecting screen will stay until the call starts
+          }
+        } catch (error) {
+          console.error('Error in automatic call:', error);
+          setShowConnecting(false);
+          setConnectingPartner(null);
+        }
+      };
+
+      // Start the call after a short delay to show connecting screen
+      setTimeout(initializeCall, 2000); // 2 second delay to show connecting screen
+    }
+  };
+
+  // Test socket connection (for debugging)
+  const testSocketConnection = () => {
+    console.log('🔍 Testing socket connection...');
+    console.log('Socket connected:', socketService.getSocket()?.connected);
+    
+    // Test emit
+    socketService.socketEmit('test-event', { message: 'Hello from client' });
+    console.log('✅ Test event sent');
+  };
+
+  // Test force close search screen (for debugging)
+  const testForceCloseSearch = () => {
+    console.log('🧪 TEST: Manually forcing search screen close');
+    console.log('🧪 TEST: Current showPartnerSearch:', showPartnerSearch);
+    console.log('🧪 TEST: Current findingPartner:', findingPartner);
+    setShowPartnerSearch(false);
+    setFindingPartner(false);
+    console.log('🧪 TEST: Search screen manually closed');
+  };
+
+  // Test manual navigation (for debugging)
+  const testManualNavigation = () => {
+    console.log('🧪 TEST: Manually triggering navigation to CallScreen');
+    handlePartnerCallAutoAccepted({
+      callerId: 'test-caller-id',
+      callerName: 'Test Caller',
+      isVideo: false,
+      callHistoryId: 'test-call-history'
+    });
+  };
+
+  // Make functions available globally for debugging (React Native)
+  if (typeof global !== 'undefined') {
+    (global as any).testSocketConnection = testSocketConnection;
+    (global as any).testForceCloseSearch = testForceCloseSearch;
+    (global as any).testManualNavigation = testManualNavigation;
+  }
+
+  // Handle automatic call for partner matching (bypasses incoming call modal)
+  const handleAutomaticCall = async (partner: User) => {
+    try {
+      console.log('🚀 Starting automatic partner call with:', partner.name);
+      console.log('Partner ID:', partner._id);
+      
+      // Request microphone permission
+      const hasPermission = await requestMicrophonePermission();
+      if (!hasPermission) {
+        showPermissionExplanation();
+        setShowConnecting(false);
+        setConnectingPartner(null);
+        return;
+      }
+      
+      // Set the remote user for the call service
+      socketService.socketEmit('set_remote_user', { userId: partner._id });
+      
+      // Initialize call service
+      callService.initialize();
+      
+      // Navigate to call screen first
+      setShowConnecting(false);
+      setConnectingPartner(null);
+      
+      navigation.navigate('CallScreen', { 
+        id: partner._id, 
+        name: partner.name, 
+        isVideoCall: false 
+      });
+      
+      // Start the call using regular call service after navigation
+      setTimeout(async () => {
+        try {
+          console.log('📞 Starting partner matching call using regular call service...');
+          console.log('Socket connected:', socketService.getSocket()?.connected);
+          
+          // Use regular call service to start the call with partner matching flag
+          await callService.startCall(partner._id, partner.name, { audio: true, video: false, isPartnerMatching: true } as any);
+          console.log('✅ Partner matching call started successfully');
+        } catch (callError) {
+          console.error('❌ Error starting partner matching call:', callError);
+          // Navigate back to lobby if call fails
+          navigation.navigate('Lobby');
+        }
+      }, 1000);
+      
+    } catch (error) {
+      console.error('❌ Error in handleAutomaticCall:', error);
+      setShowConnecting(false);
+      setConnectingPartner(null);
+    }
+  };
+
   // Add this getter to determine if random calls are available
   const isRandomCallAvailable = true; // Always allow finding a partner
 
@@ -738,22 +1054,57 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     });
   };
 
+  // Set up global event listeners immediately when component mounts
+  useEffect(() => {
+    // Set up global partner found handler immediately
+    console.log('🌍 SETUP: Setting up global partner found handler');
+    console.log('🌍 SETUP: Socket service available:', !!socketService);
+    console.log('🌍 SETUP: Socket connected:', socketService.getSocket()?.connected);
+    
+    socketService.socketOn('partner-found', globalPartnerFoundHandler);
+    console.log('🌍 SETUP: Global partner found handler registered');
+    
+    return () => {
+      console.log('🌍 CLEANUP: Removing global partner found handler');
+      socketService.socketOff('partner-found', globalPartnerFoundHandler);
+    };
+  }, []); // No dependencies - always active
+
   // Load users when component mounts
   useEffect(() => {
     fetchUsers();
     
     // Clean up socket listeners when component unmounts
     return () => {
-      // socketService.removeAllListeners(); // This method doesn't exist
+      // Clear timeout if exists
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+        searchTimeoutRef.current = null;
+      }
       
-      // Instead, remove each event listener individually
-      socketService.socketOff('user_status');
-      socketService.socketOff('user_ready_status');
-      socketService.socketOff('ready_status_updated');
-      socketService.socketOff('ready_users_list');
-      socketService.socketOff('partner_found');
+      // Cancel any ongoing search
+      if (findingPartner) {
+        socketService.socketEmit('cancel-partner-search', {});
+      }
+      
+      // Remove each event listener individually
+      socketService.socketOff('user-status');
+      socketService.socketOff('user-ready-status');
+      socketService.socketOff('ready-status-updated');
+      socketService.socketOff('ready-users-list');
+      socketService.socketOff('close-partner-search');
+      socketService.socketOff('force-close-search');
+      socketService.socketOff('partner-search-force-close');
+      socketService.socketOff('debug-socket-events');
+      socketService.socketOff('test-event-response');
+      socketService.socketOff('partner-search-error');
+      socketService.socketOff('random-partner-result');
+      
+      // Remove call service event listener
+      callService.removeEventListener('call-state-changed', handleCallStateChange);
+      callService.removeEventListener('partner-call-auto-accepted', handlePartnerCallAutoAccepted);
     };
-  }, []);
+  }, []); // Remove findingPartner dependency to ensure listeners are always active
 
   if (loading && !refreshing) {
     return (
@@ -868,6 +1219,13 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         onCancel={handleCancelSearch}
         onSettings={handleSearchSettings}
         emoji={searchEmoji}
+      />
+      
+      {/* Connecting Screen */}
+      <ConnectingScreen
+        visible={showConnecting}
+        partnerName={connectingPartner?.name}
+        onCancel={handleCancelConnecting}
       />
       
       {/* Progress Dialog */}

@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import notificationService from '../utils/notificationService';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
@@ -204,6 +205,35 @@ const ProfileScreen = () => {
         }
       ]
     );
+  };
+
+  const handleTestNotification = async () => {
+    try {
+      Alert.alert(
+        'Test Notification',
+        'This will send a test push notification to your device.',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel'
+          },
+          {
+            text: 'Send',
+            onPress: async () => {
+              const success = await notificationService.sendTestNotification();
+              if (success) {
+                Alert.alert('Success', 'Test notification sent! Check your notification tray.');
+              } else {
+                Alert.alert('Error', 'Failed to send test notification. Make sure you\'re logged in.');
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Error sending test notification:', error);
+      Alert.alert('Error', 'Failed to send test notification');
+    }
   };
   
   const renderProfileHeader = () => {
@@ -537,6 +567,16 @@ const ProfileScreen = () => {
           
           <TouchableOpacity style={styles.settingsButton}>
             <Text style={styles.settingsButtonText}>Settings</Text>
+          </TouchableOpacity>
+        </View>
+        
+        {/* Test Notification Button */}
+        <View style={styles.testContainer}>
+          <TouchableOpacity 
+            style={styles.testButton}
+            onPress={handleTestNotification}
+          >
+            <Text style={styles.testButtonText}>🔔 Test Push Notification</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -954,6 +994,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#F5F5F5',
+  },
+  testContainer: {
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+  },
+  testButton: {
+    backgroundColor: '#FF6B6B',
+    paddingVertical: 12,
+    borderRadius: 25,
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  testButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });
 

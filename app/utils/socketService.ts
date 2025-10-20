@@ -204,6 +204,44 @@ export const stopTyping = (receiverId: string): void => {
 };
 
 /**
+ * Send a private message via socket
+ */
+export const sendPrivateMessage = (receiverId: string, content: string): Promise<any> => {
+  return new Promise((resolve, reject) => {
+    if (!socket || !socket.connected) {
+      console.warn('Socket not connected, cannot send private message');
+      reject(new Error('Socket not connected'));
+      return;
+    }
+
+    console.log(`📤 Sending message via socket to ${receiverId}: ${content.substring(0, 50)}...`);
+    
+    // Emit the message
+    socket.emit('private-message', { receiverId, content });
+
+    // Listen for the message-sent confirmation
+    const timeout = setTimeout(() => {
+      console.error('❌ Message sending timeout');
+      reject(new Error('Message sending timeout'));
+    }, 10000); // 10 second timeout
+
+    const onMessageSent = (data: any) => {
+      clearTimeout(timeout);
+      if (data.success) {
+        console.log('✅ Message confirmed sent via socket');
+        resolve(data);
+      } else {
+        console.error('❌ Message sending failed:', data.error);
+        reject(new Error(data.error || 'Failed to send message'));
+      }
+      socket?.off('message-sent', onMessageSent);
+    };
+
+    socket.once('message-sent', onMessageSent);
+  });
+};
+
+/**
  * Remove all socket event listeners
  */
 export const removeAllListeners = (): void => {
@@ -231,5 +269,6 @@ export default {
   onNewMessage,
   startTyping,
   stopTyping,
+  sendPrivateMessage,
   removeAllListeners
 }; 
