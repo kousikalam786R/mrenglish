@@ -17,8 +17,12 @@ import { RootStackParamList } from '../navigation/types';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { ChatUser } from '../types/Message';
 import { useAppDispatch, useAppSelector } from '../redux/hooks';
-import { fetchRecentChats } from '../redux/thunks/messageThunks';
+import { fetchRecentChats, handleSocketMessage } from '../redux/thunks/messageThunks';
+import { updateUserStatus } from '../redux/slices/messageSlice';
 import socketService from '../utils/socketService';
+import OnlineStatus from '../components/OnlineStatus';
+import simpleUserStatusService from '../services/simpleUserStatusService';
+import { useUserStatusService } from '../hooks/useUserStatus';
 
 // Chat item component
 interface ChatItemProps {
@@ -28,6 +32,37 @@ interface ChatItemProps {
 
 // Use memo to prevent unnecessary re-renders
 const ChatItem = memo<ChatItemProps>(({ chat, onPress }) => {
+  // Get user status from centralized service with subscription
+  const [userStatus, setUserStatus] = useState(() => simpleUserStatusService.getUserStatus(chat._id));
+
+  // Subscribe to status updates for this user
+  useEffect(() => {
+    // Add user to tracking
+    simpleUserStatusService.addUserToTracking(chat._id);
+
+    // Get initial status
+    const initialStatus = simpleUserStatusService.getUserStatus(chat._id);
+    if (initialStatus) {
+      setUserStatus(initialStatus);
+    }
+
+    // Subscribe to status updates
+    const unsubscribe = simpleUserStatusService.subscribeToStatusUpdates((allStatuses) => {
+      const status = allStatuses.get(chat._id);
+      if (status) {
+        console.log(`📊 ChatItem: Status updated for ${chat.name} (${chat._id}):`, {
+          isOnline: status.isOnline,
+          lastSeenAt: status.lastSeenAt
+        });
+        setUserStatus(status);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [chat._id, chat.name]);
+  
   // Format timestamp to readable time
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -105,7 +140,26 @@ const ChatItem = memo<ChatItemProps>(({ chat, onPress }) => {
       
       <View style={styles.chatContent}>
         <View style={styles.chatHeader}>
-          <Text style={styles.chatName}>{displayName}</Text>
+          <View style={styles.nameAndStatus}>
+            <Text style={styles.chatName}>{displayName}</Text>
+            <OnlineStatus 
+              user={{
+                _id: chat._id,
+                name: displayName,
+                email: chat.email || '',
+                isOnline: userStatus?.isOnline ?? chat.isOnline,
+                lastSeenAt: userStatus?.lastSeenAt ?? chat.lastSeenAt
+              }}
+              showLastSeen={false}
+              compact={true}
+            />
+            {/* Debug info */}
+            {__DEV__ && (
+              <Text style={{ fontSize: 8, color: '#999', marginLeft: 4 }}>
+                {userStatus?.isOnline ? '🟢' : '🔴'} {userStatus?.isOnline ? 'Online' : 'Offline'}
+              </Text>
+            )}
+          </View>
           {lastMessageTime && <Text style={styles.chatTime}>{formatTime(lastMessageTime)}</Text>}
         </View>
         
@@ -152,6 +206,31 @@ const ChatsScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const dispatch = useAppDispatch();
   const { recentChats, loading } = useAppSelector(state => state.message);
+  
+  // Initialize user status service
+  const { isInitialized: statusServiceReady } = useUserStatusService();
+  
+  // Add all chat users to status tracking when chats are loaded
+  useEffect(() => {
+    if (statusServiceReady && recentChats.length > 0) {
+      console.log('📋 ChatsScreen: Adding users to status tracking');
+      recentChats.forEach(chat => {
+        simpleUserStatusService.addUserToTracking(chat._id);
+      });
+    }
+  }, [statusServiceReady, recentChats]);
+  
+  // Debug: Log recent chats changes
+  useEffect(() => {
+    if (recentChats.length > 0) {
+      console.log('📋 ChatsScreen: Recent chats updated:', recentChats.map(chat => ({
+        id: chat._id,
+        name: chat.name,
+        lastMessage: chat.lastMessage?.content?.substring(0, 20) + '...',
+        unreadCount: chat.unreadCount
+      })));
+    }
+  }, [recentChats]);
   const [mounted, setMounted] = useState(true);
   
   // Fetch chats on component mount
@@ -162,19 +241,32 @@ const ChatsScreen = () => {
     // Initialize socket connection
     socketService.initialize();
     
-    // Add socket event listeners for user status updates
-    socketService.socketOn('user_status', (data: any) => {
-      if (data && data.userId && data.status && mounted) {
-        // Update user status in chats list through Redux
-        // This would need to be implemented in the messageSlice
+    // Debug: Test socket connectivity
+    setTimeout(() => {
+      const socket = socketService.getSocket();
+      if (socket && socket.connected) {
+        console.log('✅ ChatsScreen: Socket connected successfully');
+      } else {
+        console.log('⚠️ ChatsScreen: Socket not connected');
       }
-    });
+    }, 1000);
     
     // Listen for new messages to update chat list
-    socketService.socketOn('new_message', (data: any) => {
-      // When a new message arrives, refresh chats list
-      if (mounted) {
-        loadChats();
+    socketService.socketOn('new-message', (data: any) => {
+      // When a new message arrives, update chat list through Redux (no API call)
+      if (mounted && data && data.message) {
+        console.log('📨 New message received in ChatsScreen, updating chat list silently');
+        console.log('📨 Message data:', {
+          id: data.message._id,
+          content: data.message.content.substring(0, 30) + '...',
+          sender: typeof data.message.sender === 'object' ? data.message.sender._id : data.message.sender,
+          receiver: typeof data.message.receiver === 'object' ? data.message.receiver._id : data.message.receiver
+        });
+        // The handleSocketMessage thunk already updates recent chats, so we don't need to reload
+        // This prevents the jarring reload experience
+        dispatch(handleSocketMessage(data.message));
+      } else {
+        console.log('⚠️ ChatsScreen: Invalid message data received:', data);
       }
     });
     
@@ -182,8 +274,7 @@ const ChatsScreen = () => {
     return () => {
       setMounted(false);
       // Remove socket event listeners
-      socketService.socketOff('user_status');
-      socketService.socketOff('new_message');
+      socketService.socketOff('new-message');
     };
   }, [dispatch]);
   
@@ -332,10 +423,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 4,
   },
+  nameAndStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 8,
+  },
   chatName: {
     fontSize: 16,
     fontWeight: 'bold',
     color: '#333333',
+    marginRight: 8,
   },
   chatTime: {
     fontSize: 12,

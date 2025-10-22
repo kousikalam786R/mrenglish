@@ -21,6 +21,7 @@ import { signInSuccess } from './app/redux/slices/authSlice';
 import Toast from 'react-native-toast-message';
 import notificationService from './app/utils/notificationService';
 import callService from './app/utils/callService';
+import simpleUserStatusService from './app/services/simpleUserStatusService';
 
 function App(): React.JSX.Element {
   useEffect(() => {
@@ -120,6 +121,11 @@ function App(): React.JSX.Element {
       // Fallback to direct initialization
       if (callService && typeof callService.initialize === 'function') {
         callService.initialize();
+      }
+      
+      // Initialize user status service
+      if (simpleUserStatusService && typeof simpleUserStatusService.initialize === 'function') {
+        simpleUserStatusService.initialize();
       }
     }
   }, []);

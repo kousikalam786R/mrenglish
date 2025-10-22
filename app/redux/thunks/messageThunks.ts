@@ -56,23 +56,44 @@ export const sendNewMessage = createAsyncThunk(
         throw new Error('User ID not found. Please log in again.');
       }
       
-      // Create an optimistic message
+      // Create an optimistic message with enhanced fields
       const optimisticMessage: Message = {
         _id: `local_${Date.now()}`,
         content: content.trim(),
         sender: userId,
         receiver: receiverId,
         createdAt: new Date().toISOString(),
-        read: false
+        read: false,
+        // Enhanced fields for optimistic message
+        status: 'sent',
+        sentAt: new Date().toISOString()
       };
       
       // Add optimistic message to state
       dispatch(addMessage({ chatId: receiverId, message: optimisticMessage }));
       
-      // Send the message through socket
-      socketService.sendPrivateMessage(receiverId, content.trim());
-      
-      return optimisticMessage;
+      // Send the message through socket and wait for confirmation
+      try {
+        const result = await socketService.sendPrivateMessage(receiverId, content.trim());
+        
+        // If we got a real message back from the server, replace the optimistic one
+        if (result && result.message) {
+          console.log('🔄 Replacing optimistic message with real message:', {
+            optimisticId: optimisticMessage._id,
+            realId: result.message._id,
+            status: result.message.status,
+            deliveredAt: result.message.deliveredAt
+          });
+          
+          // Replace the optimistic message with the real one
+          dispatch(addMessage({ chatId: receiverId, message: result.message }));
+        }
+        
+        return result.message || optimisticMessage;
+      } catch (error) {
+        console.error('Error sending message via socket:', error);
+        throw error;
+      }
     } catch (error: any) {
       const errorMessage = error.message || 'Failed to send message';
       console.error('Error sending message:', errorMessage);
@@ -136,6 +157,14 @@ export const fetchRecentChats = createAsyncThunk(
 export const handleSocketMessage = (message: Message) => async (dispatch: any, getState: any) => {
   try {
     console.log('Received new socket message:', message);
+    console.log('🔍 Enhanced message data:', {
+      id: message._id,
+      status: message.status || 'undefined',
+      sentAt: message.sentAt || 'undefined',
+      deliveredAt: message.deliveredAt || 'undefined',
+      readAt: message.readAt || 'undefined',
+      read: message.read
+    });
     
     // Extract chat ID based on message direction
     const userId = await AsyncStorage.getItem('userId');
@@ -164,6 +193,8 @@ export const handleSocketMessage = (message: Message) => async (dispatch: any, g
     const existingChatIndex = recentChats.findIndex((chat: ChatUser) => chat._id === chatId);
     
     if (existingChatIndex >= 0) {
+      console.log(`🔄 Updating existing chat at index ${existingChatIndex} for user ${chatId}`);
+      
       // Update existing chat with new message
       const updatedChats = [...recentChats];
       updatedChats[existingChatIndex] = {
@@ -183,6 +214,12 @@ export const handleSocketMessage = (message: Message) => async (dispatch: any, g
         return bTime - aTime;
       });
       
+      console.log(`📝 Updating recent chats with new message:`, {
+        chatId,
+        lastMessage: message.content,
+        unreadCount: updatedChats[existingChatIndex].unreadCount
+      });
+      
       // Update state
       dispatch(setRecentChats(updatedChats));
       
@@ -190,14 +227,13 @@ export const handleSocketMessage = (message: Message) => async (dispatch: any, g
       AsyncStorage.setItem('recentChats', JSON.stringify(updatedChats))
         .catch(err => console.error('Error caching updated chats:', err));
     } else {
+      console.log(`🆕 New chat detected for user ${chatId}, fetching updated chat list`);
       // If this is a new chat, fetch the updated chat list
       dispatch(fetchRecentChats());
     }
     
-    // If the message is for the current active chat, also fetch messages to ensure UI is updated
-    if (currentChat === chatId) {
-      dispatch(fetchMessages(chatId));
-    }
+    // Message is already added to Redux state above, no need to fetch again
+    console.log(`✅ Socket message handled successfully for chat ${chatId}`);
   } catch (error) {
     console.error('Error handling socket message:', error);
   }

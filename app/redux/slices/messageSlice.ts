@@ -62,10 +62,42 @@ const messageSlice = createSlice({
         state.messages[chatId] = [];
       }
       
-      // Check if message already exists
-      const messageExists = state.messages[chatId].some(msg => msg._id === message._id);
-      if (!messageExists) {
-        state.messages[chatId].push(message);
+      // Check if message already exists by exact ID
+      const existingMessageIndex = state.messages[chatId].findIndex(msg => msg._id === message._id);
+      
+      if (existingMessageIndex >= 0) {
+        // Update existing message (replace optimistic with real message)
+        state.messages[chatId][existingMessageIndex] = message;
+        console.log(`🔄 Updated existing message ${message._id} with enhanced data:`, {
+          status: message.status,
+          deliveredAt: message.deliveredAt,
+          readAt: message.readAt
+        });
+      } else {
+        // Check if this is a real message replacing an optimistic one
+        const optimisticIndex = state.messages[chatId].findIndex(msg => 
+          msg._id.startsWith('local_') && 
+          msg.content === message.content &&
+          Math.abs(new Date(msg.createdAt).getTime() - new Date(message.createdAt).getTime()) < 5000
+        );
+        
+        if (optimisticIndex >= 0) {
+          // Replace optimistic message with real one
+          state.messages[chatId][optimisticIndex] = message;
+          console.log(`🔄 Replaced optimistic message with real message ${message._id}:`, {
+            status: message.status,
+            deliveredAt: message.deliveredAt,
+            readAt: message.readAt
+          });
+        } else {
+          // Add new message
+          state.messages[chatId].push(message);
+          console.log(`➕ Added new message ${message._id}:`, {
+            status: message.status,
+            deliveredAt: message.deliveredAt,
+            readAt: message.readAt
+          });
+        }
         
         // Sort by createdAt date
         state.messages[chatId].sort((a, b) => 
@@ -93,6 +125,50 @@ const messageSlice = createSlice({
         });
       }
     },
+    // Update message status
+    updateMessageStatus: (state, action: PayloadAction<{ 
+      messageId: string, 
+      status: 'sent' | 'delivered' | 'read',
+      timestamp?: string 
+    }>) => {
+      const { messageId, status, timestamp } = action.payload;
+      
+      // Find the message across all chats
+      Object.keys(state.messages).forEach(chatId => {
+        const messageIndex = state.messages[chatId].findIndex(msg => msg._id === messageId);
+        if (messageIndex >= 0) {
+          state.messages[chatId][messageIndex].status = status;
+          
+          // Update timestamps based on status
+          if (status === 'delivered' && timestamp) {
+            state.messages[chatId][messageIndex].deliveredAt = timestamp;
+          } else if (status === 'read' && timestamp) {
+            state.messages[chatId][messageIndex].readAt = timestamp;
+            state.messages[chatId][messageIndex].read = true; // For backward compatibility
+          }
+        }
+      });
+    },
+    // Update user status in recent chats
+    updateUserStatus: (state, action: PayloadAction<{ 
+      userId: string, 
+      isOnline: boolean,
+      lastSeenAt?: string 
+    }>) => {
+      const { userId, isOnline, lastSeenAt } = action.payload;
+      
+      // Update user status in recent chats
+      state.recentChats = state.recentChats.map(chat => {
+        if (chat._id === userId) {
+          return {
+            ...chat,
+            isOnline,
+            lastSeenAt: lastSeenAt || chat.lastSeenAt
+          };
+        }
+        return chat;
+      });
+    },
     // Clear all chat data
     clearChatData: (state) => {
       state.messages = {};
@@ -113,6 +189,8 @@ export const {
   setRecentChats,
   setTypingStatus,
   markAsRead,
+  updateMessageStatus,
+  updateUserStatus,
   clearChatData
 } = messageSlice.actions;
 

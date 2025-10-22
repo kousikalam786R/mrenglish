@@ -25,10 +25,15 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import { isValidObjectId } from '../utils/validationUtils';
 import { useAppDispatch, useAppSelector } from '../redux/hooks';
 import { fetchMessages, sendNewMessage, handleSocketMessage } from '../redux/thunks/messageThunks';
-import { setCurrentChat, setTypingStatus } from '../redux/slices/messageSlice';
+import { setCurrentChat, setTypingStatus, updateMessageStatus, addMessage } from '../redux/slices/messageSlice';
 import MessageBubble from '../components/MessageBubble';
 import DateSeparator from '../components/DateSeparator';
 import TypingIndicator from '../components/TypingIndicator';
+import OnlineStatus from '../components/OnlineStatus';
+import DebugPanel from '../components/DebugPanel';
+import MessageDebugger from '../components/MessageDebugger';
+import simpleUserStatusService from '../services/simpleUserStatusService';
+import { useUserStatus } from '../hooks/useUserStatus';
 
 // Define the Extended user interface
 interface ExtendedUser extends User {
@@ -40,6 +45,7 @@ interface ChatPartnerDetails {
   name: string;
   avatar?: string;
   isOnline: boolean;
+  lastSeenAt?: string;
 }
 
 // Group messages by date
@@ -60,7 +66,8 @@ const ChatDetailScreen = () => {
   const [partnerDetails, setPartnerDetails] = useState<ChatPartnerDetails>({
     name: 'User',
     avatar: undefined,
-    isOnline: false
+    isOnline: false,
+    lastSeenAt: undefined
   });
   
   // References
@@ -77,6 +84,9 @@ const ChatDetailScreen = () => {
   
   // Extract chat partner details from route params with proper typing
   const id = route.params?.id as string || '0';
+
+  // Get user status from centralized service
+  const userStatus = useUserStatus(id);
   const name = route.params?.name as string || '';
   const avatar = route.params?.avatar;
   const user = route.params?.user as ChatUser | undefined;
@@ -87,26 +97,29 @@ const ChatDetailScreen = () => {
   // Get messages for this chat
   const chatMessages = messages[id] || [];
   
-  // Debug logs and controlled auto-scroll
+  // Smooth auto-scroll for new messages (optimized)
   const prevMessageCountRef = useRef(0);
+  const isUserScrollingRef = useRef(false);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   useEffect(() => {
-    console.log('Chat ID:', id);
-    console.log('Current messages count:', chatMessages.length);
-    console.log('Messages state keys:', Object.keys(messages));
-    
-    // Only auto-scroll when message count increases (new message added)
+    // Only auto-scroll when message count increases and user isn't manually scrolling
     if (chatMessages.length > prevMessageCountRef.current && chatMessages.length > 0) {
-      console.log(`📜 New message detected, scrolling to bottom (${prevMessageCountRef.current} -> ${chatMessages.length})`);
-      setTimeout(() => {
-        if (flatListRef.current) {
-          flatListRef.current.scrollToEnd({ animated: true });
-        }
-      }, 150);
+      console.log(`📜 New message detected (${prevMessageCountRef.current} -> ${chatMessages.length})`);
+      
+      // Only auto-scroll if user isn't actively scrolling
+      if (!isUserScrollingRef.current) {
+        // Use requestAnimationFrame for smoother animations
+        requestAnimationFrame(() => {
+          if (flatListRef.current) {
+            flatListRef.current.scrollToEnd({ animated: true });
+          }
+        });
+      }
     }
     
     prevMessageCountRef.current = chatMessages.length;
-  }, [id, chatMessages]);
+  }, [chatMessages.length]); // Only depend on length, not entire chatMessages array
   
   // Format time string for messages
   const formatTime = (dateString: string) => {
@@ -170,7 +183,8 @@ const ChatDetailScreen = () => {
             setPartnerDetails({
               name: userInfo.name || name || 'User',
               avatar: userInfo.profilePic || avatar,
-              isOnline: false
+              isOnline: false,
+              lastSeenAt: userInfo.lastSeenAt
             });
           } else {
             console.warn('Could not fetch user info, using default values');
@@ -178,7 +192,8 @@ const ChatDetailScreen = () => {
             setPartnerDetails({
               name: name || 'User',
               avatar: avatar,
-              isOnline: false
+              isOnline: false,
+              lastSeenAt: undefined
             });
           }
         } catch (error) {
@@ -187,7 +202,8 @@ const ChatDetailScreen = () => {
           setPartnerDetails({
             name: name || 'User',
             avatar: avatar,
-            isOnline: false
+            isOnline: false,
+            lastSeenAt: undefined
           });
         }
       } else {
@@ -196,13 +212,26 @@ const ChatDetailScreen = () => {
         setPartnerDetails({
           name: user.name || name || 'User',
           avatar: user.profilePic || avatar,
-          isOnline: user.isOnline || false
+          isOnline: user.isOnline || false,
+          lastSeenAt: user.lastSeenAt
         });
       }
     };
     
     validateChatPartner();
   }, [id, name, avatar, navigation, route.params, user]);
+
+  // Mark all messages as read when chat is viewed
+  useEffect(() => {
+    if (chatMessages.length > 0) {
+      // Small delay to ensure messages are fully loaded
+      const timer = setTimeout(() => {
+        markAllMessagesAsRead();
+      }, 1000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [chatMessages.length]);
   
   // Fetch user ID on component mount
   useEffect(() => {
@@ -280,35 +309,94 @@ const ChatDetailScreen = () => {
   
   // Set up socket listeners
   useEffect(() => {
+    console.log(`🔗 Setting up socket listeners for chat ${id}`);
+    
     // Initialize socket connection
     socketService.initialize();
     
+    // Quick connectivity check and request user status
+    setTimeout(() => {
+      const socket = socketService.getSocket();
+      if (socket && socket.connected) {
+        console.log(`✅ Socket connected for chat ${id}`);
+        
+        // Request current user status for this chat partner
+        socket.emit('get-user-status', { userId: id });
+        console.log(`📡 Requested user status for ${id}`);
+      } else {
+        console.log(`⚠️  Socket not connected, will retry...`);
+      }
+    }, 1000);
+    
     // Listen for user status changes
-    socketService.onUserStatus((data) => {
+    socketService.socketOn('user-status', (data) => {
+      console.log('📡 USER STATUS EVENT in ChatDetailScreen:', data);
+      console.log('📡 Looking for user ID:', id, 'Received user ID:', data?.userId);
       if (data && data.userId === id) {
+        console.log('✅ Updating partner status:', {
+          userId: data.userId,
+          status: data.status,
+          lastSeen: data.lastSeen
+        });
+        
+        // Update local state
         setPartnerDetails(prev => ({
           ...prev,
-          isOnline: data.status === 'online'
+          isOnline: data.status === 'online',
+          lastSeenAt: data.lastSeen || prev.lastSeenAt
+        }));
+        
+        // User status is now managed by the centralized service
+      } else {
+        console.log('⚠️ User status event not for this chat partner');
+      }
+    });
+    
+    // Note: message-sent event is handled by socketService.sendPrivateMessage
+    // The real message will come back through the new-message event
+    
+    // Listen for message delivery confirmations
+    socketService.socketOn('message-delivered', (data) => {
+      console.log('✅ Message delivered:', data);
+      if (data && data.messageId && data.deliveredAt) {
+        dispatch(updateMessageStatus({
+          messageId: data.messageId,
+          status: 'delivered',
+          timestamp: data.deliveredAt
+        }));
+      }
+    });
+    
+    // Listen for message read confirmations
+    socketService.socketOn('message-read', (data) => {
+      console.log('👁️  Message read:', data);
+      if (data && data.messageId && data.readAt) {
+        dispatch(updateMessageStatus({
+          messageId: data.messageId,
+          status: 'read',
+          timestamp: data.readAt
         }));
       }
     });
     
     // Listen for typing indicators
-    socketService.onUserTyping((data) => {
+    socketService.socketOn('user-typing', (data) => {
+      console.log('⌨️  TYPING EVENT in ChatDetailScreen:', data);
       if (data && data.userId === id) {
         dispatch(setTypingStatus({ userId: id, isTyping: true }));
       }
     });
     
-    socketService.onTypingStopped((data) => {
+    socketService.socketOn('typing-stopped', (data) => {
+      console.log('⌨️  TYPING STOPPED EVENT in ChatDetailScreen:', data);
       if (data && data.userId === id) {
         dispatch(setTypingStatus({ userId: id, isTyping: false }));
       }
     });
     
-    // Listen for new messages
-    socketService.onNewMessage((data) => {
-      console.log('📨 Real-time message received:', data);
+    // Listen for new messages (clean, production-ready)
+    socketService.socketOn('new-message', (data) => {
+      console.log('📨 New message received for chat', id);
       
       // Check if this message is for this chat
       if (data && data.message) {
@@ -317,97 +405,83 @@ const ChatDetailScreen = () => {
         const receiverId = typeof message.receiver === 'object' ? message.receiver._id : message.receiver;
         const currentUserIdValue = currentUserId.current;
         
-        console.log(`📨 Message details:`, {
-          from: senderId,
-          to: receiverId, 
-          currentUser: currentUserIdValue,
-          currentChat: id,
-          messageId: message._id
-        });
+        // Check if this is an incoming message for this chat
+        const isIncomingMessage = senderId === id && receiverId === currentUserIdValue;
         
-        // Only add message if it's for this chat AND not sent by current user
-        // (to avoid duplicates with optimistic updates)
-        const isForThisChat = senderId === id || receiverId === id;
-        const isFromCurrentUser = senderId === currentUserIdValue;
-        
-        if (isForThisChat && !isFromCurrentUser) {
-          console.log('✅ Adding real-time incoming message to current chat');
-          
-          // Check if we already have this message (prevent duplicates)
+        if (isIncomingMessage) {
+          // Check for duplicates
           const existingMessage = chatMessages.find(msg => 
             msg._id === message._id || 
             (msg.content === message.content && 
-             Math.abs(new Date(msg.createdAt).getTime() - new Date(message.createdAt).getTime()) < 1000)
+             Math.abs(new Date(msg.createdAt).getTime() - new Date(message.createdAt).getTime()) < 5000)
           );
           
           if (!existingMessage) {
-            // Add message directly to Redux state
+            console.log('✅ Adding new message to chat');
             dispatch(handleSocketMessage(message));
             
-            // Scroll to bottom to show new message
+            // Mark message as read since user is viewing the chat
             setTimeout(() => {
-              if (flatListRef.current) {
-                flatListRef.current.scrollToEnd({ animated: true });
-              }
-            }, 100);
+              markMessageAsRead(message._id, senderId);
+            }, 1000); // Small delay to ensure message is displayed
           } else {
-            console.log('⚠️  Duplicate message detected, skipping');
+            console.log('⚠️  Duplicate message, skipping');
           }
-        } else if (isFromCurrentUser) {
-          console.log('⚠️  Skipping own message (already added optimistically)');
         } else {
-          console.log('⚠️  Message not for this chat, ignoring');
+          console.log('⚠️  Message not for this chat');
         }
-      } else {
-        console.log('⚠️  Invalid message data structure:', data);
       }
     });
     
+    // Periodic socket health check and user activity tracking
+    const heartbeatInterval = setInterval(() => {
+      const socket = socketService.getSocket();
+      if (!socket || !socket.connected) {
+        console.log('🔌 Socket disconnected, attempting reconnection...');
+        socketService.initialize();
+      } else {
+        // Send user activity to update last seen
+        socket.emit('user-activity');
+      }
+    }, 30000); // Every 30 seconds
+    
     // Clean up listeners when component unmounts
     return () => {
-      socketService.removeAllListeners();
+      clearInterval(heartbeatInterval);
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+      console.log(`🧹 ChatDetailScreen: Cleaning up socket listeners for chat ${id}`);
+      socketService.socketOff('user-status');
+      socketService.socketOff('user-typing');
+      socketService.socketOff('typing-stopped');
+      socketService.socketOff('new-message');
+      socketService.socketOff('message-delivered');
+      socketService.socketOff('message-read');
     };
   }, [id, dispatch]);
   
-  // Handle sending a message
+  // Handle sending a message (optimized for smooth UX)
   const handleSend = async () => {
     if (message.trim().length === 0) return;
     
     const messageContent = message.trim();
-    const currentUserIdValue = currentUserId.current;
     
     // Clear input immediately for better UX
     setMessage('');
     
-    // Create optimistic message for immediate display
-    const optimisticMessage = {
-      _id: `local_${Date.now()}_${Math.random()}`, // Unique local ID
-      content: messageContent,
-      sender: currentUserIdValue,
-      receiver: id,
-      createdAt: new Date().toISOString(),
-      read: false
-    };
+    // Reset user scrolling state so auto-scroll works for sent message
+    isUserScrollingRef.current = false;
     
-    console.log('📤 Sending optimistic message:', optimisticMessage);
-    
-    // Add optimistic message immediately to Redux state
-    dispatch(handleSocketMessage(optimisticMessage));
-    
-    // Scroll to bottom immediately
-    setTimeout(() => {
-      if (flatListRef.current) {
-        flatListRef.current.scrollToEnd({ animated: true });
-      }
-    }, 50);
-    
-    // Send actual message via socket/API
+    // Send message via Redux thunk (it handles optimistic updates)
     try {
       await dispatch(sendNewMessage({ receiverId: id, content: messageContent }));
-      console.log('✅ Message sent successfully');
+      console.log('✅ Message sent successfully via optimistic update');
+      
+      // Note: No manual scrolling needed - useEffect will handle it when message is added
     } catch (error) {
       console.error('❌ Failed to send message:', error);
-      // TODO: Handle message send failure (could remove optimistic message)
+      // TODO: Show error to user and handle optimistic update rollback
     }
   };
   
@@ -417,11 +491,13 @@ const ChatDetailScreen = () => {
     
     // Handle typing indicator
     if (text.length > 0 && !typingTimeout) {
-      socketService.startTyping(id);
+      console.log(`⌨️  Starting typing to ${id}`);
+      socketService.socketEmit('typing', { receiverId: id });
       
       // Set a timeout to stop the typing indicator after 2 seconds of inactivity
       const timeout = setTimeout(() => {
-        socketService.stopTyping(id);
+        console.log(`⌨️  Stopping typing to ${id}`);
+        socketService.socketEmit('typing-stopped', { receiverId: id });
         setTypingTimeout(null);
       }, 2000);
       
@@ -429,10 +505,45 @@ const ChatDetailScreen = () => {
     } else if (text.length === 0 && typingTimeout) {
       clearTimeout(typingTimeout);
       setTypingTimeout(null);
-      socketService.stopTyping(id);
+      console.log(`⌨️  Stopping typing to ${id} (text cleared)`);
+      socketService.socketEmit('typing-stopped', { receiverId: id });
     }
   };
   
+  // Mark message as read
+  const markMessageAsRead = (messageId: string, senderId: string) => {
+    const socket = socketService.getSocket();
+    if (socket && socket.connected) {
+      socket.emit('mark-message-read', {
+        messageId,
+        senderId
+      });
+      console.log(`📖 Marked message ${messageId} as read`);
+    }
+  };
+
+  // Mark all unread messages as read when chat is viewed
+  const markAllMessagesAsRead = () => {
+    const currentUserIdValue = currentUserId.current;
+    if (!currentUserIdValue) return;
+
+    // Find all unread messages from the other user
+    const unreadMessages = chatMessages.filter(msg => {
+      const senderId = typeof msg.sender === 'object' ? msg.sender._id : msg.sender;
+      return senderId !== currentUserIdValue && !msg.read;
+    });
+
+    // Mark each unread message as read
+    unreadMessages.forEach(msg => {
+      const senderId = typeof msg.sender === 'object' ? msg.sender._id : msg.sender;
+      markMessageAsRead(msg._id, senderId);
+    });
+
+    if (unreadMessages.length > 0) {
+      console.log(`📖 Marking ${unreadMessages.length} messages as read`);
+    }
+  };
+
   // Handle call button press
   const handleCall = () => {
     navigation.navigate('CallScreen', {
@@ -457,16 +568,38 @@ const ChatDetailScreen = () => {
         
         <View style={styles.headerUserInfo}>
           <Text style={styles.headerUserName}>{partnerDetails.name}</Text>
-          <Text style={styles.headerUserStatus}>
-            {partnerDetails.isOnline ? 'Online' : 'Offline'}
-          </Text>
+          <OnlineStatus 
+            user={{
+              _id: id,
+              name: partnerDetails.name,
+              email: '',
+              isOnline: userStatus?.isOnline ?? partnerDetails.isOnline,
+              lastSeenAt: userStatus?.lastSeenAt ?? partnerDetails.lastSeenAt,
+              isTyping: isPartnerTyping
+            }}
+            showLastSeen={true}
+            compact={false}
+          />
+          {/* Debug info */}
+          {__DEV__ && (
+            <Text style={{ fontSize: 10, color: '#999' }}>
+              Debug: Online={userStatus?.isOnline ? 'Yes' : 'No'}, 
+              LastSeen={userStatus?.lastSeenAt ? 'Yes' : 'No'}
+            </Text>
+          )}
         </View>
         
         <TouchableOpacity style={styles.headerAction} onPress={handleCall}>
           <Icon name="call" size={24} color="#6A3DE8" />
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.headerAction} onPress={() => {}}>
+        <TouchableOpacity style={styles.headerAction} onPress={() => {
+          navigation.navigate('CallScreen', {
+            id: id,
+            name: partnerDetails.name,
+            isVideoCall: true
+          });
+        }}>
           <Icon name="videocam" size={24} color="#6A3DE8" />
         </TouchableOpacity>
       </View>
@@ -490,10 +623,11 @@ const ChatDetailScreen = () => {
     }
     
     // Check if the current user is the sender (improved logic)
-    const isSender = 
+    const isSender: boolean = Boolean(
       item._id.startsWith('local_') || // Local optimistic messages
       senderId === currentUserIdValue || // Direct ID match
-      (senderId && currentUserIdValue && senderId.toString() === currentUserIdValue.toString()); // String comparison
+      (senderId && currentUserIdValue && senderId.toString() === currentUserIdValue.toString()) // String comparison
+    );
     
     // Create a stable key that handles both local and server IDs
     const messageKey = item._id.startsWith('local_') 
@@ -510,7 +644,16 @@ const ChatDetailScreen = () => {
           username={partnerDetails.name}
           avatar={partnerDetails.avatar}
           showAvatar={false} // Disable avatar to prevent UI hierarchy issues
+          message={item} // Pass full message object for enhanced status
         />
+        {/* Debug info for each message */}
+        {/* {__DEV__ && (
+          <Text style={{ fontSize: 8, color: '#999', marginLeft: 10 }}>
+            Status: {item.status || 'none'} | 
+            Delivered: {item.deliveredAt ? 'yes' : 'no'} | 
+            Read: {item.readAt ? 'yes' : 'no'}
+          </Text>
+        )} */}
       </View>
     );
   };
@@ -546,6 +689,9 @@ const ChatDetailScreen = () => {
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       {renderHeader()}
       
+      {/* Debug Panels - Remove in production */}
+     
+      
       <KeyboardAvoidingView
         style={styles.keyboardAvoidingContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -563,14 +709,41 @@ const ChatDetailScreen = () => {
             renderItem={renderMessageItem}
             contentContainerStyle={styles.messagesContainer}
             onContentSizeChange={() => {
-              if (flatListRef.current && chatMessages.length > 0) {
+              // Only scroll on initial load, not for new messages (useEffect handles those)
+              if (flatListRef.current && chatMessages.length > 0 && prevMessageCountRef.current === 0) {
                 flatListRef.current.scrollToEnd({ animated: false });
               }
             }}
             onLayout={() => {
-              if (flatListRef.current && chatMessages.length > 0) {
+              // Only scroll on initial load
+              if (flatListRef.current && chatMessages.length > 0 && prevMessageCountRef.current === 0) {
                 flatListRef.current.scrollToEnd({ animated: false });
               }
+            }}
+            onScrollBeginDrag={() => {
+              // User started scrolling manually
+              isUserScrollingRef.current = true;
+              console.log('👆 User started manual scrolling');
+            }}
+            onScrollEndDrag={() => {
+              // User stopped scrolling, reset after a delay
+              if (scrollTimeoutRef.current) {
+                clearTimeout(scrollTimeoutRef.current);
+              }
+              scrollTimeoutRef.current = setTimeout(() => {
+                isUserScrollingRef.current = false;
+                console.log('👆 User manual scrolling ended');
+              }, 2000); // Allow auto-scroll again after 2 seconds
+            }}
+            onMomentumScrollEnd={() => {
+              // Scroll animation finished
+              if (scrollTimeoutRef.current) {
+                clearTimeout(scrollTimeoutRef.current);
+              }
+              scrollTimeoutRef.current = setTimeout(() => {
+                isUserScrollingRef.current = false;
+                console.log('👆 Scroll momentum ended');
+              }, 1000);
             }}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
@@ -587,8 +760,12 @@ const ChatDetailScreen = () => {
                 />
               ) : null
             }
-            refreshing={loading}
-            onRefresh={loadMessages}
+            refreshing={false}
+            onRefresh={undefined}
+            showsVerticalScrollIndicator={true}
+            maintainVisibleContentPosition={{
+              minIndexForVisible: 0,
+            }}
           />
         )}
         

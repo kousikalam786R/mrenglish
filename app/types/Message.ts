@@ -4,6 +4,11 @@ export interface User {
   email: string;
   username?: string;
   profilePic?: string;
+  // Enhanced presence tracking
+  isOnline?: boolean;
+  lastSeenAt?: string;
+  isTyping?: boolean;
+  typingInChat?: string;
 }
 
 export interface Message {
@@ -13,6 +18,11 @@ export interface Message {
   content: string;
   read: boolean;
   createdAt: string;
+  // Enhanced status tracking
+  status?: 'sent' | 'delivered' | 'read';
+  sentAt?: string;
+  deliveredAt?: string;
+  readAt?: string;
 }
 
 export interface ChatUser extends User {
@@ -20,6 +30,8 @@ export interface ChatUser extends User {
   lastMessage?: Message;
   isOnline?: boolean;
   user?: User;
+  // Enhanced presence
+  lastSeenAt?: string;
 }
 
 export interface MessageState {

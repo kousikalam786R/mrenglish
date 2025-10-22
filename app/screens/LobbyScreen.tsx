@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   View, 
   Text, 
@@ -26,6 +26,8 @@ import IconMaterial from 'react-native-vector-icons/MaterialIcons';
 import ConnectingScreen from '../components/ConnectingScreen';
 import PartnerSearchScreen from '../components/PartnerSearchScreen';
 import { mediaDevices } from 'react-native-webrtc';
+import simpleUserStatusService from '../services/simpleUserStatusService';
+import { useUserStatusService } from '../hooks/useUserStatus';
 
 // Define user type
 interface User {
@@ -50,6 +52,36 @@ interface UserCardProps {
 }
 
 const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps) => {
+  // Get user status from centralized service with subscription
+  const [userStatus, setUserStatus] = useState(() => simpleUserStatusService.getUserStatus(user._id));
+
+  // Subscribe to status updates for this user
+  useEffect(() => {
+    // Add user to tracking
+    simpleUserStatusService.addUserToTracking(user._id);
+
+    // Get initial status
+    const initialStatus = simpleUserStatusService.getUserStatus(user._id);
+    if (initialStatus) {
+      setUserStatus(initialStatus);
+    }
+
+    // Subscribe to status updates
+    const unsubscribe = simpleUserStatusService.subscribeToStatusUpdates((allStatuses) => {
+      const status = allStatuses.get(user._id);
+      if (status) {
+        console.log(`📊 UserCard: Status updated for ${user.name} (${user._id}):`, {
+          isOnline: status.isOnline,
+          lastSeenAt: status.lastSeenAt
+        });
+        setUserStatus(status);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [user._id, user.name]);
   // Level indicator background colors
   const getLevelBgColor = (level?: string) => {
     if (!level) return '#e0e0e0';
@@ -77,7 +109,7 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
           <View style={[styles.levelIndicator, { backgroundColor: getLevelBgColor(user.level) }]}>
             <Text style={styles.levelText}>{user.level || 'A1'}</Text>
           </View>
-          {user.isOnline && <View style={styles.onlineIndicator} />}
+          {(userStatus?.isOnline ?? user.isOnline) && <View style={styles.onlineIndicator} />}
         </View>
         
         <View style={styles.userInfo}>
@@ -91,12 +123,18 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
           <Text style={styles.userCountry}>
             {user.country || '🌎 Global'} • {user.talks || 0} talks
           </Text>
-          <Text style={user.isOnline ? styles.onlineText : styles.offlineText}>
-            {user.isOnline ? 'online' : 'offline'}
+          <Text style={(userStatus?.isOnline ?? user.isOnline) ? styles.onlineText : styles.offlineText}>
+            {(userStatus?.isOnline ?? user.isOnline) ? 'online' : 'offline'}
           </Text>
+          {/* Debug info */}
+          {__DEV__ && (
+            <Text style={{ fontSize: 8, color: '#999', marginTop: 2 }}>
+              {userStatus?.isOnline ? '🟢' : '🔴'} {userStatus?.isOnline ? 'Online' : 'Offline'}
+            </Text>
+          )}
         </View>
         
-        {user.isOnline ? (
+        {(userStatus?.isOnline ?? user.isOnline) ? (
           <View style={styles.buttonsContainer}>
             <TouchableOpacity 
               style={[styles.callButton, styles.callButtonFullWidth]} 
@@ -142,6 +180,18 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   const [searchEmoji, setSearchEmoji] = useState('👨‍🍳');
   const [showConnecting, setShowConnecting] = useState(false);
   const [connectingPartner, setConnectingPartner] = useState<User | null>(null);
+
+  // Initialize user status service
+  const { isInitialized: statusServiceReady } = useUserStatusService();
+
+  // Add users to status tracking when users list changes
+  useEffect(() => {
+    if (statusServiceReady && users.length > 0) {
+      users.forEach(user => {
+        simpleUserStatusService.addUserToTracking(user._id);
+      });
+    }
+  }, [statusServiceReady, users]);
 
   // Check microphone permission on component mount
   useEffect(() => {
@@ -267,7 +317,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       setCurrentUserReady(false);
       
       // Listen for user status updates
-      socketService.socketOn('user_status', (data: any) => {
+      socketService.socketOn('user-status', (data: any) => {
         if (data && data.userId) {
           console.log(`Updating user ${data.userId} status to ${data.status}`);
           updateUserStatus(data.userId, data.status === 'online');

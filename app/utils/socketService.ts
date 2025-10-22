@@ -165,28 +165,28 @@ export const storeUserData = (userData: any): void => {
  * Listen for user status changes
  */
 export const onUserStatus = (callback: (data: UserStatusData) => void): void => {
-  socketOn('user_status', callback);
+  socketOn('user-status', callback);
 };
 
 /**
  * Listen for typing indicators
  */
 export const onUserTyping = (callback: (data: TypingData) => void): void => {
-  socketOn('typing', callback);
+  socketOn('user-typing', callback);
 };
 
 /**
  * Listen for typing stopped indicators
  */
 export const onTypingStopped = (callback: (data: TypingData) => void): void => {
-  socketOn('typing_stopped', callback);
+  socketOn('typing-stopped', callback);
 };
 
 /**
  * Listen for new messages
  */
 export const onNewMessage = (callback: (data: MessageData) => void): void => {
-  socketOn('new_message', callback);
+  socketOn('new-message', callback);
 };
 
 /**
@@ -200,7 +200,7 @@ export const startTyping = (receiverId: string): void => {
  * Send typing stopped indicator to server
  */
 export const stopTyping = (receiverId: string): void => {
-  socketEmit('typing_stopped', { receiverId });
+  socketEmit('typing-stopped', { receiverId });
 };
 
 /**
@@ -248,10 +248,10 @@ export const removeAllListeners = (): void => {
   if (!socket) return;
   
   // Remove common event listeners
-  socket.off('user_status');
-  socket.off('typing');
-  socket.off('typing_stopped');
-  socket.off('new_message');
+  socket.off('user-status');
+  socket.off('user-typing');
+  socket.off('typing-stopped');
+  socket.off('new-message');
 };
 
 // Default export for backward compatibility
