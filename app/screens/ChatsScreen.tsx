@@ -1,4 +1,4 @@
-import React, { useState, useEffect, memo, useCallback } from 'react';
+import React, { useState, useEffect, memo, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -55,6 +55,9 @@ const ChatItem = memo<ChatItemProps>(({ chat, onPress }) => {
           lastSeenAt: status.lastSeenAt
         });
         setUserStatus(status);
+      } else {
+        console.log(`📊 ChatItem: No status found for ${chat.name} (${chat._id}) in allStatuses map`);
+        console.log(`📊 ChatItem: Available statuses:`, Array.from(allStatuses.keys()));
       }
     });
 
@@ -154,11 +157,11 @@ const ChatItem = memo<ChatItemProps>(({ chat, onPress }) => {
               compact={true}
             />
             {/* Debug info */}
-            {__DEV__ && (
+            {/* {__DEV__ && (
               <Text style={{ fontSize: 8, color: '#999', marginLeft: 4 }}>
                 {userStatus?.isOnline ? '🟢' : '🔴'} {userStatus?.isOnline ? 'Online' : 'Offline'}
               </Text>
-            )}
+            )} */}
           </View>
           {lastMessageTime && <Text style={styles.chatTime}>{formatTime(lastMessageTime)}</Text>}
         </View>
@@ -215,8 +218,21 @@ const ChatsScreen = () => {
     if (statusServiceReady && recentChats.length > 0) {
       console.log('📋 ChatsScreen: Adding users to status tracking');
       recentChats.forEach(chat => {
-        simpleUserStatusService.addUserToTracking(chat._id);
+        console.log(`📋 ChatsScreen: Adding user ${chat.name} (${chat._id}) to tracking`);
+        // Add user to tracking with initial status from chat data
+        simpleUserStatusService.addUserToTracking(chat._id, {
+          isOnline: chat.isOnline || false,
+          lastSeenAt: chat.lastSeenAt
+        });
       });
+      
+      // Request fresh status for all users after a delay to ensure socket is ready
+      setTimeout(() => {
+        console.log('📋 ChatsScreen: Requesting fresh status for all users');
+        recentChats.forEach(chat => {
+          simpleUserStatusService.requestUserStatus(chat._id);
+        });
+      }, 3000);
     }
   }, [statusServiceReady, recentChats]);
   
@@ -227,8 +243,14 @@ const ChatsScreen = () => {
         id: chat._id,
         name: chat.name,
         lastMessage: chat.lastMessage?.content?.substring(0, 20) + '...',
-        unreadCount: chat.unreadCount
+        unreadCount: chat.unreadCount,
+        isOnline: chat.isOnline
       })));
+      
+      // Debug: Log user status service info
+      if (__DEV__) {
+        console.log('📋 ChatsScreen: User status service debug info:', simpleUserStatusService.getDebugInfo());
+      }
     }
   }, [recentChats]);
   const [mounted, setMounted] = useState(true);
@@ -246,8 +268,10 @@ const ChatsScreen = () => {
       const socket = socketService.getSocket();
       if (socket && socket.connected) {
         console.log('✅ ChatsScreen: Socket connected successfully');
+        console.log('✅ ChatsScreen: Socket ID:', socket.id);
       } else {
         console.log('⚠️ ChatsScreen: Socket not connected');
+        console.log('⚠️ ChatsScreen: Socket object:', socket);
       }
     }, 1000);
     
@@ -309,6 +333,14 @@ const ChatsScreen = () => {
     navigation.navigate('Contacts');
   }, [navigation]);
   
+  // Debug: Force refresh user statuses
+  const handleRefreshStatuses = useCallback(() => {
+    if (__DEV__) {
+      console.log('🔄 ChatsScreen: Manually refreshing user statuses');
+      simpleUserStatusService.forceRefreshAllStatuses();
+    }
+  }, []);
+  
   // Render a chat item - memoized to prevent unnecessary rerenders
   const renderItem = useCallback(({ item }: { item: ChatUser }) => (
     <ChatItem 
@@ -320,13 +352,29 @@ const ChatsScreen = () => {
   // Optimize list rendering
   const keyExtractor = useCallback((item: ChatUser) => item._id, []);
   
+  // Sort chats by last message time (newest first) to ensure latest chats appear at top
+  const sortedChats = useMemo(() => {
+    return [...recentChats].sort((a, b) => {
+      const aTime = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : 0;
+      const bTime = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : 0;
+      return bTime - aTime; // Descending order (newest first)
+    });
+  }, [recentChats]);
+  
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Chats</Text>
-        <TouchableOpacity style={styles.newChatButton} onPress={handleNewChat}>
-          <Icon name="edit" size={24} color="#6A3DE8" />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {__DEV__ && (
+            <TouchableOpacity style={styles.debugButton} onPress={handleRefreshStatuses}>
+              <Icon name="refresh" size={20} color="#6A3DE8" />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.newChatButton} onPress={handleNewChat}>
+            <Icon name="edit" size={24} color="#6A3DE8" />
+          </TouchableOpacity>
+        </View>
       </View>
       
       {loading ? (
@@ -335,7 +383,7 @@ const ChatsScreen = () => {
         </View>
       ) : (
         <FlatList
-          data={recentChats}
+          data={sortedChats}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
           contentContainerStyle={styles.chatsList}
@@ -375,6 +423,16 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: '#333333',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  debugButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#F0F0F0',
+    marginRight: 8,
   },
   newChatButton: {
     padding: 8,

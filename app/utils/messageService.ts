@@ -228,11 +228,20 @@ export const getRecentChats = async (): Promise<ChatUser[]> => {
     const filteredChats = chats.filter(chat => chat._id !== userId);
     console.log(`Filtered out ${chats.length - filteredChats.length} self-chats`);
     
+    // Sort chats by last message time (newest first)
+    const sortedChats = filteredChats.sort((a, b) => {
+      const aTime = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : 0;
+      const bTime = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : 0;
+      return bTime - aTime; // Descending order (newest first)
+    });
+    
+    console.log(`Sorted ${sortedChats.length} chats by last message time`);
+    
     // Cache the transformed chats
-    AsyncStorage.setItem('recentChats', JSON.stringify(filteredChats))
+    AsyncStorage.setItem('recentChats', JSON.stringify(sortedChats))
       .catch(err => console.error('Error caching chats:', err));
     
-    return filteredChats;
+    return sortedChats;
   } catch (error) {
     console.error('Error fetching recent chats:', error);
     throw error;

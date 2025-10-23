@@ -127,36 +127,39 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
             {(userStatus?.isOnline ?? user.isOnline) ? 'online' : 'offline'}
           </Text>
           {/* Debug info */}
-          {__DEV__ && (
+          {/* {__DEV__ && (
             <Text style={{ fontSize: 8, color: '#999', marginTop: 2 }}>
               {userStatus?.isOnline ? '🟢' : '🔴'} {userStatus?.isOnline ? 'Online' : 'Offline'}
             </Text>
-          )}
+          )} */}
         </View>
         
-        {(userStatus?.isOnline ?? user.isOnline) ? (
-          <View style={styles.buttonsContainer}>
-            <TouchableOpacity 
-              style={[styles.callButton, styles.callButtonFullWidth]} 
-              onPress={(e) => {
-                e.stopPropagation(); // Prevent triggering the parent's onPress
-                onCallPress();
-              }}
-            >
-              <IconMaterial name="call" size={24} color="white" />
-            </TouchableOpacity>
-      </View>
-        ) : (
+        <View style={styles.buttonsContainer}>
           <TouchableOpacity 
-            style={styles.messageButton} 
+            style={[
+              styles.callButton, 
+              styles.callButtonFullWidth,
+              (!(userStatus?.isOnline ?? user.isOnline) || userStatus?.isOnCall) && styles.callButtonDisabled
+            ]} 
             onPress={(e) => {
               e.stopPropagation(); // Prevent triggering the parent's onPress
-              onMessagePress();
+              onCallPress();
             }}
+            disabled={!(userStatus?.isOnline ?? user.isOnline) || userStatus?.isOnCall}
           >
-            <IconMaterial name="chat" size={24} color="white" />
+            <IconMaterial 
+              name={userStatus?.isOnCall ? "call-end" : "call"} 
+              size={24} 
+              color={(!(userStatus?.isOnline ?? user.isOnline) || userStatus?.isOnCall) ? "#999" : "white"} 
+            />
+            {!(userStatus?.isOnline ?? user.isOnline) && (
+              <Text style={styles.offlineCallText}>Offline</Text>
+            )}
+            {userStatus?.isOnCall && (
+              <Text style={styles.onCallText}>On Call</Text>
+            )}
           </TouchableOpacity>
-        )}
+        </View>
     </TouchableOpacity>
     </View>
   );
@@ -316,13 +319,8 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       // Set current user ready status to false by default
       setCurrentUserReady(false);
       
-      // Listen for user status updates
-      socketService.socketOn('user-status', (data: any) => {
-        if (data && data.userId) {
-          console.log(`Updating user ${data.userId} status to ${data.status}`);
-          updateUserStatus(data.userId, data.status === 'online');
-        }
-      });
+      // User status updates are now handled by SimpleUserStatusService
+      // No need for duplicate listeners here
       
       // Listen for user ready-to-talk status updates
       socketService.socketOn('user_ready_status', (data: any) => {
@@ -421,6 +419,10 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       callService.addEventListener('call-state-changed', handleCallStateChange);
       callService.addEventListener('partner-call-auto-accepted', handlePartnerCallAutoAccepted);
       console.log('🔧 SETUP: Event listeners added - call-state-changed & partner-call-auto-accepted');
+      
+      // Add call status tracking listeners
+      callService.addEventListener('call-started', handleCallStarted);
+      callService.addEventListener('call-ended', handleCallEnded);
       
       // Request a list of ready users - emit the event instead of calling a non-existent method
       socketService.socketEmit('get_ready_users', {});
@@ -521,11 +523,50 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   // Handle initiating a call to a user
   const handleCallPress = async (user: User) => {
     try {
-      if (!user.isOnline) {
-        Alert.alert('Cannot Call', 'This user is offline. Please try again when they are online.');
+      // Get current user status from the service
+      const userStatus = simpleUserStatusService.getUserStatus(user._id);
+      
+      // Check if user is on call
+      if (userStatus?.isOnCall) {
+        Alert.alert(
+          'User Busy', 
+          'This user is currently on a call. Please try calling them later.',
+          [{ text: 'OK', style: 'default' }]
+        );
         return;
       }
       
+      // Check if user is online, but still allow calling with a warning
+      if (!user.isOnline) {
+        Alert.alert(
+          'User Offline', 
+          'This user is currently offline. You can still try to call them, but they may not answer immediately.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Call Anyway', onPress: () => proceedWithCall(user) }
+          ]
+        );
+        return;
+      }
+      
+      // Proceed with call for online users
+      await proceedWithCall(user);
+    } catch (error: any) {
+      console.error('Error starting call:', error);
+      
+      // Hide progress dialog
+      setShowProgress(false);
+      
+      Alert.alert(
+        'Call Failed', 
+        `Failed to start call: ${error.message || 'Please try again later.'}`
+      );
+    }
+  };
+
+  // Proceed with the actual call logic
+  const proceedWithCall = async (user: User) => {
+    try {
       // Request microphone permission before starting the call
       const hasPermission = await requestMicrophonePermission();
       
@@ -584,6 +625,11 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
           await callService.startCall(user._id, user.name, { audio: true, video: false });
           console.log('Call initiated successfully');
           
+          // Update call status for both users
+          const currentUserId = await getCurrentUserId();
+          simpleUserStatusService.setUserCallStatus(currentUserId, true);
+          simpleUserStatusService.setUserCallStatus(user._id, true);
+          
           // Hide progress dialog
           setShowProgress(false);
         } catch (callStartError: any) {
@@ -618,11 +664,50 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   // Handle video call to a user
   const handleVideoCallPress = async (user: User) => {
     try {
-      if (!user.isOnline) {
-        Alert.alert('Cannot Call', 'This user is offline. Please try again when they are online.');
+      // Get current user status from the service
+      const userStatus = simpleUserStatusService.getUserStatus(user._id);
+      
+      // Check if user is on call
+      if (userStatus?.isOnCall) {
+        Alert.alert(
+          'User Busy', 
+          'This user is currently on a call. Please try video calling them later.',
+          [{ text: 'OK', style: 'default' }]
+        );
         return;
       }
       
+      // Check if user is online, but still allow calling with a warning
+      if (!user.isOnline) {
+        Alert.alert(
+          'User Offline', 
+          'This user is currently offline. You can still try to video call them, but they may not answer immediately.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Call Anyway', onPress: () => proceedWithVideoCall(user) }
+          ]
+        );
+        return;
+      }
+      
+      // Proceed with video call for online users
+      await proceedWithVideoCall(user);
+    } catch (error) {
+      console.error('Error starting video call:', error);
+      
+      // Hide progress dialog
+      setShowProgress(false);
+      
+      Alert.alert(
+        'Video Call Failed', 
+        `Failed to start video call: ${error instanceof Error ? error.message : 'Please try again later'}`
+      );
+    }
+  };
+
+  // Proceed with the actual video call logic
+  const proceedWithVideoCall = async (user: User) => {
+    try {
       // Request microphone and camera permissions before starting the call
       const hasMicPermission = await requestMicrophonePermission();
       
@@ -705,6 +790,11 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
           console.log('Starting video call with user:', user._id);
           await callService.startCall(user._id, user.name, { audio: true, video: true });
           console.log('Video call initiated successfully');
+          
+          // Update call status for both users
+          const currentUserId = await getCurrentUserId();
+          simpleUserStatusService.setUserCallStatus(currentUserId, true);
+          simpleUserStatusService.setUserCallStatus(user._id, true);
           
           // Hide progress dialog
           setShowProgress(false);
@@ -946,6 +1036,24 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     }
   };
 
+  // Handle call started event
+  const handleCallStarted = (data: any) => {
+    console.log('📞 Call started event:', data);
+    if (data.userId) {
+      // Update call status for the user
+      simpleUserStatusService.setUserCallStatus(data.userId, true, data.callStartTime);
+    }
+  };
+
+  // Handle call ended event
+  const handleCallEnded = (data: any) => {
+    console.log('📞 Call ended event:', data);
+    if (data.userId) {
+      // Update call status for the user
+      simpleUserStatusService.setUserCallStatus(data.userId, false);
+    }
+  };
+
 
   // Global partner found handler (always active)
   const globalPartnerFoundHandler = (data: any) => {
@@ -1153,6 +1261,8 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       // Remove call service event listener
       callService.removeEventListener('call-state-changed', handleCallStateChange);
       callService.removeEventListener('partner-call-auto-accepted', handlePartnerCallAutoAccepted);
+      callService.removeEventListener('call-started', handleCallStarted);
+      callService.removeEventListener('call-ended', handleCallEnded);
     };
   }, []); // Remove findingPartner dependency to ensure listeners are always active
 
@@ -1489,6 +1599,22 @@ const styles = StyleSheet.create({
   },
   callButtonFullWidth: {
     width: '100%',
+  },
+  callButtonDisabled: {
+    backgroundColor: '#CCCCCC',
+    opacity: 0.6,
+  },
+  offlineCallText: {
+    color: '#666',
+    fontSize: 10,
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  onCallText: {
+    color: '#FF6B6B',
+    fontSize: 10,
+    marginTop: 2,
+    fontWeight: '600',
   },
   messageButton: {
     backgroundColor: '#673AB7',

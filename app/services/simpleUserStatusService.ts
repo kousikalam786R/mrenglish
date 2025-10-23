@@ -7,6 +7,8 @@ export interface UserStatus {
   lastSeenAt?: string;
   isTyping?: boolean;
   typingInChat?: string;
+  isOnCall?: boolean;
+  callStartTime?: string;
 }
 
 export interface UserStatusUpdate {
@@ -86,9 +88,26 @@ class SimpleUserStatusService {
     console.log('🔧 SimpleUserStatusService: Setting up socket listeners...');
 
     // Listen for user status updates
-    socketService.socketOn('user-status', (data: UserStatusUpdate) => {
+    socketService.socketOn('user-status', (data: any) => {
       console.log('📡 SimpleUserStatusService: Received user-status event:', data);
-      this.updateUserStatus(data);
+      
+      // Handle both old and new data formats
+      let userStatusData: UserStatusUpdate;
+      
+      if (data.status !== undefined) {
+        // New format: { userId, status: 'online'|'offline', lastSeen }
+        userStatusData = {
+          userId: data.userId,
+          isOnline: data.status === 'online',
+          lastSeenAt: data.lastSeen ? new Date(data.lastSeen).toISOString() : undefined
+        };
+      } else {
+        // Old format: { userId, isOnline, lastSeenAt }
+        userStatusData = data as UserStatusUpdate;
+      }
+      
+      console.log('📡 SimpleUserStatusService: Processed user status data:', userStatusData);
+      this.updateUserStatus(userStatusData);
     });
 
     // Listen for typing indicators
@@ -102,10 +121,26 @@ class SimpleUserStatusService {
       this.setUserTyping(data.userId, false);
     });
 
+    // Listen for call status updates
+    socketService.socketOn('user-call-started', (data: { userId: string, callStartTime?: string }) => {
+      console.log('📞 SimpleUserStatusService: User started call:', data);
+      this.setUserCallStatus(data.userId, true, data.callStartTime);
+    });
+
+    socketService.socketOn('user-call-ended', (data: { userId: string }) => {
+      console.log('📞 SimpleUserStatusService: User ended call:', data);
+      this.setUserCallStatus(data.userId, false);
+    });
+
     // Listen for connection status changes
     socketService.socketOn('connect', () => {
       console.log('🔗 SimpleUserStatusService: Socket connected');
       this.requestAllUserStatuses();
+      
+      // Force refresh all tracked users after a short delay
+      setTimeout(() => {
+        this.refreshAllUserStatuses();
+      }, 2000);
     });
 
     socketService.socketOn('disconnect', () => {
@@ -148,10 +183,40 @@ class SimpleUserStatusService {
   }
 
   /**
+   * Force refresh all user statuses (useful after reconnection)
+   */
+  private refreshAllUserStatuses(): void {
+    console.log('🔄 SimpleUserStatusService: Force refreshing all user statuses');
+    
+    this.userStatuses.forEach((status, userId) => {
+      if (userId !== this.currentUserId) {
+        // Reset status to unknown and request fresh status
+        this.userStatuses.set(userId, {
+          ...status,
+          isOnline: false,
+          lastSeenAt: undefined
+        });
+        
+        // Request fresh status
+        this.requestUserStatus(userId);
+      }
+    });
+    
+    // Notify callbacks of the refresh
+    this.notifyStatusUpdate();
+  }
+
+  /**
    * Update user status and notify callbacks
    */
   private updateUserStatus(data: UserStatusUpdate): void {
     const { userId, isOnline, lastSeenAt } = data;
+    
+    // Only update if we're tracking this user
+    if (!this.userStatuses.has(userId)) {
+      console.log('📊 SimpleUserStatusService: Received status update for untracked user:', userId);
+      return;
+    }
     
     const currentStatus = this.userStatuses.get(userId);
     const newStatus: UserStatus = {
@@ -162,17 +227,27 @@ class SimpleUserStatusService {
       typingInChat: currentStatus?.typingInChat
     };
 
-    this.userStatuses.set(userId, newStatus);
+    // Only update if status actually changed
+    const statusChanged = !currentStatus || 
+      currentStatus.isOnline !== newStatus.isOnline || 
+      currentStatus.lastSeenAt !== newStatus.lastSeenAt;
 
-    console.log('📊 SimpleUserStatusService: Updated status for user:', {
-      userId,
-      isOnline,
-      lastSeenAt,
-      hasCallbacks: this.statusUpdateCallbacks.size > 0
-    });
+    if (statusChanged) {
+      this.userStatuses.set(userId, newStatus);
 
-    // Notify all callbacks
-    this.notifyStatusUpdate();
+      console.log('📊 SimpleUserStatusService: Updated status for user:', {
+        userId,
+        isOnline,
+        lastSeenAt,
+        hasCallbacks: this.statusUpdateCallbacks.size > 0,
+        previousStatus: currentStatus?.isOnline
+      });
+
+      // Notify all callbacks
+      this.notifyStatusUpdate();
+    } else {
+      console.log('📊 SimpleUserStatusService: Status unchanged for user:', userId);
+    }
   }
 
   /**
@@ -193,6 +268,32 @@ class SimpleUserStatusService {
     };
 
     this.userStatuses.set(userId, updatedStatus);
+    this.notifyStatusUpdate();
+  }
+
+  /**
+   * Set user call status
+   */
+  public setUserCallStatus(userId: string, isOnCall: boolean, callStartTime?: string): void {
+    const currentStatus = this.userStatuses.get(userId) || {
+      userId,
+      isOnline: false,
+      lastSeenAt: undefined,
+      isTyping: false
+    };
+
+    const updatedStatus: UserStatus = {
+      ...currentStatus,
+      isOnCall,
+      callStartTime: isOnCall ? (callStartTime || new Date().toISOString()) : undefined
+    };
+
+    this.userStatuses.set(userId, updatedStatus);
+    console.log('📞 SimpleUserStatusService: Updated call status for user:', {
+      userId,
+      isOnCall,
+      callStartTime: updatedStatus.callStartTime
+    });
     this.notifyStatusUpdate();
   }
 
@@ -252,7 +353,36 @@ class SimpleUserStatusService {
     
     const socket = socketService.getSocket();
     if (socket && socket.connected) {
+      console.log('📡 SimpleUserStatusService: Socket connected, emitting get-user-status');
       socket.emit('get-user-status', { userId });
+    } else {
+      console.log('📡 SimpleUserStatusService: Socket not connected, cannot request status');
+    }
+  }
+
+  /**
+   * Request status for a specific user with retry logic
+   */
+  private requestUserStatusWithRetry(userId: string, retryCount: number = 0): void {
+    const maxRetries = 3;
+    const retryDelay = 1000; // 1 second
+
+    console.log(`📡 SimpleUserStatusService: Requesting status for user ${userId} (attempt ${retryCount + 1}/${maxRetries + 1})`);
+    
+    const socket = socketService.getSocket();
+    if (socket && socket.connected) {
+      console.log('📡 SimpleUserStatusService: Socket connected, emitting get-user-status');
+      socket.emit('get-user-status', { userId });
+    } else {
+      console.log('📡 SimpleUserStatusService: Socket not connected, will retry...');
+      
+      if (retryCount < maxRetries) {
+        setTimeout(() => {
+          this.requestUserStatusWithRetry(userId, retryCount + 1);
+        }, retryDelay);
+      } else {
+        console.log(`📡 SimpleUserStatusService: Max retries reached for user ${userId}`);
+      }
     }
   }
 
@@ -260,7 +390,12 @@ class SimpleUserStatusService {
    * Add user to tracking
    */
   addUserToTracking(userId: string, initialStatus?: Partial<UserStatus>): void {
-    if (this.userStatuses.has(userId)) return;
+    if (this.userStatuses.has(userId)) {
+      console.log('👤 SimpleUserStatusService: User already being tracked:', userId);
+      // Still request status to ensure it's up to date
+      this.requestUserStatus(userId);
+      return;
+    }
 
     const status: UserStatus = {
       userId,
@@ -273,8 +408,8 @@ class SimpleUserStatusService {
     this.userStatuses.set(userId, status);
     console.log('👤 SimpleUserStatusService: Added user to tracking:', userId);
 
-    // Request initial status
-    this.requestUserStatus(userId);
+    // Request initial status with retry logic
+    this.requestUserStatusWithRetry(userId);
   }
 
   /**
@@ -294,6 +429,27 @@ class SimpleUserStatusService {
     // Return unsubscribe function
     return () => {
       this.statusUpdateCallbacks.delete(callback);
+    };
+  }
+
+  /**
+   * Force refresh all user statuses (public method for debugging)
+   */
+  public forceRefreshAllStatuses(): void {
+    console.log('🔄 SimpleUserStatusService: Force refreshing all statuses (public method)');
+    this.refreshAllUserStatuses();
+  }
+
+  /**
+   * Get debug information about tracked users
+   */
+  public getDebugInfo(): any {
+    return {
+      trackedUsers: Array.from(this.userStatuses.keys()),
+      statuses: Object.fromEntries(this.userStatuses),
+      callbacks: this.statusUpdateCallbacks.size,
+      isInitialized: this.isInitialized,
+      currentUserId: this.currentUserId
     };
   }
 
@@ -323,3 +479,4 @@ class SimpleUserStatusService {
 const simpleUserStatusService = new SimpleUserStatusService();
 
 export default simpleUserStatusService;
+

@@ -69,6 +69,7 @@ const ChatDetailScreen = () => {
     isOnline: false,
     lastSeenAt: undefined
   });
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   
   // References
   const flatListRef = useRef<FlatList>(null);
@@ -101,20 +102,41 @@ const ChatDetailScreen = () => {
   const prevMessageCountRef = useRef(0);
   const isUserScrollingRef = useRef(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isInitialLoadRef = useRef(true);
   
   useEffect(() => {
-    // Only auto-scroll when message count increases and user isn't manually scrolling
+    // Always scroll to bottom on initial load
+    if (isInitialLoadRef.current && chatMessages.length > 0) {
+      console.log(`📜 Initial load: Scrolling to bottom with ${chatMessages.length} messages`);
+      setTimeout(() => {
+        if (flatListRef.current) {
+          flatListRef.current.scrollToEnd({ animated: false });
+        }
+        isInitialLoadRef.current = false;
+      }, 100);
+      return;
+    }
+    
+    // Auto-scroll for new messages
     if (chatMessages.length > prevMessageCountRef.current && chatMessages.length > 0) {
       console.log(`📜 New message detected (${prevMessageCountRef.current} -> ${chatMessages.length})`);
       
       // Only auto-scroll if user isn't actively scrolling
       if (!isUserScrollingRef.current) {
-        // Use requestAnimationFrame for smoother animations
-        requestAnimationFrame(() => {
+        // Use multiple attempts to ensure scroll works
+        const scrollToBottom = () => {
           if (flatListRef.current) {
             flatListRef.current.scrollToEnd({ animated: true });
           }
-        });
+        };
+        
+        // Immediate scroll
+        requestAnimationFrame(scrollToBottom);
+        
+        // Backup scroll after a short delay
+        setTimeout(scrollToBottom, 100);
+      } else {
+        console.log('📜 User is scrolling, skipping auto-scroll');
       }
     }
     
@@ -294,12 +316,22 @@ const ChatDetailScreen = () => {
         .unwrap()
         .then((result) => {
           console.log(`Loaded ${result.length} messages for chat ${id}`);
-          // Scroll to bottom after loading messages
+          // Reset scroll state and scroll to bottom after loading messages
+          isUserScrollingRef.current = false;
+          isInitialLoadRef.current = true;
+          
+          // Multiple attempts to ensure scroll works
           setTimeout(() => {
             if (flatListRef.current) {
               flatListRef.current.scrollToEnd({ animated: false });
             }
-          }, 300);
+          }, 100);
+          
+          setTimeout(() => {
+            if (flatListRef.current) {
+              flatListRef.current.scrollToEnd({ animated: false });
+            }
+          }, 500);
         })
         .catch(error => {
           console.error('Error loading messages:', error);
@@ -328,29 +360,8 @@ const ChatDetailScreen = () => {
       }
     }, 1000);
     
-    // Listen for user status changes
-    socketService.socketOn('user-status', (data) => {
-      console.log('📡 USER STATUS EVENT in ChatDetailScreen:', data);
-      console.log('📡 Looking for user ID:', id, 'Received user ID:', data?.userId);
-      if (data && data.userId === id) {
-        console.log('✅ Updating partner status:', {
-          userId: data.userId,
-          status: data.status,
-          lastSeen: data.lastSeen
-        });
-        
-        // Update local state
-        setPartnerDetails(prev => ({
-          ...prev,
-          isOnline: data.status === 'online',
-          lastSeenAt: data.lastSeen || prev.lastSeenAt
-        }));
-        
-        // User status is now managed by the centralized service
-      } else {
-        console.log('⚠️ User status event not for this chat partner');
-      }
-    });
+    // User status updates are now handled by SimpleUserStatusService
+    // The useUserStatus hook will automatically update the status
     
     // Note: message-sent event is handled by socketService.sendPrivateMessage
     // The real message will come back through the new-message event
@@ -478,7 +489,12 @@ const ChatDetailScreen = () => {
       await dispatch(sendNewMessage({ receiverId: id, content: messageContent }));
       console.log('✅ Message sent successfully via optimistic update');
       
-      // Note: No manual scrolling needed - useEffect will handle it when message is added
+      // Force scroll to bottom after sending message
+      setTimeout(() => {
+        if (flatListRef.current) {
+          flatListRef.current.scrollToEnd({ animated: true });
+        }
+      }, 100);
     } catch (error) {
       console.error('❌ Failed to send message:', error);
       // TODO: Show error to user and handle optimistic update rollback
@@ -556,6 +572,14 @@ const ChatDetailScreen = () => {
   // Handle back button press
   const handleBackPress = () => {
     navigation.goBack();
+  };
+  
+  // Handle scroll to bottom button
+  const handleScrollToBottom = () => {
+    if (flatListRef.current) {
+      flatListRef.current.scrollToEnd({ animated: true });
+      setShowScrollToBottom(false);
+    }
   };
   
   // Render header with user info and actions
@@ -644,7 +668,6 @@ const ChatDetailScreen = () => {
           username={partnerDetails.name}
           avatar={partnerDetails.avatar}
           showAvatar={false} // Disable avatar to prevent UI hierarchy issues
-          message={item} // Pass full message object for enhanced status
         />
         {/* Debug info for each message */}
         {/* {__DEV__ && (
@@ -720,20 +743,31 @@ const ChatDetailScreen = () => {
                 flatListRef.current.scrollToEnd({ animated: false });
               }
             }}
+            onScroll={(event) => {
+              // Check if user is near the bottom
+              const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+              const isNearBottom = contentOffset.y + layoutMeasurement.height >= contentSize.height - 100;
+              setShowScrollToBottom(!isNearBottom);
+            }}
             onScrollBeginDrag={() => {
               // User started scrolling manually
               isUserScrollingRef.current = true;
               console.log('👆 User started manual scrolling');
+              
+              // Clear any existing timeout
+              if (scrollTimeoutRef.current) {
+                clearTimeout(scrollTimeoutRef.current);
+              }
             }}
             onScrollEndDrag={() => {
-              // User stopped scrolling, reset after a delay
+              // User stopped scrolling, reset after a shorter delay
               if (scrollTimeoutRef.current) {
                 clearTimeout(scrollTimeoutRef.current);
               }
               scrollTimeoutRef.current = setTimeout(() => {
                 isUserScrollingRef.current = false;
-                console.log('👆 User manual scrolling ended');
-              }, 2000); // Allow auto-scroll again after 2 seconds
+                console.log('👆 User manual scrolling ended - auto-scroll enabled');
+              }, 1000); // Allow auto-scroll again after 1 second
             }}
             onMomentumScrollEnd={() => {
               // Scroll animation finished
@@ -742,8 +776,8 @@ const ChatDetailScreen = () => {
               }
               scrollTimeoutRef.current = setTimeout(() => {
                 isUserScrollingRef.current = false;
-                console.log('👆 Scroll momentum ended');
-              }, 1000);
+                console.log('👆 Scroll momentum ended - auto-scroll enabled');
+              }, 500); // Shorter delay for momentum end
             }}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
@@ -767,6 +801,16 @@ const ChatDetailScreen = () => {
               minIndexForVisible: 0,
             }}
           />
+        )}
+        
+        {/* Scroll to bottom button */}
+        {showScrollToBottom && (
+          <TouchableOpacity 
+            style={styles.scrollToBottomButton}
+            onPress={handleScrollToBottom}
+          >
+            <Icon name="keyboard-arrow-down" size={24} color="white" />
+          </TouchableOpacity>
         )}
         
         <View style={styles.inputContainer}>
@@ -885,6 +929,22 @@ const styles = StyleSheet.create({
   sendButtonText: {
     color: '#FFF',
     fontWeight: 'bold',
+  },
+  scrollToBottomButton: {
+    position: 'absolute',
+    bottom: 80,
+    right: 20,
+    backgroundColor: '#6A3DE8',
+    borderRadius: 25,
+    width: 50,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
 });
 

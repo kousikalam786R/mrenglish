@@ -1,7 +1,5 @@
 import React from 'react';
 import { View, Text, StyleSheet, Image } from 'react-native';
-import MessageStatus from './MessageStatus';
-import { Message } from '../types/Message';
 
 interface MessageBubbleProps {
   content: string;
@@ -11,7 +9,6 @@ interface MessageBubbleProps {
   avatar?: string;
   username?: string;
   showAvatar?: boolean;
-  message?: Message; // Full message object for status tracking
 }
 
 const MessageBubble: React.FC<MessageBubbleProps> = ({
@@ -22,7 +19,6 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   avatar,
   username,
   showAvatar = true,
-  message,
 }) => {
   // Generate a color based on the username (for consistent message colors)
   const getAvatarLetter = () => {
@@ -80,16 +76,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             {time}
           </Text>
           
-          {/* Enhanced message status */}
-          {message && (
-            <MessageStatus 
-              message={message} 
-              isSender={isSender} 
-            />
-          )}
-          
-          {/* Fallback for legacy messages without full message object */}
-          {!message && isSender && (
+          {isSender && (
             <Text style={styles.readStatus}>
               {read ? '✓✓' : '✓'}
             </Text>
