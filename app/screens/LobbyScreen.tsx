@@ -25,6 +25,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import IconMaterial from 'react-native-vector-icons/MaterialIcons';
 import ConnectingScreen from '../components/ConnectingScreen';
 import PartnerSearchScreen from '../components/PartnerSearchScreen';
+import FilterModal, { FilterSettings } from '../components/FilterModal';
 import { mediaDevices } from 'react-native-webrtc';
 import simpleUserStatusService from '../services/simpleUserStatusService';
 import { useUserStatusService } from '../hooks/useUserStatus';
@@ -42,6 +43,7 @@ interface User {
   rating?: number;
   talks?: number;
   readyToTalk?: boolean;
+  isOnCall?: boolean;
 }
 
 interface UserCardProps {
@@ -183,9 +185,84 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   const [searchEmoji, setSearchEmoji] = useState('👨‍🍳');
   const [showConnecting, setShowConnecting] = useState(false);
   const [connectingPartner, setConnectingPartner] = useState<User | null>(null);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [filterSettings, setFilterSettings] = useState<FilterSettings>({
+    gender: 'all',
+    ratingMin: 0,
+    ratingMax: 100,
+    levelMin: 0,
+    levelMax: 5,
+    levels: ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
+  });
 
   // Initialize user status service
   const { isInitialized: statusServiceReady } = useUserStatusService();
+
+  // Memoize sorted users list to avoid re-rendering issues
+  const sortedUsers = useMemo(() => {
+    // Apply filters to users
+    const filteredUsers = users.filter((user: User) => {
+      // Gender filter
+      if (filterSettings.gender !== 'all') {
+        const userGender = (user.gender || '').toLowerCase();
+        if (userGender !== filterSettings.gender.toLowerCase()) {
+          return false;
+        }
+      }
+      
+      // Rating filter
+      if (user.rating) {
+        if (user.rating < filterSettings.ratingMin || user.rating > filterSettings.ratingMax) {
+          return false;
+        }
+      }
+      
+      // Level filter
+      if (user.level) {
+        const englishLevels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+        const userLevelIndex = englishLevels.indexOf(user.level);
+        if (userLevelIndex === -1 || userLevelIndex < filterSettings.levelMin || userLevelIndex > filterSettings.levelMax) {
+          return false;
+        }
+      }
+      
+      return true;
+    });
+    
+    // First, get ready-to-talk users (sorted by rating descending)
+    const readyUsersSorted = [...readyUsers]
+      .filter((user: User) => {
+        // Apply same filters to ready users
+        if (filterSettings.gender !== 'all') {
+          const userGender = (user.gender || '').toLowerCase();
+          if (userGender !== filterSettings.gender.toLowerCase()) {
+            return false;
+          }
+        }
+        if (user.rating) {
+          if (user.rating < filterSettings.ratingMin || user.rating > filterSettings.ratingMax) {
+            return false;
+          }
+        }
+        if (user.level) {
+          const englishLevels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+          const userLevelIndex = englishLevels.indexOf(user.level);
+          if (userLevelIndex === -1 || userLevelIndex < filterSettings.levelMin || userLevelIndex > filterSettings.levelMax) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    
+    // Then get other online users (not ready to talk, sorted by rating descending)
+    const otherOnlineUsers = filteredUsers
+      .filter((user: User) => user.isOnline && !user.readyToTalk && !user.isOnCall)
+      .sort((a: User, b: User) => (b.rating || 0) - (a.rating || 0));
+    
+    // Return ready users first, then other online users
+    return [...readyUsersSorted, ...otherOnlineUsers];
+  }, [readyUsers, users, filterSettings]);
 
   // Add users to status tracking when users list changes
   useEffect(() => {
@@ -323,9 +400,9 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       // No need for duplicate listeners here
       
       // Listen for user ready-to-talk status updates
-      socketService.socketOn('user_ready_status', (data: any) => {
+      socketService.socketOn('user-ready-status', (data: any) => {
         if (data && data.userId) {
-          console.log(`Updating user ${data.userId} ready status to ${data.isReady}`);
+          console.log(`✅ Ready status update for user ${data.userId}:`, data);
           updateUserReadyStatus(data.userId, data.isReady, data.userData);
         }
       });
@@ -339,9 +416,9 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       });
       
       // Listen for ready users list updates
-      socketService.socketOn('ready_users_list', (data: any) => {
+      socketService.socketOn('ready-users-list', (data: any) => {
         if (data.users && Array.isArray(data.users)) {
-          console.log(`Received ${data.users.length} ready users`);
+          console.log(`📋 Received ${data.users.length} ready users from server`);
           updateReadyUsersList(data.users);
         }
       });
@@ -425,7 +502,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       callService.addEventListener('call-ended', handleCallEnded);
       
       // Request a list of ready users - emit the event instead of calling a non-existent method
-      socketService.socketEmit('get_ready_users', {});
+      socketService.socketEmit('get-ready-users', {});
       
       // Partner matching calls now use regular call service
       // No need for separate partner call event listeners
@@ -453,6 +530,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   
   // Update a single user's ready-to-talk status
   const updateUserReadyStatus = (userId: string, isReady: boolean, userData: any = {}) => {
+    console.log(`🔄 Updating ready status for user ${userId}: ${isReady}`);
     setUsers(prevUsers => {
       const updatedUsers = prevUsers.map((user: User) => {
         if (user._id === userId) {
@@ -468,8 +546,19 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         return user;
       });
       
-      // Update ready users list
-      setReadyUsers(updatedUsers.filter((user: User) => user.isOnline && user.readyToTalk));
+      // Filter ready users: must be online AND ready to talk AND not on call
+      const filteredReadyUsers = updatedUsers.filter((user: User) => {
+        const isReadyUser = user.isOnline && user.readyToTalk && !user.isOnCall;
+        if (isReadyUser) {
+          console.log(`✅ User ${user.name} is ready to talk`);
+        } else if (user.isOnline && user.readyToTalk && user.isOnCall) {
+          console.log(`📞 User ${user.name} is ready to talk but currently on call`);
+        }
+        return isReadyUser;
+      });
+      
+      console.log(`📊 Total ready users after update: ${filteredReadyUsers.length}`);
+      setReadyUsers(filteredReadyUsers);
       
       return updatedUsers;
     });
@@ -477,12 +566,15 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   
   // Update the list of ready users
   const updateReadyUsersList = (readyUsersList: any[]) => {
-    console.log('Updating ready users list with', readyUsersList.length, 'users');
+    console.log('🔄 Updating ready users list with', readyUsersList.length, 'users');
     
     // Mark users as ready in our local state based on the list
     setUsers(prevUsers => {
       const userMap = new Map();
       prevUsers.forEach(user => userMap.set(user._id, user));
+      
+      // Get all user IDs from the ready list
+      const readyUserIds = new Set(readyUsersList.map(ru => ru.userId));
       
       // Update or add users from the ready list
       readyUsersList.forEach(readyUser => {
@@ -490,10 +582,11 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         const existingUser = userMap.get(userId);
         
         if (existingUser) {
-          // Update existing user
+          // Update existing user - mark as ready
           userMap.set(userId, {
             ...existingUser,
-            readyToTalk: true,
+            readyToTalk: true, // This user is in the ready list
+            isOnline: true, // Must be online to be in ready list
             level: readyUser.level || existingUser.level,
             name: readyUser.name || existingUser.name,
             profilePic: readyUser.profilePic || existingUser.profilePic
@@ -506,15 +599,30 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
             profilePic: readyUser.profilePic,
             level: readyUser.level || 'Intermediate',
             isOnline: true,
-            readyToTalk: true
+            readyToTalk: true // This user is in the ready list
+          });
+        }
+      });
+      
+      // Remove ready status from users NOT in the ready list
+      userMap.forEach((user, userId) => {
+        if (!readyUserIds.has(userId)) {
+          userMap.set(userId, {
+            ...user,
+            readyToTalk: false // Not in ready list anymore
           });
         }
       });
       
       const updatedUsers = Array.from(userMap.values());
       
-      // Also update the ready users list
-      setReadyUsers(updatedUsers.filter((user: User) => user.isOnline && user.readyToTalk));
+      // Filter to only show users who are online AND ready to talk AND not on call
+      const filteredReadyUsers = updatedUsers.filter((user: User) => {
+        return user.isOnline && user.readyToTalk && !user.isOnCall;
+      });
+      
+      console.log(`📊 Total ready users after list update: ${filteredReadyUsers.length}`);
+      setReadyUsers(filteredReadyUsers);
       
       return updatedUsers;
     });
@@ -629,6 +737,10 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
           const currentUserId = await getCurrentUserId();
           simpleUserStatusService.setUserCallStatus(currentUserId, true);
           simpleUserStatusService.setUserCallStatus(user._id, true);
+          
+          // Clear ready-to-talk status when call starts
+          setCurrentUserReady(false);
+          socketService.socketEmit('set-ready-to-talk', { status: false });
           
           // Hide progress dialog
           setShowProgress(false);
@@ -796,6 +908,10 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
           simpleUserStatusService.setUserCallStatus(currentUserId, true);
           simpleUserStatusService.setUserCallStatus(user._id, true);
           
+          // Clear ready-to-talk status when video call starts
+          setCurrentUserReady(false);
+          socketService.socketEmit('set-ready-to-talk', { status: false });
+          
           // Hide progress dialog
           setShowProgress(false);
         } catch (callStartError) {
@@ -895,11 +1011,10 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         searchTimeoutRef.current = null;
       }
       
-      // If not ready, set status to ready
-      if (!currentUserReady) {
-        socketService.socketEmit('set-ready-to-talk', { status: true });
-        setCurrentUserReady(true);
-      }
+      // Set user as ready to talk when they click "Find a perfect partner"
+      console.log('✅ Setting user as ready to talk');
+      socketService.socketEmit('set-ready-to-talk', { status: true });
+      setCurrentUserReady(true);
       
       // Pick a random emoji for the search screen
       const emojis = ['👨‍🍳', '🧑‍🎓', '👩‍🏫', '🧑‍💼', '👨‍💻', '🧑‍🔬', '👩‍🚀', '🧑‍🎨'];
@@ -916,10 +1031,16 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         await socketService.initialize();
       }
       
-      // Request a random partner
-      console.log('📡 Emitting find-random-partner event');
+      // Request a random partner with saved preferences
+      console.log('📡 Emitting find-random-partner event with preferences:', filterSettings);
       socketService.socketEmit('find-random-partner', {
-        preferences: {} // Can add preferences here later
+        preferences: {
+          gender: filterSettings.gender,
+          ratingMin: filterSettings.ratingMin,
+          ratingMax: filterSettings.ratingMax,
+          levelMin: ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'][filterSettings.levelMin],
+          levelMax: ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'][filterSettings.levelMax]
+        }
       });
       
       // Set a timeout to avoid waiting too long
@@ -1037,20 +1158,56 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   };
 
   // Handle call started event
-  const handleCallStarted = (data: any) => {
+  const handleCallStarted = async (data: any) => {
     console.log('📞 Call started event:', data);
     if (data.userId) {
-      // Update call status for the user
+      // Update call status for BOTH users (caller and receiver)
       simpleUserStatusService.setUserCallStatus(data.userId, true, data.callStartTime);
+      
+      // Get current user ID and mark both users as on call
+      const currentUserId = await getCurrentUserId();
+      
+      // Update call status for both users
+      if (currentUserId) {
+        simpleUserStatusService.setUserCallStatus(currentUserId, true, data.callStartTime);
+      }
+      
+      // Clear ready-to-talk status when call starts
+      setCurrentUserReady(false);
+      socketService.socketEmit('set-ready-to-talk', { status: false });
+      
+      // Update user status in the list - mark both users as on call
+      setUsers(prevUsers => prevUsers.map((user: User) => {
+        if (user._id === data.userId || user._id === currentUserId) {
+          return { ...user, isOnCall: true };
+        }
+        return user;
+      }));
     }
   };
 
   // Handle call ended event
-  const handleCallEnded = (data: any) => {
+  const handleCallEnded = async (data: any) => {
     console.log('📞 Call ended event:', data);
     if (data.userId) {
-      // Update call status for the user
+      // Update call status for BOTH users (caller and receiver)
       simpleUserStatusService.setUserCallStatus(data.userId, false);
+      
+      // Get current user ID and mark both users as not on call
+      const currentUserId = await getCurrentUserId();
+      
+      // Update call status for both users
+      if (currentUserId) {
+        simpleUserStatusService.setUserCallStatus(currentUserId, false);
+      }
+      
+      // Update user status in the list - mark both users as not on call
+      setUsers(prevUsers => prevUsers.map((user: User) => {
+        if (user._id === data.userId || user._id === currentUserId) {
+          return { ...user, isOnCall: false };
+        }
+        return user;
+      }));
     }
   };
 
@@ -1075,6 +1232,11 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       setShowPartnerSearch(false);
       setFindingPartner(false);
       
+      // Clear ready-to-talk status when partner is found
+      console.log('🔴 Clearing ready-to-talk status - partner found');
+      setCurrentUserReady(false);
+      socketService.socketEmit('set-ready-to-talk', { status: false });
+      
       console.log('🤝 Matched with:', partner.name);
 
       // Show connecting screen for BOTH users
@@ -1094,6 +1256,10 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
             await handleAutomaticCall(partner);
           } else {
             console.log('⏳ This user will wait for incoming call');
+            // Clear ready-to-talk status for both users when accepting
+            console.log('🔴 Clearing ready-to-talk status - accepting incoming call');
+            setCurrentUserReady(false);
+            socketService.socketEmit('set-ready-to-talk', { status: false });
             // Just wait for the incoming call - the other user will initiate
             // The connecting screen will stay until the call starts
           }
@@ -1283,24 +1449,12 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         <Text style={styles.title}>Lobby</Text>
         <TouchableOpacity 
           style={styles.settingsButton}
-          onPress={() => {
-            // Toggle ready status when settings button is pressed
-            const newStatus = !currentUserReady;
-            socketService.socketEmit('set_ready_to_talk', { isReady: newStatus });
-            setCurrentUserReady(newStatus);
-            Alert.alert(
-              'Status Updated',
-              newStatus 
-                ? 'You are now set as available for calls!' 
-                : 'You are no longer set as available for calls.',
-              [{ text: 'OK', style: 'default' }]
-            );
-          }}
+          onPress={() => setShowFilterModal(true)}
         >
           <IconMaterial 
-            name={currentUserReady ? "settings-power" : "settings"} 
+            name="tune" 
             size={24} 
-            color={currentUserReady ? "#4CAF50" : "#333"} 
+            color="#333" 
           />
         </TouchableOpacity>
       </View>
@@ -1314,12 +1468,43 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         </View>
       ) : null}
       
+      {/* Ready to talk now horizontal section */}
+      {readyUsers.length > 0 && (
+        <View style={styles.readySection}>
+          <Text style={styles.readyTitle}>Ready to talk now</Text>
+          <FlatList
+            data={readyUsers}
+            horizontal
+            keyExtractor={(item) => item._id}
+            renderItem={({ item }) => (
+              <TouchableOpacity 
+                style={styles.readyCard}
+                onPress={() => handleCallPress(item)}
+              >
+                <Image 
+                  source={{ uri: item.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg' }} 
+                  style={styles.readyAvatar} 
+                />
+                <Text style={styles.readyName} numberOfLines={1}>{item.name}</Text>
+                <TouchableOpacity 
+                  style={styles.readyTalkButton}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    handleCallPress(item);
+                  }}
+                >
+                  <Text style={styles.readyTalkText}>Talk now</Text>
+                </TouchableOpacity>
+              </TouchableOpacity>
+            )}
+            contentContainerStyle={styles.readyListContent}
+            showsHorizontalScrollIndicator={false}
+          />
+        </View>
+      )}
+      
       <View style={styles.inviteSection}>
-        <Text style={styles.inviteTitle}>
-          {currentUserReady 
-            ? 'You are ready to talk!' 
-            : 'Invite online partners'}
-        </Text>
+        <Text style={styles.inviteTitle}>Invite online partners</Text>
         <TouchableOpacity 
           style={styles.refreshButton}
           onPress={handleRefresh}
@@ -1330,10 +1515,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       </View>
       
       <FlatList
-        data={readyUsers.length > 0 
-          ? readyUsers // Show ready users first if available
-          : users.filter((user: User) => user.isOnline) // Otherwise show all online users
-        }
+        data={sortedUsers}
         keyExtractor={(item) => item._id}
         renderItem={({ item }) => (
           <UserCard 
@@ -1399,6 +1581,18 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
           setFindingPartner(false);
           handleCancelCall();
         }}
+      />
+      
+      {/* Filter Modal */}
+      <FilterModal
+        visible={showFilterModal}
+        onClose={() => setShowFilterModal(false)}
+        onApply={(filters) => {
+          setFilterSettings(filters);
+          console.log('✅ Applied filters:', filters);
+          // Filters will be used when searching for partners
+        }}
+        initialFilters={filterSettings}
       />
     </SafeAreaView>
   );
@@ -1669,6 +1863,59 @@ const styles = StyleSheet.create({
   },
   buttonActive: {
     backgroundColor: '#4A148C', // Darker purple when active
+  },
+  readySection: {
+    paddingVertical: 15,
+    backgroundColor: '#FFFFFF',
+  },
+  readyTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    paddingHorizontal: 20,
+    marginBottom: 12,
+  },
+  readyListContent: {
+    paddingHorizontal: 15,
+  },
+  readyCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    marginRight: 12,
+    width: 120,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  readyAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    marginBottom: 8,
+  },
+  readyName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  readyTalkButton: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    width: '100%',
+  },
+  readyTalkText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
 });
 
