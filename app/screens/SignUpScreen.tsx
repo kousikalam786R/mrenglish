@@ -13,12 +13,12 @@ import {
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useNavigation } from '@react-navigation/native';
 import { AuthScreenNavigationProp } from '../navigation/types';
-import { useAuth } from '../navigation';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import CustomInput from '../components/CustomInput';
 import { saveAuthData } from '../utils/authUtils';
-import { GoogleSignin } from '@react-native-google-signin/google-signin';
-import auth from '@react-native-firebase/auth';
-import { API_URL, DIRECT_IP, DEV } from '../utils/config';
+import { DIRECT_IP, DEV } from '../utils/config';
+import { useAppDispatch } from '../redux/hooks';
+import { setUserData } from '../redux/slices/userSlice';
 
 // Server request timeout
 const SERVER_TIMEOUT_MS = 30000; // 30 seconds
@@ -31,7 +31,7 @@ const SignUpScreen = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigation = useNavigation<AuthScreenNavigationProp>();
-  const { signIn } = useAuth();
+  const dispatch = useAppDispatch();
 
   const handleSignUp = async () => {
     // Validate inputs
@@ -83,16 +83,24 @@ const SignUpScreen = () => {
       
       if (response.ok) {
         console.log('Server signup successful', data);
-        
+
         // Store JWT token from server response
         if (data.token) {
           try {
             // Use the auth utilities to store token
-            await saveAuthData(data.token, data.user.id);
+            await saveAuthData(data.token, data.user?.id);
             console.log('Authentication data stored successfully');
-            console.log('Manually updating auth state...');
-            signIn();
-            console.log('Auth state updated, navigation should occur automatically');
+
+            if (data.user) {
+              try {
+                await AsyncStorage.setItem('user', JSON.stringify(data.user));
+                dispatch(setUserData(data.user));
+              } catch (cacheError) {
+                console.error('Error caching user data:', cacheError);
+              }
+            }
+
+            navigation.replace('Onboarding');
           } catch (storageError) {
             console.error('Error storing token:', storageError);
             Alert.alert('Error', 'Account created, but failed to save authentication data');

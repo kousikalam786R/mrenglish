@@ -11,6 +11,8 @@ import {
   StatusBar,
   ActivityIndicator,
   RefreshControl,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -22,6 +24,9 @@ import { useAppSelector, useAppDispatch } from '../redux/hooks';
 import { signOut } from '../redux/thunks/authThunks';
 import apiClient from '../utils/apiClient';
 import Toast from 'react-native-toast-message';
+import Ionicons from 'react-native-vector-icons/Ionicons';
+import { updateUserProfile } from '../utils/profileService';
+import { setUserData } from '../redux/slices/userSlice';
 
 // Define types for better type checking
 interface Activity {
@@ -96,6 +101,35 @@ interface Advice {
   count: number;
 }
 
+const ENGLISH_LEVEL_LABELS: Record<string, string> = {
+  A1: 'Beginner',
+  A2: 'Elementary',
+  B1: 'Intermediate',
+  B2: 'Upper intermediate',
+  C1: 'Advanced',
+  C2: 'Proficiency',
+};
+
+const formatEnglishLevel = (level?: string | null): string => {
+  if (!level) {
+    return 'Not specified';
+  }
+
+  const trimmed = level.trim();
+  if (!trimmed) {
+    return 'Not specified';
+  }
+
+  const code = trimmed.toUpperCase().split(/[^A-Z0-9]/)[0];
+  const description = ENGLISH_LEVEL_LABELS[code];
+
+  if (description) {
+    return `${code} (${description})`;
+  }
+
+  return trimmed;
+};
+
 const ProfileScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [activeTab, setActiveTab] = useState<'stats' | 'about'>('stats');
@@ -109,6 +143,11 @@ const ProfileScreen = () => {
   const [advice, setAdvice] = useState<Advice[]>([]);
   const [complimentsExpanded, setComplimentsExpanded] = useState(false);
   const [adviceExpanded, setAdviceExpanded] = useState(false);
+  const [interestModalVisible, setInterestModalVisible] = useState(false);
+  const [pendingInterests, setPendingInterests] = useState<string[]>([]);
+  const [interestInput, setInterestInput] = useState('');
+  const [interestError, setInterestError] = useState<string | null>(null);
+  const [savingInterests, setSavingInterests] = useState(false);
   
   const dispatch = useAppDispatch();
   const { isSignedIn } = useAppSelector(state => state.auth);
@@ -144,6 +183,7 @@ const ProfileScreen = () => {
       
       const currentUser = profileResponse.data.user;
       setUser(currentUser);
+      setPendingInterests(currentUser.interests || []);
       
       // Then fetch stats and rating data
       const [statsResponse, ratingResponse] = await Promise.all([
@@ -183,6 +223,79 @@ const ProfileScreen = () => {
 
   const handleRefresh = () => {
     fetchProfileData(false);
+  };
+
+  const openInterestEditor = () => {
+    if (!user) return;
+    setPendingInterests(user.interests ? [...user.interests] : []);
+    setInterestInput('');
+    setInterestError(null);
+    setInterestModalVisible(true);
+  };
+
+  const handleAddInterest = () => {
+    const value = interestInput.trim();
+    if (!value) {
+      return;
+    }
+
+    if (value.length > 40) {
+      setInterestError('Please keep interests under 40 characters.');
+      return;
+    }
+
+    const exists = pendingInterests.some(
+      interest => interest.toLowerCase() === value.toLowerCase()
+    );
+
+    if (exists) {
+      setInterestError('You already added this interest.');
+      return;
+    }
+
+    setPendingInterests(prev => [...prev, value]);
+    setInterestInput('');
+    setInterestError(null);
+  };
+
+  const handleRemoveInterest = (interestToRemove: string) => {
+    setPendingInterests(prev => prev.filter(interest => interest !== interestToRemove));
+  };
+
+  const handleSaveInterests = async () => {
+    if (!user) return;
+
+    try {
+      setSavingInterests(true);
+      const updatedProfile = await updateUserProfile({ interests: pendingInterests });
+
+      const updatedUser = {
+        ...user,
+        interests: [...pendingInterests],
+        ...(updatedProfile || {}),
+      } as User;
+
+      setUser(updatedUser);
+      setPendingInterests(updatedUser.interests || []);
+      await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+      dispatch(setUserData(updatedUser as any));
+
+      Toast.show({
+        type: 'success',
+        text1: 'Interests updated',
+      });
+
+      setInterestModalVisible(false);
+    } catch (error: any) {
+      console.error('Error updating interests:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Could not update interests',
+        text2: error.response?.data?.message || error.message || 'Please try again.',
+      });
+    } finally {
+      setSavingInterests(false);
+    }
   };
   
   const handleEditProfile = () => {
@@ -272,6 +385,98 @@ const ProfileScreen = () => {
     );
   };
 
+  const renderInterestsModal = () => (
+    <Modal
+      visible={interestModalVisible}
+      animationType="slide"
+      onRequestClose={() => setInterestModalVisible(false)}
+    >
+      <SafeAreaView style={styles.interestModalContainer}>
+        <View style={styles.interestModalHeader}>
+          <TouchableOpacity
+            style={styles.interestBackButton}
+            onPress={() => setInterestModalVisible(false)}
+          >
+            <Ionicons name="chevron-back" size={26} color="#2C2C47" />
+          </TouchableOpacity>
+          <Text style={styles.interestModalTitle}>Interests</Text>
+          <View style={styles.interestHeaderSpacer} />
+        </View>
+
+        <View style={styles.interestInputRow}>
+          <TextInput
+            style={styles.interestInput}
+            placeholder="Add your interest"
+            placeholderTextColor="#A0A0B2"
+            value={interestInput}
+            onChangeText={text => {
+              setInterestInput(text);
+              if (interestError) {
+                setInterestError(null);
+              }
+            }}
+            maxLength={40}
+          />
+          <TouchableOpacity
+            style={[
+              styles.interestAddButton,
+              interestInput.trim().length === 0 && styles.interestAddButtonDisabled,
+            ]}
+            onPress={handleAddInterest}
+            disabled={interestInput.trim().length === 0}
+          >
+            <Text style={styles.interestAddButtonText}>Add</Text>
+          </TouchableOpacity>
+        </View>
+
+        {interestError ? <Text style={styles.interestErrorText}>{interestError}</Text> : null}
+
+        <ScrollView
+          style={styles.interestModalList}
+          contentContainerStyle={styles.interestModalScroll}
+          keyboardShouldPersistTaps="handled"
+        >
+          {pendingInterests.length > 0 ? (
+            <View style={styles.interestChipsWrapper}>
+              {pendingInterests.map((interest, index) => (
+                <View key={`${interest}-${index}`} style={styles.interestEditChip}>
+                  <Text style={styles.interestEditChipText}>{interest}</Text>
+                  <TouchableOpacity
+                    style={styles.interestChipRemove}
+                    onPress={() => handleRemoveInterest(interest)}
+                  >
+                    <Ionicons name="close" size={16} color="#4A4A62" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.interestEmptyState}>
+              <Text style={styles.interestEmptyText}>
+                Add a few interests so partners know what to chat about.
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+
+        <TouchableOpacity
+          style={[
+            styles.interestDoneButton,
+            savingInterests && styles.interestDoneButtonDisabled,
+          ]}
+          onPress={handleSaveInterests}
+          disabled={savingInterests}
+        >
+          {savingInterests ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.interestDoneButtonText}>Done</Text>
+          )}
+        </TouchableOpacity>
+      </SafeAreaView>
+    </Modal>
+  );
+
   const renderStatsRow = () => {
     if (!stats) return null;
     
@@ -318,7 +523,7 @@ const ProfileScreen = () => {
             <Text style={styles.infoIconText}>ENG</Text>
           </View>
           <Text style={styles.infoLabel}>English level</Text>
-          <Text style={styles.infoValue}>{user.englishLevel || 'A2'} (Upper intermediate)</Text>
+          <Text style={styles.infoValue}>{formatEnglishLevel(user.englishLevel)}</Text>
         </View>
         
         <View style={styles.infoItem}>
@@ -354,14 +559,14 @@ const ProfileScreen = () => {
                 <Text style={styles.interestText}>{interest}</Text>
               </View>
             ))}
-            <TouchableOpacity style={styles.addInterestButton}>
+            <TouchableOpacity style={styles.addInterestButton} onPress={openInterestEditor}>
               <Text style={styles.addInterestText}>Add +</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.noInterestsContainer}>
             <Text style={styles.noInterestsText}>No interests added yet</Text>
-            <TouchableOpacity style={styles.addInterestButton}>
+            <TouchableOpacity style={styles.addInterestButton} onPress={openInterestEditor}>
               <Text style={styles.addInterestText}>Add +</Text>
             </TouchableOpacity>
           </View>
@@ -580,6 +785,7 @@ const ProfileScreen = () => {
           </TouchableOpacity>
         </View>
       </ScrollView>
+      {renderInterestsModal()}
     </SafeAreaView>
   );
 };
@@ -792,6 +998,119 @@ const styles = StyleSheet.create({
   interestText: {
     fontSize: 14,
     color: '#333333',
+  },
+  interestModalContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 20,
+  },
+  interestModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 24,
+    paddingTop: 12,
+  },
+  interestBackButton: {
+    paddingRight: 12,
+    paddingVertical: 6,
+  },
+  interestModalTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#2C2C47',
+  },
+  interestHeaderSpacer: {
+    width: 26,
+  },
+  interestInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5F5FA',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+  },
+  interestInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#2C2C47',
+    paddingVertical: 8,
+  },
+  interestAddButton: {
+    marginLeft: 12,
+    backgroundColor: '#6C5CE7',
+    borderRadius: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  interestAddButtonDisabled: {
+    backgroundColor: '#C9C5F5',
+  },
+  interestAddButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  interestErrorText: {
+    color: '#E74C3C',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  interestModalList: {
+    flex: 1,
+  },
+  interestModalScroll: {
+    paddingVertical: 20,
+  },
+  interestChipsWrapper: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  interestEditChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1EFFF',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginRight: 8,
+    marginBottom: 10,
+  },
+  interestEditChipText: {
+    fontSize: 14,
+    color: '#4A4A62',
+    marginRight: 8,
+  },
+  interestChipRemove: {
+    padding: 4,
+  },
+  interestEmptyState: {
+    paddingVertical: 40,
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  interestEmptyText: {
+    fontSize: 15,
+    color: '#8B8BA4',
+    textAlign: 'center',
+  },
+  interestDoneButton: {
+    backgroundColor: '#6C5CE7',
+    borderRadius: 18,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginHorizontal: 10,
+    marginBottom: 24,
+  },
+  interestDoneButtonDisabled: {
+    opacity: 0.6,
+  },
+  interestDoneButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
   addInterestButton: {
     backgroundColor: '#E5E5E5',

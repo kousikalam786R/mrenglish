@@ -82,6 +82,11 @@ export interface UserProfile {
     text: string;
     time: string;
   }>;
+  goal?: string;
+  nativeLanguage?: string;
+  englishLevel?: string;
+  gender?: string;
+  age?: number;
 }
 
 const waitForToken = async (retries = 3, delay = 300): Promise<string | null> => {

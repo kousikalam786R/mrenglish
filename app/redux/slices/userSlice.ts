@@ -15,7 +15,12 @@ const initialState: UserProfile = {
   interests: [],
   bio: 'No bio yet',
   country: 'Unknown',
-  recentActivity: []
+  recentActivity: [],
+  goal: undefined,
+  nativeLanguage: undefined,
+  englishLevel: undefined,
+  gender: undefined,
+  age: undefined
 };
 
 // Create the user slice

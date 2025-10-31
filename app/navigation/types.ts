@@ -8,6 +8,7 @@ export type AuthStackParamList = {
   SignIn: undefined;
   SignUp: undefined;
   ForgotPassword: undefined;
+  Onboarding: undefined;
 };
 
 // Main app navigation parameter list
