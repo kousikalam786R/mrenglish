@@ -1,0 +1,96 @@
+{
+  "common": {
+    "cancel": "إلغاء",
+    "save": "حفظ",
+    "delete": "حذف",
+    "edit": "تعديل",
+    "done": "تم",
+    "loading": "جاري التحميل...",
+    "error": "خطأ",
+    "success": "نجاح",
+    "updated": "تم التحديث",
+    "back": "رجوع",
+    "next": "التالي",
+    "continue": "متابعة",
+    "close": "إغلاق",
+    "confirm": "تأكيد",
+    "yes": "نعم",
+    "no": "لا",
+    "ok": "موافق"
+  },
+  "settings": {
+    "title": "الإعدادات",
+    "account": "الحساب",
+    "preferences": "التفضيلات",
+    "appInformation": "معلومات التطبيق",
+    "changePassword": "تغيير كلمة المرور",
+    "logout": "تسجيل الخروج",
+    "deleteAccount": "حذف الحساب",
+    "darkMode": "الوضع الداكن",
+    "language": "اللغة",
+    "notifications": "الإشعارات",
+    "termsOfService": "شروط الخدمة",
+    "privacyPolicy": "سياسة الخصوصية",
+    "about": "حول MrEnglish",
+    "signOut": "تسجيل الخروج",
+    "signOutConfirm": "هل أنت متأكد أنك تريد تسجيل الخروج من MrEnglish على هذا الجهاز؟ ستحتاج إلى تسجيل الدخول مرة أخرى للوصول إلى حسابك."
+  },
+  "profile": {
+    "title": "الملف الشخصي",
+    "editProfile": "تعديل الملف الشخصي",
+    "information": "المعلومات",
+    "interests": "الاهتمامات",
+    "rating": "التقييم",
+    "compliments": "الإشادات",
+    "advice": "النصائح",
+    "feedback": "التعليقات",
+    "stats": {
+      "feedback": "التعليقات",
+      "talks": "المحادثات",
+      "hours": "الساعات",
+      "satisfactionPercentage": "من المستخدمين راضون عن شريك المحادثة هذا"
+    },
+    "nativeLanguage": "اللغة الأم",
+    "englishLevel": "مستوى اللغة الإنجليزية",
+    "gender": "الجنس",
+    "age": "العمر",
+    "notSpecified": "غير محدد",
+    "noInterests": "لم تتم إضافة اهتمامات بعد",
+    "addInterest": "إضافة +",
+    "addYourInterest": "أضف اهتمامك",
+    "yearsOld": "سنة"
+  },
+  "home": {
+    "title": "الرئيسية",
+    "history": "السجل",
+    "general": "عام",
+    "interview": "مقابلة",
+    "startPractice": "بدء الممارسة مع RAHA",
+    "voiceChat": "محادثة صوتية",
+    "voiceChatDesc": "محادثة صوتية مع RAHA AI",
+    "call": "مكالمة",
+    "callDesc": "تحدث مع RAHA AI في تجربة مشابهة للمكالمة",
+    "selectMode": "اختر وضع الممارسة",
+    "minutesRemaining": "دقيقة متبقية من التجربة المجانية"
+  },
+  "lobby": {
+    "title": "ردهة",
+    "readyToTalk": "جاهز للتحدث الآن",
+    "talkNow": "تحدث الآن",
+    "invitePartners": "دعوة الشركاء عبر الإنترنت",
+    "refresh": "تحديث",
+    "noOneHere": "لا يوجد أحد هنا بعد",
+    "offline": "غير متصل",
+    "online": "متصل",
+    "onCall": "في مكالمة"
+  },
+  "languages": {
+    "english": "English",
+    "hindi": "हिंদी",
+    "spanish": "Español",
+    "french": "Français",
+    "arabic": "العربية",
+    "bengali": "বাংলা"
+  }
+}
+

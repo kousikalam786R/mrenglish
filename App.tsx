@@ -16,6 +16,8 @@ import SocketProvider from './app/utils/SocketProvider';
 import { Provider } from 'react-redux';
 import { store } from './app/redux/store';
 import PermissionsManager from './app/components/PermissionsManager';
+import { ThemeProvider } from './app/context/ThemeContext';
+import './app/i18n/config'; // Initialize i18n
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { signInSuccess } from './app/redux/slices/authSlice';
 import Toast from 'react-native-toast-message';
@@ -133,14 +135,16 @@ function App(): React.JSX.Element {
   return (
     <GestureHandlerRootView style={styles.container}>
       <Provider store={store}>
-        <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-          <PermissionsManager>
-            <SocketProvider>
-              <AppNavigator />
-            </SocketProvider>
-          </PermissionsManager>
-          <Toast />
-        </SafeAreaProvider>
+        <ThemeProvider>
+          <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+            <PermissionsManager>
+              <SocketProvider>
+                <AppNavigator />
+              </SocketProvider>
+            </PermissionsManager>
+            <Toast />
+          </SafeAreaProvider>
+        </ThemeProvider>
       </Provider>
     </GestureHandlerRootView>
   );

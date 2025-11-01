@@ -21,12 +21,13 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { useAppSelector, useAppDispatch } from '../redux/hooks';
-import { signOut } from '../redux/thunks/authThunks';
 import apiClient from '../utils/apiClient';
 import Toast from 'react-native-toast-message';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { updateUserProfile } from '../utils/profileService';
 import { setUserData } from '../redux/slices/userSlice';
+import { useTheme } from '../context/ThemeContext';
+import { useTranslation } from 'react-i18next';
 
 // Define types for better type checking
 interface Activity {
@@ -132,6 +133,8 @@ const formatEnglishLevel = (level?: string | null): string => {
 
 const ProfileScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { theme, isDark } = useTheme();
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'stats' | 'about'>('stats');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -303,21 +306,8 @@ const ProfileScreen = () => {
     navigation.navigate('EditProfile' as any);
   };
   
-  const handleLogout = () => {
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel'
-        },
-        {
-          text: 'Sign Out',
-          onPress: () => dispatch(signOut())
-        }
-      ]
-    );
+  const handleOpenSettings = () => {
+    navigation.navigate('Settings');
   };
 
   const handleTestNotification = async () => {
@@ -353,7 +343,15 @@ const ProfileScreen = () => {
     if (!user) return null;
     
     return (
-      <View style={styles.profileHeader}>
+      <View style={[styles.profileHeader, { backgroundColor: theme.card }]}>
+        <TouchableOpacity
+          style={[styles.settingsIconButton, { backgroundColor: theme.primary + '15' }]}
+          onPress={handleOpenSettings}
+          accessibilityRole="button"
+          accessibilityLabel="Open settings"
+        >
+          <Ionicons name="settings-outline" size={22} color={theme.text} />
+        </TouchableOpacity>
         <View style={styles.profileImageContainer}>
           <Image 
             source={{ 
@@ -361,7 +359,7 @@ const ProfileScreen = () => {
             }} 
             style={styles.avatar} 
           />
-          <View style={styles.levelBadge}>
+          <View style={[styles.levelBadge, { backgroundColor: theme.textTertiary }]}>
             <Text style={styles.levelBadgeText}>{user.englishLevel || 'A2'}</Text>
           </View>
           <View style={styles.crownIcon}>
@@ -391,23 +389,23 @@ const ProfileScreen = () => {
       animationType="slide"
       onRequestClose={() => setInterestModalVisible(false)}
     >
-      <SafeAreaView style={styles.interestModalContainer}>
-        <View style={styles.interestModalHeader}>
+      <SafeAreaView style={[styles.interestModalContainer, { backgroundColor: theme.background }]}>
+        <View style={[styles.interestModalHeader, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
           <TouchableOpacity
             style={styles.interestBackButton}
             onPress={() => setInterestModalVisible(false)}
           >
-            <Ionicons name="chevron-back" size={26} color="#2C2C47" />
+            <Ionicons name="chevron-back" size={26} color={theme.text} />
           </TouchableOpacity>
-          <Text style={styles.interestModalTitle}>Interests</Text>
+          <Text style={[styles.interestModalTitle, { color: theme.text }]}>{t('profile.interests')}</Text>
           <View style={styles.interestHeaderSpacer} />
         </View>
 
         <View style={styles.interestInputRow}>
           <TextInput
-            style={styles.interestInput}
-            placeholder="Add your interest"
-            placeholderTextColor="#A0A0B2"
+            style={[styles.interestInput, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.inputBorder }]}
+                  placeholder={t('profile.addYourInterest')}
+            placeholderTextColor={theme.textTertiary}
             value={interestInput}
             onChangeText={text => {
               setInterestInput(text);
@@ -420,7 +418,8 @@ const ProfileScreen = () => {
           <TouchableOpacity
             style={[
               styles.interestAddButton,
-              interestInput.trim().length === 0 && styles.interestAddButtonDisabled,
+              { backgroundColor: theme.primary },
+              interestInput.trim().length === 0 && { backgroundColor: theme.inputBackground, opacity: 0.5 },
             ]}
             onPress={handleAddInterest}
             disabled={interestInput.trim().length === 0}
@@ -429,7 +428,7 @@ const ProfileScreen = () => {
           </TouchableOpacity>
         </View>
 
-        {interestError ? <Text style={styles.interestErrorText}>{interestError}</Text> : null}
+        {interestError ? <Text style={[styles.interestErrorText, { color: theme.error }]}>{interestError}</Text> : null}
 
         <ScrollView
           style={styles.interestModalList}
@@ -439,20 +438,20 @@ const ProfileScreen = () => {
           {pendingInterests.length > 0 ? (
             <View style={styles.interestChipsWrapper}>
               {pendingInterests.map((interest, index) => (
-                <View key={`${interest}-${index}`} style={styles.interestEditChip}>
-                  <Text style={styles.interestEditChipText}>{interest}</Text>
+                <View key={`${interest}-${index}`} style={[styles.interestEditChip, { backgroundColor: theme.primary + '15', borderColor: theme.primary + '30' }]}>
+                  <Text style={[styles.interestEditChipText, { color: theme.primary }]}>{interest}</Text>
                   <TouchableOpacity
                     style={styles.interestChipRemove}
                     onPress={() => handleRemoveInterest(interest)}
                   >
-                    <Ionicons name="close" size={16} color="#4A4A62" />
+                    <Ionicons name="close" size={16} color={theme.text} />
                   </TouchableOpacity>
                 </View>
               ))}
             </View>
           ) : (
             <View style={styles.interestEmptyState}>
-              <Text style={styles.interestEmptyText}>
+              <Text style={[styles.interestEmptyText, { color: theme.textSecondary }]}>
                 Add a few interests so partners know what to chat about.
               </Text>
             </View>
@@ -462,7 +461,8 @@ const ProfileScreen = () => {
         <TouchableOpacity
           style={[
             styles.interestDoneButton,
-            savingInterests && styles.interestDoneButtonDisabled,
+            { backgroundColor: theme.primary },
+            savingInterests && { opacity: 0.7 },
           ]}
           onPress={handleSaveInterests}
           disabled={savingInterests}
@@ -470,7 +470,7 @@ const ProfileScreen = () => {
           {savingInterests ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <Text style={styles.interestDoneButtonText}>Done</Text>
+            <Text style={styles.interestDoneButtonText}>{t('common.done')}</Text>
           )}
         </TouchableOpacity>
       </SafeAreaView>
@@ -481,23 +481,23 @@ const ProfileScreen = () => {
     if (!stats) return null;
     
     return (
-      <View style={styles.statsRow}>
+      <View style={[styles.statsRow, { backgroundColor: theme.card }]}>
         <View style={styles.statItem}>
           <Text style={styles.statIcon}>💬</Text>
-          <Text style={styles.statNumber}>{stats.positiveFeedback + stats.negativeFeedback}</Text>
-          <Text style={styles.statLabel}>Feedback</Text>
+          <Text style={[styles.statNumber, { color: theme.text }]}>{stats.positiveFeedback + stats.negativeFeedback}</Text>
+          <Text style={[styles.statLabel, { color: theme.textSecondary }]}>{t('profile.stats.feedback')}</Text>
         </View>
         
         <View style={styles.statItem}>
           <Text style={styles.statIcon}>📞</Text>
-          <Text style={styles.statNumber}>{stats.totalCalls}</Text>
-          <Text style={styles.statLabel}>Talks</Text>
+          <Text style={[styles.statNumber, { color: theme.text }]}>{stats.totalCalls}</Text>
+          <Text style={[styles.statLabel, { color: theme.textSecondary }]}>{t('profile.stats.talks')}</Text>
         </View>
         
         <View style={styles.statItem}>
           <Text style={styles.statIcon}>⏰</Text>
-          <Text style={styles.statNumber}>{stats.totalHours}</Text>
-          <Text style={styles.statLabel}>Hours</Text>
+          <Text style={[styles.statNumber, { color: theme.text }]}>{stats.totalHours}</Text>
+          <Text style={[styles.statLabel, { color: theme.textSecondary }]}>{t('profile.stats.hours')}</Text>
         </View>
       </View>
     );
@@ -508,38 +508,38 @@ const ProfileScreen = () => {
     
     return (
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Information</Text>
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>Information</Text>
         
-        <View style={styles.infoItem}>
-          <View style={styles.infoIcon}>
-            <Text style={styles.infoIconText}>Aa</Text>
+        <View style={[styles.infoItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <View style={[styles.infoIcon, { backgroundColor: theme.primary + '15' }]}>
+            <Text style={[styles.infoIconText, { color: theme.primary }]}>Aa</Text>
           </View>
-          <Text style={styles.infoLabel}>Native language</Text>
-          <Text style={styles.infoValue}>{user.nativeLanguage || 'Not specified'}</Text>
+          <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>{t('profile.nativeLanguage')}</Text>
+          <Text style={[styles.infoValue, { color: theme.text }]}>{user.nativeLanguage || t('profile.notSpecified')}</Text>
         </View>
         
-        <View style={styles.infoItem}>
-          <View style={styles.infoIcon}>
-            <Text style={styles.infoIconText}>ENG</Text>
+        <View style={[styles.infoItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <View style={[styles.infoIcon, { backgroundColor: theme.primary + '15' }]}>
+            <Text style={[styles.infoIconText, { color: theme.primary }]}>ENG</Text>
           </View>
-          <Text style={styles.infoLabel}>English level</Text>
-          <Text style={styles.infoValue}>{formatEnglishLevel(user.englishLevel)}</Text>
+          <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>{t('profile.englishLevel')}</Text>
+          <Text style={[styles.infoValue, { color: theme.text }]}>{formatEnglishLevel(user.englishLevel)}</Text>
         </View>
         
-        <View style={styles.infoItem}>
-          <View style={styles.infoIcon}>
-            <Text style={styles.infoIconText}>♂</Text>
+        <View style={[styles.infoItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <View style={[styles.infoIcon, { backgroundColor: theme.primary + '15' }]}>
+            <Text style={[styles.infoIconText, { color: theme.primary }]}>♂</Text>
           </View>
-          <Text style={styles.infoLabel}>Gender</Text>
-          <Text style={styles.infoValue}>{user.gender || 'Not specified'}</Text>
+          <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>{t('profile.gender')}</Text>
+          <Text style={[styles.infoValue, { color: theme.text }]}>{user.gender || t('profile.notSpecified')}</Text>
         </View>
         
-        <View style={styles.infoItem}>
-          <View style={styles.infoIcon}>
-            <Text style={styles.infoIconText}>📅</Text>
+        <View style={[styles.infoItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <View style={[styles.infoIcon, { backgroundColor: theme.primary + '15' }]}>
+            <Text style={[styles.infoIconText, { color: theme.primary }]}>📅</Text>
           </View>
-          <Text style={styles.infoLabel}>Age</Text>
-          <Text style={styles.infoValue}>{user.age ? `${user.age} years old` : 'Not specified'}</Text>
+          <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>{t('profile.age')}</Text>
+          <Text style={[styles.infoValue, { color: theme.text }]}>{user.age ? `${user.age} ${t('profile.yearsOld', { defaultValue: 'years old' })}` : t('profile.notSpecified')}</Text>
         </View>
       </View>
     );
@@ -550,24 +550,24 @@ const ProfileScreen = () => {
     
     return (
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Interests</Text>
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('profile.interests')}</Text>
         
         {user.interests && user.interests.length > 0 ? (
           <View style={styles.interestsGrid}>
             {user.interests.map((interest, index) => (
-              <View key={index} style={styles.interestChip}>
-                <Text style={styles.interestText}>{interest}</Text>
+              <View key={index} style={[styles.interestChip, { backgroundColor: theme.primary + '15', borderColor: theme.primary + '30' }]}>
+                <Text style={[styles.interestText, { color: theme.primary }]}>{interest}</Text>
               </View>
             ))}
-            <TouchableOpacity style={styles.addInterestButton} onPress={openInterestEditor}>
-              <Text style={styles.addInterestText}>Add +</Text>
+            <TouchableOpacity style={[styles.addInterestButton, { backgroundColor: theme.primary }]} onPress={openInterestEditor}>
+              <Text style={styles.addInterestText}>{t('profile.addInterest')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
-          <View style={styles.noInterestsContainer}>
-            <Text style={styles.noInterestsText}>No interests added yet</Text>
-            <TouchableOpacity style={styles.addInterestButton} onPress={openInterestEditor}>
-              <Text style={styles.addInterestText}>Add +</Text>
+          <View style={[styles.noInterestsContainer, { backgroundColor: theme.card }]}>
+            <Text style={[styles.noInterestsText, { color: theme.textSecondary }]}>{t('profile.noInterests')}</Text>
+            <TouchableOpacity style={[styles.addInterestButton, { backgroundColor: theme.primary }]} onPress={openInterestEditor}>
+              <Text style={styles.addInterestText}>{t('profile.addInterest')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -580,22 +580,22 @@ const ProfileScreen = () => {
     
     return (
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Rating</Text>
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('profile.rating')}</Text>
         
-        <View style={styles.ratingCard}>
-          <Text style={styles.satisfactionPercentage}>{stats.satisfactionPercentage}%</Text>
-          <Text style={styles.satisfactionText}>of users are satisfied with this conversation partner</Text>
+        <View style={[styles.ratingCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <Text style={[styles.satisfactionPercentage, { color: theme.primary }]}>{stats.satisfactionPercentage}%</Text>
+          <Text style={[styles.satisfactionText, { color: theme.textSecondary }]}>{t('profile.stats.satisfactionPercentage')}</Text>
         </View>
         
         <View style={styles.ratingStats}>
           <View style={styles.ratingStatItem}>
             <Text style={styles.ratingIcon}>👍</Text>
-            <Text style={styles.ratingNumber}>{stats.positiveFeedback}</Text>
+            <Text style={[styles.ratingNumber, { color: theme.text }]}>{stats.positiveFeedback}</Text>
           </View>
           
           <View style={styles.ratingStatItem}>
             <Text style={styles.ratingIcon}>👎</Text>
-            <Text style={styles.ratingNumber}>{stats.negativeFeedback}</Text>
+            <Text style={[styles.ratingNumber, { color: theme.text }]}>{stats.negativeFeedback}</Text>
           </View>
         </View>
       </View>
@@ -609,8 +609,8 @@ const ProfileScreen = () => {
           style={styles.sectionHeader}
           onPress={() => setComplimentsExpanded(!complimentsExpanded)}
         >
-          <Text style={styles.sectionTitle}>Compliments</Text>
-          <Text style={[styles.chevronIcon, complimentsExpanded && styles.chevronRotated]}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('profile.compliments')}</Text>
+          <Text style={[styles.chevronIcon, { color: theme.textSecondary }, complimentsExpanded && styles.chevronRotated]}>
             {complimentsExpanded ? '⌄' : '›'}
           </Text>
         </TouchableOpacity>
@@ -618,15 +618,17 @@ const ProfileScreen = () => {
         {complimentsExpanded && (
           <View style={styles.complimentsList}>
             {compliments.map((compliment, index) => (
-              <View key={index} style={styles.complimentItem}>
+              <View key={index} style={[styles.complimentItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
                 <View style={[
                   styles.complimentBadge,
+                  { backgroundColor: compliment.count === 0 ? theme.inputBackground : theme.primary + '15' },
                   compliment.count === 0 && styles.complimentBadgeEmpty
                 ]}>
-                  <Text style={styles.complimentCount}>{compliment.count}</Text>
+                  <Text style={[styles.complimentCount, { color: compliment.count === 0 ? theme.textTertiary : theme.primary }]}>{compliment.count}</Text>
                 </View>
                 <Text style={[
                   styles.complimentText,
+                  { color: compliment.count === 0 ? theme.textTertiary : theme.text },
                   compliment.count === 0 && styles.complimentTextEmpty
                 ]}>
                   {compliment._id}
@@ -646,8 +648,8 @@ const ProfileScreen = () => {
           style={styles.sectionHeader}
           onPress={() => setAdviceExpanded(!adviceExpanded)}
         >
-          <Text style={styles.sectionTitle}>Advice</Text>
-          <Text style={[styles.chevronIcon, adviceExpanded && styles.chevronRotated]}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('profile.advice')}</Text>
+          <Text style={[styles.chevronIcon, { color: theme.textSecondary }, adviceExpanded && styles.chevronRotated]}>
             {adviceExpanded ? '⌄' : '›'}
           </Text>
         </TouchableOpacity>
@@ -655,15 +657,17 @@ const ProfileScreen = () => {
         {adviceExpanded && (
           <View style={styles.adviceList}>
             {advice.map((adviceItem, index) => (
-              <View key={index} style={styles.adviceItem}>
+              <View key={index} style={[styles.adviceItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
                 <View style={[
                   styles.adviceBadge,
+                  { backgroundColor: adviceItem.count === 0 ? theme.inputBackground : theme.warning + '15' },
                   adviceItem.count === 0 && styles.adviceBadgeEmpty
                 ]}>
-                  <Text style={styles.adviceCount}>{adviceItem.count}</Text>
+                  <Text style={[styles.adviceCount, { color: adviceItem.count === 0 ? theme.textTertiary : theme.warning }]}>{adviceItem.count}</Text>
                 </View>
                 <Text style={[
                   styles.adviceText,
+                  { color: adviceItem.count === 0 ? theme.textTertiary : theme.text },
                   adviceItem.count === 0 && styles.adviceTextEmpty
                 ]}>
                   {adviceItem._id}
@@ -682,14 +686,14 @@ const ProfileScreen = () => {
     return (
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Feedback</Text>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('profile.feedback')}</Text>
           <TouchableOpacity>
-            <Text style={styles.chevronIcon}>›</Text>
+            <Text style={[styles.chevronIcon, { color: theme.textSecondary }]}>›</Text>
           </TouchableOpacity>
         </View>
         
         {feedback.slice(0, 3).map((item, index) => (
-          <View key={index} style={styles.feedbackItem}>
+          <View key={index} style={[styles.feedbackItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <Image 
               source={{ 
                 uri: item.feedbackBy.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg' 
@@ -697,8 +701,8 @@ const ProfileScreen = () => {
               style={styles.feedbackAvatar} 
             />
             <View style={styles.feedbackContent}>
-              <Text style={styles.feedbackName}>{item.feedbackBy.name}</Text>
-              <Text style={styles.feedbackDate}>
+              <Text style={[styles.feedbackName, { color: theme.text }]}>{item.feedbackBy.name}</Text>
+              <Text style={[styles.feedbackDate, { color: theme.textSecondary }]}>
                 {new Date(item.createdAt).toLocaleDateString('en-US', {
                   year: 'numeric',
                   month: 'long',
@@ -719,23 +723,23 @@ const ProfileScreen = () => {
   
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4A90E2" />
+      <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
+        <ActivityIndicator size="large" color={theme.primary} />
       </View>
     );
   }
   
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.surface }]} edges={['top', 'left', 'right', 'bottom']}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={theme.background} />
       <ScrollView 
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            colors={['#4A90E2']}
-            tintColor="#4A90E2"
+            colors={[theme.primary]}
+            tintColor={theme.primary}
           />
         }
       >
@@ -761,24 +765,11 @@ const ProfileScreen = () => {
         
         {/* Feedback Section */}
         {renderFeedbackSection()}
-        
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity 
-            style={styles.logoutButton}
-            onPress={handleLogout}
-          >
-            <Text style={styles.logoutButtonText}>Logout</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.settingsButton}>
-            <Text style={styles.settingsButtonText}>Settings</Text>
-          </TouchableOpacity>
-        </View>
-        
+
         {/* Test Notification Button */}
         <View style={styles.testContainer}>
           <TouchableOpacity 
-            style={styles.testButton}
+            style={[styles.testButton, { backgroundColor: theme.primary }]}
             onPress={handleTestNotification}
           >
             <Text style={styles.testButtonText}>🔔 Test Push Notification</Text>
@@ -809,6 +800,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
+  },
+  settingsIconButton: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#EEF3FF',
   },
   profileImageContainer: {
     position: 'relative',
@@ -1270,43 +1272,6 @@ const styles = StyleSheet.create({
   },
   adviceTextEmpty: {
     color: '#999999',
-  },
-  buttonContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    marginHorizontal: 16,
-    marginBottom: 20,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    marginTop: 8,
-  },
-  logoutButton: {
-    flex: 1,
-    backgroundColor: '#F2F2F2',
-    paddingVertical: 12,
-    borderRadius: 50,
-    marginRight: 8,
-    alignItems: 'center',
-  },
-  logoutButtonText: {
-    color: '#666666',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  settingsButton: {
-    flex: 1,
-    backgroundColor: '#4A90E2',
-    paddingVertical: 12,
-    borderRadius: 50,
-    marginLeft: 8,
-    alignItems: 'center',
-  },
-  settingsButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 16,
   },
   loadingContainer: {
     flex: 1,

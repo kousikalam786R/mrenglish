@@ -42,7 +42,9 @@
     "react-native-webrtc": "^124.0.5",
     "react-redux": "^9.2.0",
     "redux": "^5.0.1",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^4.8.1",
+    "i18next": "^23.15.1",
+    "react-i18next": "^14.1.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

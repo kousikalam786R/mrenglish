@@ -66,6 +66,7 @@ const getHeaders = async () => {
 
 // Interface for user profile data
 export interface UserProfile {
+  preferredLanguage?: string;
   _id?: string;
   name?: string;
   email?: string;
@@ -87,6 +88,8 @@ export interface UserProfile {
   englishLevel?: string;
   gender?: string;
   age?: number;
+  googleId?: string; // Added to detect Google sign-in users
+  notificationsEnabled?: boolean; // Notification preference
 }
 
 const waitForToken = async (retries = 3, delay = 300): Promise<string | null> => {

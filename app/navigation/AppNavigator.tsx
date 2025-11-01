@@ -18,6 +18,7 @@ import { CallStatus } from '../utils/callService';
 import IncomingCallModal from '../components/IncomingCallModal';
 import SplashScreen from '../screens/SplashScreen';
 import { navigationRef, processQueuedActions } from './NavigationService';
+import { useTheme } from '../context/ThemeContext';
 
 // Screens
 import LobbyScreen from '../screens/LobbyScreen';
@@ -26,6 +27,12 @@ import RankingScreen from '../screens/RankingScreen';
 import ContactsScreen from '../screens/ContactsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
+import SettingsScreen from '../screens/SettingsScreen';
+import ChangePasswordScreen from '../screens/ChangePasswordScreen';
+import DeleteAccountScreen from '../screens/DeleteAccountScreen';
+import TermsOfServiceScreen from '../screens/TermsOfServiceScreen';
+import PrivacyPolicyScreen from '../screens/PrivacyPolicyScreen';
+import AboutScreen from '../screens/AboutScreen';
 import PostCallFeedbackScreen from '../screens/PostCallFeedbackScreen';
 import PostCallFlowScreen from '../screens/PostCallFlowScreen';
 import ChatDetailScreen from '../screens/ChatDetailScreen';
@@ -51,16 +58,7 @@ import {
   ContactsStackParamList
 } from './types';
 
-// Custom navigation theme
-const NavigationTheme = {
-  ...DefaultTheme,
-  colors: {
-    ...DefaultTheme.colors,
-    background: '#FFFFFF',
-    card: '#FFFFFF',
-    primary: '#4A90E2',
-  },
-};
+// Navigation theme will be created dynamically based on app theme
 
 // Disable animations for Android to prevent UI frame errors
 const screenOptions: NativeStackNavigationOptions = {
@@ -217,6 +215,8 @@ const ContactsStackNavigator = () => {
 
 // Main tab navigator
 const MainNavigator = () => {
+  const { theme } = useTheme();
+  
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -257,9 +257,13 @@ const MainNavigator = () => {
             return <View style={{ width: size, height: size, backgroundColor: color, borderRadius: size/2 }} />;
           }
         },
-        tabBarActiveTintColor: '#4A90E2',
-        tabBarInactiveTintColor: 'gray',
-        tabBarStyle: { elevation: 5 },
+        tabBarActiveTintColor: theme.primary,
+        tabBarInactiveTintColor: theme.textTertiary,
+        tabBarStyle: { 
+          backgroundColor: theme.card,
+          borderTopColor: theme.border,
+          elevation: 5,
+        },
         // Disable animations on Android to prevent UI frame errors
         tabBarItemStyle: Platform.OS === 'android' ? { marginTop: 0, paddingTop: 0 } : undefined,
       })}
@@ -364,6 +368,60 @@ const RootNavigator = () => {
               }}
             />
             <Stack.Screen 
+              name="Settings" 
+              component={SettingsScreen} 
+              options={{
+                headerShown: false,
+                presentation: 'card',
+                animation: 'slide_from_right'
+              }}
+            />
+            <Stack.Screen 
+              name="ChangePassword" 
+              component={ChangePasswordScreen} 
+              options={{
+                headerShown: false,
+                presentation: 'card',
+                animation: 'slide_from_right'
+              }}
+            />
+            <Stack.Screen 
+              name="TermsOfService"
+              component={TermsOfServiceScreen}
+              options={{
+                headerShown: false,
+                presentation: 'card',
+                animation: 'slide_from_right'
+              }}
+            />
+            <Stack.Screen 
+              name="PrivacyPolicy"
+              component={PrivacyPolicyScreen}
+              options={{
+                headerShown: false,
+                presentation: 'card',
+                animation: 'slide_from_right'
+              }}
+            />
+            <Stack.Screen 
+              name="About"
+              component={AboutScreen}
+              options={{
+                headerShown: false,
+                presentation: 'card',
+                animation: 'slide_from_right'
+              }}
+            />
+            <Stack.Screen 
+              name="DeleteAccount" 
+              component={DeleteAccountScreen} 
+              options={{
+                headerShown: false,
+                presentation: 'card',
+                animation: 'slide_from_right'
+              }}
+            />
+            <Stack.Screen 
               name="EditProfile" 
               component={EditProfileScreen} 
               options={{
@@ -450,6 +508,22 @@ GoogleSignin.configure({
 const AppNavigator = () => {
   const { isSignedIn, status } = useSelector((state: any) => state.auth);
   const dispatch = useAppDispatch();
+  const { theme, isDark } = useTheme();
+  
+  // Create navigation theme dynamically based on app theme
+  const navigationTheme = useMemo(() => ({
+    ...DefaultTheme,
+    colors: {
+      ...DefaultTheme.colors,
+      background: theme.background,
+      card: theme.card,
+      text: theme.text,
+      border: theme.border,
+      primary: theme.primary,
+      notification: theme.primary,
+    },
+    dark: isDark,
+  }), [theme, isDark]);
   
   // Show loading screen while authentication status is being determined
   if (status === 'loading') {
@@ -459,7 +533,7 @@ const AppNavigator = () => {
   return (
     <NavigationContainer 
       ref={navigationRef} 
-      theme={NavigationTheme} 
+      theme={navigationTheme} 
       onReady={() => {
         // Process any queued navigation actions once the container is ready
         processQueuedActions();

@@ -29,6 +29,8 @@ import FilterModal, { FilterSettings } from '../components/FilterModal';
 import { mediaDevices } from 'react-native-webrtc';
 import simpleUserStatusService from '../services/simpleUserStatusService';
 import { useUserStatusService } from '../hooks/useUserStatus';
+import { useTheme } from '../context/ThemeContext';
+import { useTranslation } from 'react-i18next';
 
 // Define user type
 interface User {
@@ -54,6 +56,7 @@ interface UserCardProps {
 }
 
 const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps) => {
+  const { theme } = useTheme();
   // Get user status from centralized service with subscription
   const [userStatus, setUserStatus] = useState(() => simpleUserStatusService.getUserStatus(user._id));
 
@@ -97,7 +100,7 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
   };
 
   return (
-    <View style={styles.userCard}>
+    <View style={[styles.userCard, { backgroundColor: theme.card }]}>
     <TouchableOpacity 
         style={styles.userCardContent}
       onPress={onPress}
@@ -115,18 +118,21 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
         </View>
         
         <View style={styles.userInfo}>
-          <Text style={styles.userName}>
+          <Text style={[styles.userName, { color: theme.text }]}>
             {user.name} {user.gender === 'Female' ? '🌸' : user.gender === 'Male' ? '👨' : ''}
           </Text>
           <View style={styles.ratingContainer}>
-            <Text style={styles.thumbsUp}>👍 {user.rating || 95}%</Text>
-            <Text style={styles.userGender}> • {user.gender || 'Not specified'}</Text>
+            <Text style={[styles.thumbsUp, { color: theme.textSecondary }]}>👍 {user.rating || 95}%</Text>
+            <Text style={[styles.userGender, { color: theme.textSecondary }]}> • {user.gender || 'Not specified'}</Text>
         </View>
-          <Text style={styles.userCountry}>
+          <Text style={[styles.userCountry, { color: theme.textSecondary }]}>
             {user.country || '🌎 Global'} • {user.talks || 0} talks
           </Text>
-          <Text style={(userStatus?.isOnline ?? user.isOnline) ? styles.onlineText : styles.offlineText}>
-            {(userStatus?.isOnline ?? user.isOnline) ? 'online' : 'offline'}
+          <Text style={[
+            (userStatus?.isOnline ?? user.isOnline) ? styles.onlineText : styles.offlineText,
+            { color: (userStatus?.isOnline ?? user.isOnline) ? theme.success : theme.textTertiary }
+          ]}>
+            {(userStatus?.isOnline ?? user.isOnline) ? t('lobby.online') : t('lobby.offline')}
           </Text>
           {/* Debug info */}
           {/* {__DEV__ && (
@@ -141,7 +147,7 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
             style={[
               styles.callButton, 
               styles.callButtonFullWidth,
-              (!(userStatus?.isOnline ?? user.isOnline) || userStatus?.isOnCall) && styles.callButtonDisabled
+              { backgroundColor: (!(userStatus?.isOnline ?? user.isOnline) || userStatus?.isOnCall) ? theme.inputBackground : theme.primary },
             ]} 
             onPress={(e) => {
               e.stopPropagation(); // Prevent triggering the parent's onPress
@@ -152,13 +158,13 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
             <IconMaterial 
               name={userStatus?.isOnCall ? "call-end" : "call"} 
               size={24} 
-              color={(!(userStatus?.isOnline ?? user.isOnline) || userStatus?.isOnCall) ? "#999" : "white"} 
+              color={(!(userStatus?.isOnline ?? user.isOnline) || userStatus?.isOnCall) ? theme.textTertiary : "white"} 
             />
             {!(userStatus?.isOnline ?? user.isOnline) && (
-              <Text style={styles.offlineCallText}>Offline</Text>
+              <Text style={[styles.offlineCallText, { color: theme.textTertiary }]}>{t('lobby.offline')}</Text>
             )}
             {userStatus?.isOnCall && (
-              <Text style={styles.onCallText}>On Call</Text>
+              <Text style={[styles.onCallText, { color: theme.textTertiary }]}>{t('lobby.onCall')}</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -172,6 +178,8 @@ interface LobbyScreenProps {
 }
 
 const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
+  const { theme, isDark } = useTheme();
+  const { t } = useTranslation();
   const [users, setUsers] = useState<User[]>([]);
   const [readyUsers, setReadyUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1442,11 +1450,11 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.surface }]} edges={['top', 'left', 'right']}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={theme.background} />
       
-      <View style={styles.header}>
-        <Text style={styles.title}>Lobby</Text>
+      <View style={[styles.header, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
+        <Text style={[styles.title, { color: theme.text }]}>{t('lobby.title')}</Text>
         <TouchableOpacity 
           style={styles.settingsButton}
           onPress={() => setShowFilterModal(true)}
@@ -1454,46 +1462,46 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
           <IconMaterial 
             name="tune" 
             size={24} 
-            color="#333" 
+            color={theme.text} 
           />
         </TouchableOpacity>
       </View>
       
       {readyUsers.length === 0 ? (
-        <View style={styles.emptyStateContainer}>
-          <View style={styles.emptyIconContainer}>
-            <IconMaterial name="person" size={50} color="#ccc" />
+        <View style={[styles.emptyStateContainer, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <View style={[styles.emptyIconContainer, { backgroundColor: theme.inputBackground }]}>
+            <IconMaterial name="person" size={50} color={theme.textTertiary} />
           </View>
-          <Text style={styles.emptyStateTitle}>There's no one here yet</Text>
+          <Text style={[styles.emptyStateTitle, { color: theme.textSecondary }]}>{t('lobby.noOneHere')}</Text>
         </View>
       ) : null}
       
       {/* Ready to talk now horizontal section */}
       {readyUsers.length > 0 && (
         <View style={styles.readySection}>
-          <Text style={styles.readyTitle}>Ready to talk now</Text>
+          <Text style={[styles.readyTitle, { color: theme.text }]}>{t('lobby.readyToTalk')}</Text>
           <FlatList
             data={readyUsers}
             horizontal
             keyExtractor={(item) => item._id}
             renderItem={({ item }) => (
               <TouchableOpacity 
-                style={styles.readyCard}
+                style={[styles.readyCard, { backgroundColor: theme.card }]}
                 onPress={() => handleCallPress(item)}
               >
                 <Image 
                   source={{ uri: item.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg' }} 
                   style={styles.readyAvatar} 
                 />
-                <Text style={styles.readyName} numberOfLines={1}>{item.name}</Text>
+                <Text style={[styles.readyName, { color: theme.text }]} numberOfLines={1}>{item.name}</Text>
                 <TouchableOpacity 
-                  style={styles.readyTalkButton}
+                  style={[styles.readyTalkButton, { backgroundColor: theme.primary }]}
                   onPress={(e) => {
                     e.stopPropagation();
                     handleCallPress(item);
                   }}
                 >
-                  <Text style={styles.readyTalkText}>Talk now</Text>
+                  <Text style={styles.readyTalkText}>{t('lobby.talkNow')}</Text>
                 </TouchableOpacity>
               </TouchableOpacity>
             )}
@@ -1504,13 +1512,13 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       )}
       
       <View style={styles.inviteSection}>
-        <Text style={styles.inviteTitle}>Invite online partners</Text>
+        <Text style={[styles.inviteTitle, { color: theme.text }]}>{t('lobby.invitePartners')}</Text>
         <TouchableOpacity 
-          style={styles.refreshButton}
+          style={[styles.refreshButton, { backgroundColor: theme.primary }]}
           onPress={handleRefresh}
         >
           <Icon name="refresh" size={22} color="white" />
-          <Text style={styles.refreshText}>Refresh</Text>
+          <Text style={styles.refreshText}>{t('lobby.refresh')}</Text>
         </TouchableOpacity>
       </View>
       
@@ -1601,7 +1609,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    // backgroundColor will be set dynamically with theme
   },
   loadingContainer: {
     flex: 1,

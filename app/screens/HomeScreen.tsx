@@ -20,6 +20,8 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import IconMaterial from 'react-native-vector-icons/MaterialIcons';
 import { RootScreenNavigationProp } from '../navigation/types';
 import { useAppSelector } from '../redux/hooks';
+import { useTheme } from '../context/ThemeContext';
+import { useTranslation } from 'react-i18next';
 
 const { width } = Dimensions.get('window');
 const cardWidth = (width - 48) / 2;
@@ -39,6 +41,8 @@ const HomeScreen = () => {
   const navigation = useNavigation<RootScreenNavigationProp>();
   // Get user data from Redux store instead of local state
   const userData = useAppSelector(state => state.user);
+  const { theme, isDark } = useTheme();
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('general');
   const [messages, setMessages] = useState([
     { id: 1, text: "Hello! I'm RAHA AI. How can I help you practice today?", isAI: true },
@@ -305,59 +309,59 @@ const HomeScreen = () => {
         animationType="fade"
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
+        <View style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}>
+          <View style={[styles.modalContainer, { backgroundColor: theme.card }]}>
             <TouchableOpacity 
               style={styles.closeButton} 
               onPress={() => setModalVisible(false)}
             >
-              <Icon name="close" size={24} color="#333" />
+              <Icon name="close" size={24} color={theme.text} />
             </TouchableOpacity>
             
-            <Text style={styles.modalTitle}>Select mode of Practice</Text>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>{t('home.selectMode')}</Text>
             
             {/* Progress bar */}
             <View style={styles.progressContainer}>
-              <View style={styles.progressBar}>
-                <View style={styles.progressFill} />
+              <View style={[styles.progressBar, { backgroundColor: theme.inputBackground }]}>
+                <View style={[styles.progressFill, { backgroundColor: theme.primary }]} />
               </View>
-              <Text style={styles.timerText}>18:05 minutes remaining of free trial</Text>
+              <Text style={[styles.timerText, { color: theme.textSecondary }]}>18:05 {t('home.minutesRemaining')}</Text>
             </View>
             
             {/* Voice Chat Option */}
             <TouchableOpacity 
-              style={styles.practiceOption}
+              style={[styles.practiceOption, { backgroundColor: theme.card }]}
               onPress={() => handlePracticeMode('voiceChat')}
             >
-              <View style={styles.optionIconContainer}>
+              <View style={[styles.optionIconContainer, { backgroundColor: theme.primary }]}>
                 <Icon name="chatbubble-ellipses" size={28} color="#fff" />
               </View>
               <View style={styles.optionTextContainer}>
-                <Text style={styles.optionTitle}>Voice Chat</Text>
-                <Text style={styles.optionDescription}>Voice chat with RAHA AI</Text>
+                <Text style={[styles.optionTitle, { color: theme.text }]}>{t('home.voiceChat')}</Text>
+                <Text style={[styles.optionDescription, { color: theme.textSecondary }]}>{t('home.voiceChatDesc')}</Text>
               </View>
             </TouchableOpacity>
             
             {/* Call Option */}
             <TouchableOpacity 
-              style={styles.practiceOption}
+              style={[styles.practiceOption, { backgroundColor: theme.card }]}
               onPress={() => handlePracticeMode('call')}
             >
-              <View style={styles.optionIconContainer}>
+              <View style={[styles.optionIconContainer, { backgroundColor: theme.primary }]}>
                 <Icon name="call" size={28} color="#fff" />
               </View>
               <View style={styles.optionTextContainer}>
-                <Text style={styles.optionTitle}>Call</Text>
-                <Text style={styles.optionDescription}>Talk to RAHA AI in a call-like experience</Text>
+                <Text style={[styles.optionTitle, { color: theme.text }]}>{t('home.call')}</Text>
+                <Text style={[styles.optionDescription, { color: theme.textSecondary }]}>{t('home.callDesc')}</Text>
               </View>
             </TouchableOpacity>
             
             {/* Start Practice Button */}
             <TouchableOpacity 
-              style={styles.startPracticeButton}
+              style={[styles.startPracticeButton, { backgroundColor: theme.primary }]}
               onPress={() => handlePracticeMode('voiceChat')} // Default to voice chat
             >
-              <Text style={styles.startPracticeText}>Start Practice with RAHA</Text>
+              <Text style={styles.startPracticeText}>{t('home.startPractice')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -366,12 +370,12 @@ const HomeScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.surface }]} edges={['top']}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={theme.background} />
       
       {/* User Profile */}
       <TouchableOpacity 
-        style={styles.userProfileContainer}
+        style={[styles.userProfileContainer, { backgroundColor: theme.card }]}
         onPress={navigateToUserProfile}
       >
         <Image 
@@ -381,58 +385,58 @@ const HomeScreen = () => {
           style={styles.userAvatar}
         />
         <View style={styles.userInfo}>
-          <Text style={styles.userName}>{userData?.name || 'User'}</Text>
+          <Text style={[styles.userName, { color: theme.text }]}>{userData?.name || 'User'}</Text>
           <View style={styles.levelContainer}>
-            <Text style={styles.levelText}>Level: {userData?.level || 'Beginner'}</Text>
+            <Text style={[styles.levelText, { color: theme.textSecondary }]}>Level: {userData?.level || 'Beginner'}</Text>
           </View>
         </View>
-        <Icon name="chevron-forward" size={20} color="#999" />
+        <Icon name="chevron-forward" size={20} color={theme.textTertiary} />
       </TouchableOpacity>
       
       {/* Header with RAHA AI title */}
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: theme.card }]}>
         <View style={styles.aiHeaderContainer}>
           <Image 
             source={{ uri: 'https://img.icons8.com/color/96/000000/robot.png' }} 
             style={styles.aiAvatar}
           />
-          <Text style={styles.aiTitle}>RAHA AI</Text>
+          <Text style={[styles.aiTitle, { color: theme.text }]}>RAHA AI</Text>
         </View>
         
         <TouchableOpacity style={styles.historyButton}>
-          <Text style={styles.historyText}>History</Text>
+          <Text style={[styles.historyText, { color: theme.primary }]}>History</Text>
         </TouchableOpacity>
       </View>
       
       {/* Custom Tabs */}
-      <View style={styles.tabBar}>
+      <View style={[styles.tabBar, { backgroundColor: theme.card }]}>
         <TouchableOpacity 
           style={[
             styles.tabButton, 
-            activeTab === 'general' ? styles.activeTab : null
+            activeTab === 'general' && { backgroundColor: theme.primary + '15' }
           ]} 
           onPress={() => setActiveTab('general')}
         >
           <Text style={[
-            styles.tabText, 
-            activeTab === 'general' ? styles.activeTabText : null
+            styles.tabText,
+            { color: activeTab === 'general' ? theme.primary : theme.textSecondary }
           ]}>
-            General
+            {t('home.general')}
           </Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
           style={[
             styles.tabButton, 
-            activeTab === 'interview' ? styles.activeTab : null
+            activeTab === 'interview' && { backgroundColor: theme.primary + '15' }
           ]} 
           onPress={() => setActiveTab('interview')}
         >
           <Text style={[
-            styles.tabText, 
-            activeTab === 'interview' ? styles.activeTabText : null
+            styles.tabText,
+            { color: activeTab === 'interview' ? theme.primary : theme.textSecondary }
           ]}>
-            Interview
+            {t('home.interview')}
           </Text>
         </TouchableOpacity>
       </View>
@@ -449,7 +453,7 @@ const HomeScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    // backgroundColor will be set dynamically with theme
   },
   userProfileContainer: {
     flexDirection: 'row',

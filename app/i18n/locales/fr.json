@@ -1,0 +1,96 @@
+{
+  "common": {
+    "cancel": "Annuler",
+    "save": "Enregistrer",
+    "delete": "Supprimer",
+    "edit": "Modifier",
+    "done": "Terminé",
+    "loading": "Chargement...",
+    "error": "Erreur",
+    "success": "Succès",
+    "updated": "mis à jour",
+    "back": "Retour",
+    "next": "Suivant",
+    "continue": "Continuer",
+    "close": "Fermer",
+    "confirm": "Confirmer",
+    "yes": "Oui",
+    "no": "Non",
+    "ok": "OK"
+  },
+  "settings": {
+    "title": "Paramètres",
+    "account": "Compte",
+    "preferences": "Préférences",
+    "appInformation": "Informations sur l'application",
+    "changePassword": "Changer le mot de passe",
+    "logout": "Déconnexion",
+    "deleteAccount": "Supprimer le compte",
+    "darkMode": "Mode sombre",
+    "language": "Langue",
+    "notifications": "Notifications",
+    "termsOfService": "Conditions d'utilisation",
+    "privacyPolicy": "Politique de confidentialité",
+    "about": "À propos de MrEnglish",
+    "signOut": "Se déconnecter",
+    "signOutConfirm": "Êtes-vous sûr de vouloir vous déconnecter de MrEnglish sur cet appareil ? Vous devrez vous reconnecter pour accéder à votre compte."
+  },
+  "profile": {
+    "title": "Profil",
+    "editProfile": "Modifier le profil",
+    "information": "Informations",
+    "interests": "Centres d'intérêt",
+    "rating": "Évaluation",
+    "compliments": "Compliments",
+    "advice": "Conseils",
+    "feedback": "Commentaires",
+    "stats": {
+      "feedback": "Commentaires",
+      "talks": "Conversations",
+      "hours": "Heures",
+      "satisfactionPercentage": "des utilisateurs sont satisfaits de ce partenaire de conversation"
+    },
+    "nativeLanguage": "Langue maternelle",
+    "englishLevel": "Niveau d'anglais",
+    "gender": "Genre",
+    "age": "Âge",
+    "notSpecified": "Non spécifié",
+    "noInterests": "Aucun centre d'intérêt ajouté pour le moment",
+    "addInterest": "Ajouter +",
+    "addYourInterest": "Ajoutez votre centre d'intérêt",
+    "yearsOld": "ans"
+  },
+  "home": {
+    "title": "Accueil",
+    "history": "Historique",
+    "general": "Général",
+    "interview": "Entretien",
+    "startPractice": "Commencer l'entraînement avec RAHA",
+    "voiceChat": "Chat vocal",
+    "voiceChatDesc": "Chat vocal avec RAHA AI",
+    "call": "Appel",
+    "callDesc": "Parler avec RAHA AI dans une expérience similaire à un appel",
+    "selectMode": "Sélectionner le mode d'entraînement",
+    "minutesRemaining": "minutes restantes de l'essai gratuit"
+  },
+  "lobby": {
+    "title": "Hall",
+    "readyToTalk": "Prêt à parler maintenant",
+    "talkNow": "Parler maintenant",
+    "invitePartners": "Inviter des partenaires en ligne",
+    "refresh": "Actualiser",
+    "noOneHere": "Il n'y a personne ici pour le moment",
+    "offline": "hors ligne",
+    "online": "en ligne",
+    "onCall": "En appel"
+  },
+  "languages": {
+    "english": "English",
+    "hindi": "हिंदी",
+    "spanish": "Español",
+    "french": "Français",
+    "arabic": "العربية",
+    "bengali": "বাংলা"
+  }
+}
+

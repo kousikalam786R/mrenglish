@@ -20,6 +20,12 @@ export type AppStackParamList = {
   Contacts: undefined;
   Profile: undefined;
   EditProfile: undefined;
+  Settings: undefined;
+  ChangePassword: undefined;
+  DeleteAccount: undefined;
+  TermsOfService: undefined;
+  PrivacyPolicy: undefined;
+  About: undefined;
   UserProfile: { userId: string; userName: string };
   PostCallFeedback: { userId: string; userName: string; userAvatar?: string; callDuration?: number; interactionId?: string };
   PostCallFlow: { userId: string; userName: string; userAvatar?: string; callDuration?: number; interactionId?: string };

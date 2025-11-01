@@ -1,0 +1,96 @@
+{
+  "common": {
+    "cancel": "বাতিল",
+    "save": "সংরক্ষণ",
+    "delete": "মুছে ফেলুন",
+    "edit": "সম্পাদনা",
+    "done": "সম্পন্ন",
+    "loading": "লোড হচ্ছে...",
+    "error": "ত্রুটি",
+    "success": "সফল",
+    "updated": "আপডেট করা হয়েছে",
+    "back": "পিছনে",
+    "next": "পরবর্তী",
+    "continue": "চালিয়ে যান",
+    "close": "বন্ধ করুন",
+    "confirm": "নিশ্চিত করুন",
+    "yes": "হ্যাঁ",
+    "no": "না",
+    "ok": "ঠিক আছে"
+  },
+  "settings": {
+    "title": "সেটিংস",
+    "account": "অ্যাকাউন্ট",
+    "preferences": "পছন্দসমূহ",
+    "appInformation": "অ্যাপ তথ্য",
+    "changePassword": "পাসওয়ার্ড পরিবর্তন করুন",
+    "logout": "লগআউট",
+    "deleteAccount": "অ্যাকাউন্ট মুছে ফেলুন",
+    "darkMode": "ডার্ক মোড",
+    "language": "ভাষা",
+    "notifications": "বিজ্ঞপ্তি",
+    "termsOfService": "সেবার শর্তাবলী",
+    "privacyPolicy": "গোপনীয়তা নীতি",
+    "about": "MrEnglish সম্পর্কে",
+    "signOut": "সাইন আউট করুন",
+    "signOutConfirm": "আপনি কি এই ডিভাইস থেকে MrEnglish থেকে সাইন আউট করতে চান? আপনার অ্যাকাউন্ট অ্যাক্সেস করতে আপনাকে আবার সাইন ইন করতে হবে।"
+  },
+  "profile": {
+    "title": "প্রোফাইল",
+    "editProfile": "প্রোফাইল সম্পাদনা করুন",
+    "information": "তথ্য",
+    "interests": "আগ্রহ",
+    "rating": "রেটিং",
+    "compliments": "প্রশংসা",
+    "advice": "পরামর্শ",
+    "feedback": "মতামত",
+    "stats": {
+      "feedback": "মতামত",
+      "talks": "কথোপকথন",
+      "hours": "ঘন্টা",
+      "satisfactionPercentage": "ব্যবহারকারীরা এই কথোপকথন সঙ্গীর সাথে সন্তুষ্ট"
+    },
+    "nativeLanguage": "মাতৃভাষা",
+    "englishLevel": "ইংরেজি স্তর",
+    "gender": "লিঙ্গ",
+    "age": "বয়স",
+    "notSpecified": "নির্দিষ্ট করা নেই",
+    "noInterests": "এখনও কোন আগ্রহ যোগ করা হয়নি",
+    "addInterest": "যোগ করুন +",
+    "addYourInterest": "আপনার আগ্রহ যোগ করুন",
+    "yearsOld": "বছর বয়সী"
+  },
+  "home": {
+    "title": "হোম",
+    "history": "ইতিহাস",
+    "general": "সাধারণ",
+    "interview": "সাক্ষাতকার",
+    "startPractice": "RAHA এর সাথে অনুশীলন শুরু করুন",
+    "voiceChat": "ভয়েস চ্যাট",
+    "voiceChatDesc": "RAHA AI এর সাথে ভয়েস চ্যাট",
+    "call": "কল",
+    "callDesc": "RAHA AI এর সাথে কল-এর মতো অভিজ্ঞতায় কথা বলুন",
+    "selectMode": "অনুশীলনের মোড নির্বাচন করুন",
+    "minutesRemaining": "মিনিট বিনামূল্যে ট্রায়াল অবশিষ্ট"
+  },
+  "lobby": {
+    "title": "লবি",
+    "readyToTalk": "এখন কথা বলতে প্রস্তুত",
+    "talkNow": "এখন কথা বলুন",
+    "invitePartners": "অনলাইন পার্টনারদের আমন্ত্রণ করুন",
+    "refresh": "রিফ্রেশ করুন",
+    "noOneHere": "এখানে এখনও কেউ নেই",
+    "offline": "অফলাইন",
+    "online": "অনলাইন",
+    "onCall": "কল চলছে"
+  },
+  "languages": {
+    "english": "English",
+    "hindi": "हिंदी",
+    "spanish": "Español",
+    "french": "Français",
+    "arabic": "العربية",
+    "bengali": "বাংলা"
+  }
+}
+
