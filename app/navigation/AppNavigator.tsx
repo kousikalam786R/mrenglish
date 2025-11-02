@@ -44,6 +44,7 @@ import NetworkDebugScreen from '../screens/NetworkDebugScreen';
 
 // Auth Screens
 import HomeScreen from '../screens/HomeScreen';
+import WelcomeScreen from '../screens/WelcomeScreen';
 import SignInScreen from '../screens/SignInScreen';
 import SignUpScreen from '../screens/SignUpScreen';
 import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
@@ -294,9 +295,9 @@ const AuthNavigator = () => {
   return (
     <AuthStack.Navigator 
       screenOptions={screenOptions}
-      initialRouteName="SignIn"
+      initialRouteName="Welcome"
     >
-      <AuthStack.Screen name="Welcome" component={HomeScreen} />
+      <AuthStack.Screen name="Welcome" component={WelcomeScreen} />
       <AuthStack.Screen name="SignIn" component={SignInScreen} />
       <AuthStack.Screen name="SignUp" component={SignUpScreen} />
       <AuthStack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
