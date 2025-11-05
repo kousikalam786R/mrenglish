@@ -57,6 +57,7 @@ interface UserCardProps {
 
 const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps) => {
   const { theme } = useTheme();
+  const { t } = useTranslation();
   // Get user status from centralized service with subscription
   const [userStatus, setUserStatus] = useState(() => simpleUserStatusService.getUserStatus(user._id));
 
@@ -143,30 +144,50 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
         </View>
         
         <View style={styles.buttonsContainer}>
-          <TouchableOpacity 
-            style={[
-              styles.callButton, 
-              styles.callButtonFullWidth,
-              { backgroundColor: (!(userStatus?.isOnline ?? user.isOnline) || userStatus?.isOnCall) ? theme.inputBackground : theme.primary },
-            ]} 
-            onPress={(e) => {
-              e.stopPropagation(); // Prevent triggering the parent's onPress
-              onCallPress();
-            }}
-            disabled={!(userStatus?.isOnline ?? user.isOnline) || userStatus?.isOnCall}
-          >
-            <IconMaterial 
-              name={userStatus?.isOnCall ? "call-end" : "call"} 
-              size={24} 
-              color={(!(userStatus?.isOnline ?? user.isOnline) || userStatus?.isOnCall) ? theme.textTertiary : "white"} 
-            />
-            {!(userStatus?.isOnline ?? user.isOnline) && (
-              <Text style={[styles.offlineCallText, { color: theme.textTertiary }]}>{t('lobby.offline')}</Text>
-            )}
-            {userStatus?.isOnCall && (
-              <Text style={[styles.onCallText, { color: theme.textTertiary }]}>{t('lobby.onCall')}</Text>
-            )}
-          </TouchableOpacity>
+          {!(userStatus?.isOnline ?? user.isOnline) ? (
+            // Show message icon for offline users
+            <TouchableOpacity 
+              style={[
+                styles.callButton, 
+                styles.callButtonFullWidth,
+                styles.messageButton,
+                { backgroundColor: theme.primary },
+              ]} 
+              onPress={(e) => {
+                e.stopPropagation(); // Prevent triggering the parent's onPress
+                onMessagePress();
+              }}
+            >
+              <IconMaterial 
+                name="message" 
+                size={24} 
+                color="white" 
+              />
+            </TouchableOpacity>
+          ) : (
+            // Show call icon for online users
+            <TouchableOpacity 
+              style={[
+                styles.callButton, 
+                styles.callButtonFullWidth,
+                { backgroundColor: userStatus?.isOnCall ? theme.inputBackground : theme.primary },
+              ]} 
+              onPress={(e) => {
+                e.stopPropagation(); // Prevent triggering the parent's onPress
+                onCallPress();
+              }}
+              disabled={userStatus?.isOnCall}
+            >
+              <IconMaterial 
+                name={userStatus?.isOnCall ? "call-end" : "call"} 
+                size={24} 
+                color={userStatus?.isOnCall ? theme.textTertiary : "white"} 
+              />
+              {userStatus?.isOnCall && (
+                <Text style={[styles.onCallText, { color: theme.textTertiary }]}>{t('lobby.onCall')}</Text>
+              )}
+            </TouchableOpacity>
+          )}
         </View>
     </TouchableOpacity>
     </View>
@@ -1801,6 +1822,8 @@ const styles = StyleSheet.create({
   },
   callButtonFullWidth: {
     width: '100%',
+    borderRadius: 25,
+    overflow: 'hidden',
   },
   callButtonDisabled: {
     backgroundColor: '#CCCCCC',

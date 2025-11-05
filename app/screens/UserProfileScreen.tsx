@@ -12,12 +12,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/types';
 import Icon from 'react-native-vector-icons/Ionicons';
 import IconMaterial from 'react-native-vector-icons/MaterialIcons';
 import { API_URL } from '../utils/config';
 import { getAuthToken } from '../utils/authUtils';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import simpleUserStatusService from '../services/simpleUserStatusService';
+import { useUserStatus } from '../hooks/useUserStatus';
+import Toast from 'react-native-toast-message';
 
 // Interface for the user profile data
 interface UserProfile {
@@ -71,18 +75,58 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
   const [isFavorite, setIsFavorite] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
   const [showBlockModal, setShowBlockModal] = useState(false);
+  const [isBlockedByUser, setIsBlockedByUser] = useState(false); // If current user is blocked by profile owner
+  
+  // Get real-time user status from status service
+  const userStatus = useUserStatus(userId);
 
   // Fetch user profile data
-  useEffect(() => {
-    const fetchUserProfile = async () => {
+  const fetchUserProfile = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      setIsBlockedByUser(false); // Reset blocked state at the start of fetch
+      
+      // Get token for API request
+      const token = await getAuthToken();
+      
+      // Fetch user profile from API
+      const userResponse = await fetch(`${API_URL}/auth/users/${userId}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      // Check if user is blocked by profile owner (404 status with blocked flag)
+      // Backend returns 404 to make it appear as if user doesn't exist
+      if (userResponse.status === 404) {
+        try {
+          const errorData = await userResponse.json();
+          if (errorData.blocked) {
+            setIsBlockedByUser(true);
+            setLoading(false);
+            return;
+          }
+        } catch (e) {
+          // If JSON parsing fails, treat as regular 404
+          setIsBlockedByUser(true);
+          setLoading(false);
+          return;
+        }
+      }
+      
+      if (!userResponse.ok) {
+        throw new Error('Failed to fetch user profile');
+      }
+      
+      const userData = await userResponse.json();
+      setIsBlockedByUser(false); // Reset blocked state if profile loads successfully
+      
+      // Fetch user rating summary
+      let ratingData: RatingSummary | null = null;
       try {
-        setLoading(true);
-        
-        // Get token for API request
-        const token = await getAuthToken();
-        
-        // Fetch user profile from API
-        const userResponse = await fetch(`${API_URL}/auth/users/${userId}`, {
+        const ratingResponse = await fetch(`${API_URL}/ratings/summary/${userId}`, {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -90,63 +134,46 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
           }
         });
         
-        if (!userResponse.ok) {
-          throw new Error('Failed to fetch user profile');
+        if (ratingResponse.ok) {
+          const ratingJson = await ratingResponse.json();
+          ratingData = ratingJson.data;
+          setRatingSummary(ratingData);
         }
-        
-        const userData = await userResponse.json();
-        
-        // Fetch user rating summary
-        let ratingData: RatingSummary | null = null;
-        try {
-          const ratingResponse = await fetch(`${API_URL}/ratings/summary/${userId}`, {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          });
-          
-          if (ratingResponse.ok) {
-            const ratingJson = await ratingResponse.json();
-            ratingData = ratingJson.data;
-            setRatingSummary(ratingData);
-          }
-        } catch (ratingError) {
-          console.error('Error fetching rating summary:', ratingError);
-          // Continue without rating data
-        }
-        
-        // Check if user is in favorites
-        const favoritesString = await AsyncStorage.getItem('favorites');
-        const favorites = favoritesString ? JSON.parse(favoritesString) : [];
-        const isUserFavorite = favorites.some((favUser: any) => favUser._id === userId);
-        
-        // Check if user is blocked
-        const blockedUsersString = await AsyncStorage.getItem('blockedUsers');
-        const blockedUsers = blockedUsersString ? JSON.parse(blockedUsersString) : [];
-        const isUserBlocked = blockedUsers.some((blockedUser: any) => blockedUser._id === userId);
-        
-        // Use real stats from rating summary if available
-        const totalFeedback = ratingData 
-          ? ratingData.stats.positiveFeedback + ratingData.stats.negativeFeedback 
-          : 0;
-        const totalCalls = ratingData?.stats.totalCalls || 0;
-        const totalHours = ratingData?.stats.totalHours || 0;
-        const satisfactionPercentage = ratingData?.stats.satisfactionPercentage || 0;
-        
-        setUser({
-          ...userData,
-          level: userData.englishLevel || userData.level,
-          feedback: totalFeedback,
-          talks: totalCalls,
-          hours: totalHours,
-          rating: satisfactionPercentage,
-          isFavorite: isUserFavorite,
-          isBlocked: isUserBlocked
-        });
-        setIsFavorite(isUserFavorite);
-        setIsBlocked(isUserBlocked);
+      } catch (ratingError) {
+        console.error('Error fetching rating summary:', ratingError);
+        // Continue without rating data
+      }
+      
+      // Check if user is in favorites
+      const favoritesString = await AsyncStorage.getItem('favorites');
+      const favorites = favoritesString ? JSON.parse(favoritesString) : [];
+      const isUserFavorite = favorites.some((favUser: any) => favUser._id === userId);
+      
+      // Check if user is blocked
+      const blockedUsersString = await AsyncStorage.getItem('blockedUsers');
+      const blockedUsers = blockedUsersString ? JSON.parse(blockedUsersString) : [];
+      const isUserBlocked = blockedUsers.some((blockedUser: any) => blockedUser._id !== userId);
+      
+      // Use real stats from rating summary if available
+      const totalFeedback = ratingData 
+        ? ratingData.stats.positiveFeedback + ratingData.stats.negativeFeedback 
+        : 0;
+      const totalCalls = ratingData?.stats.totalCalls || 0;
+      const totalHours = ratingData?.stats.totalHours || 0;
+      const satisfactionPercentage = ratingData?.stats.satisfactionPercentage || 0;
+      
+      setUser({
+        ...userData,
+        level: userData.englishLevel || userData.level,
+        feedback: totalFeedback,
+        talks: totalCalls,
+        hours: totalHours,
+        rating: satisfactionPercentage,
+        isFavorite: isUserFavorite,
+        isBlocked: isUserBlocked
+      });
+      setIsFavorite(isUserFavorite);
+      setIsBlocked(isUserBlocked);
       } catch (error) {
         console.error('Error fetching user profile:', error);
         Alert.alert(
@@ -172,10 +199,19 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
       } finally {
         setLoading(false);
       }
-    };
-    
+    }, [userId]);
+
+  // Fetch profile when component mounts
+  useEffect(() => {
     fetchUserProfile();
-  }, [userId, userName]);
+  }, [fetchUserProfile]);
+
+  // Refetch profile when screen comes into focus (e.g., after unblocking)
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchUserProfile();
+    }, [fetchUserProfile])
+  );
 
   // Toggle favorite status
   const toggleFavorite = async () => {
@@ -193,7 +229,13 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
           setUser({ ...user, isFavorite: false });
         }
         
-        Alert.alert('Success', `${userName} removed from your friends list`);
+        Toast.show({
+          type: 'info',
+          text1: 'Removed from Friends',
+          text2: `${userName} has been removed from your friends list`,
+          position: 'top',
+          visibilityTime: 3000,
+        });
       } else {
         // Add to favorites
         if (user) {
@@ -210,46 +252,102 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
           setIsFavorite(true);
           setUser({ ...user, isFavorite: true });
           
-          Alert.alert('Success', `${userName} added to your friends list`);
+          Toast.show({
+            type: 'success',
+            text1: 'Added to Friends',
+            text2: `${userName} has been added to your friends list`,
+            position: 'top',
+            visibilityTime: 3000,
+          });
         }
       }
     } catch (error) {
       console.error('Error updating favorites:', error);
-      Alert.alert('Error', 'Failed to update friends list');
+      Toast.show({
+        type: 'error',
+        text1: 'Error',
+        text2: 'Failed to update friends list. Please try again.',
+        position: 'top',
+        visibilityTime: 3000,
+      });
     }
   };
 
   // Block user function
   const blockUser = async () => {
     try {
-      const blockedUsersString = await AsyncStorage.getItem('blockedUsers');
-      const blockedUsers = blockedUsersString ? JSON.parse(blockedUsersString) : [];
-      
       // Check if already blocked
       if (isBlocked) {
-        // Unblock user
+        // Unblock user - sync with backend
+        const token = await getAuthToken();
+        const response = await fetch(`${API_URL}/auth/users/${userId}/block`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ block: false })
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Failed to unblock user');
+        }
+        
+        // Also update local storage
+        const blockedUsersString = await AsyncStorage.getItem('blockedUsers');
+        const blockedUsers = blockedUsersString ? JSON.parse(blockedUsersString) : [];
         const updatedBlockedUsers = blockedUsers.filter((blockedUser: any) => blockedUser._id !== userId);
         await AsyncStorage.setItem('blockedUsers', JSON.stringify(updatedBlockedUsers));
         setIsBlocked(false);
         
-        if (user) {
-          setUser({ ...user, isBlocked: false });
-        }
+        // Refetch profile to update the view
+        await fetchUserProfile();
         
-        Alert.alert('Success', `${userName} has been unblocked`);
+        Toast.show({
+          type: 'success',
+          text1: 'Unblocked',
+          text2: `${userName} has been unblocked`,
+          position: 'top',
+          visibilityTime: 3000,
+        });
       } else {
         // Show confirmation modal
         setShowBlockModal(true);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating blocked users:', error);
-      Alert.alert('Error', 'Failed to update blocked users');
+      Toast.show({
+        type: 'error',
+        text1: 'Error',
+        text2: error.message || 'Failed to update blocked users. Please try again.',
+        position: 'top',
+        visibilityTime: 3000,
+      });
     }
   };
   
   // Confirm block user
   const confirmBlockUser = async () => {
     try {
+      const token = await getAuthToken();
+      
+      // Sync with backend first
+      const response = await fetch(`${API_URL}/auth/users/${userId}/block`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ block: true })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to block user');
+      }
+      
+      // Also update local storage for backward compatibility
       const blockedUsersString = await AsyncStorage.getItem('blockedUsers');
       const blockedUsers = blockedUsersString ? JSON.parse(blockedUsersString) : [];
       
@@ -263,8 +361,12 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
           country: user.country
         };
         
-        blockedUsers.push(userToBlock);
-        await AsyncStorage.setItem('blockedUsers', JSON.stringify(blockedUsers));
+        // Check if already blocked before adding
+        const alreadyBlocked = blockedUsers.some((blockedUser: any) => blockedUser._id === userId);
+        if (!alreadyBlocked) {
+          blockedUsers.push(userToBlock);
+          await AsyncStorage.setItem('blockedUsers', JSON.stringify(blockedUsers));
+        }
         
         // Also remove from favorites if they are a favorite
         if (isFavorite) {
@@ -282,9 +384,15 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
         // Navigate back after successful block
         navigation.goBack();
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error blocking user:', error);
-      Alert.alert('Error', 'Failed to block user');
+      Toast.show({
+        type: 'error',
+        text1: 'Error',
+        text2: error.message || 'Failed to block user. Please try again.',
+        position: 'top',
+        visibilityTime: 3000,
+      });
       setShowBlockModal(false);
     }
   };
@@ -321,9 +429,13 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
 
   // Handle message user
   const handleMessageUser = () => {
-    // Don't allow messaging blocked users
+    // Show toast for blocked users
     if (isBlocked) {
-      Alert.alert('Blocked', 'You cannot message a blocked user');
+      Toast.show({
+        type: 'error',
+        text1: 'Blocked',
+        text2: 'You cannot chat with user you blocked',
+      });
       return;
     }
     
@@ -332,6 +444,38 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
       name: userName 
     });
   };
+
+  // Show blocked message if user is blocked by profile owner
+  if (isBlockedByUser) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+        <View style={styles.header}>
+          <TouchableOpacity 
+            style={styles.backButton} 
+            onPress={() => navigation.goBack()}
+          >
+            <Icon name="chevron-back" size={28} color="#000" />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.blockedContainer}>
+          <View style={styles.userNotFoundIconContainer}>
+            <IconMaterial name="person-off" size={80} color="#999" />
+          </View>
+          <Text style={styles.blockedTitle}>User Not Found</Text>
+          <Text style={styles.blockedMessage}>
+            This user doesn't exist or may have been removed from the platform.
+          </Text>
+          <TouchableOpacity 
+            style={styles.goBackButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.goBackButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (loading || !user) {
     return (
@@ -357,16 +501,19 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
           <Icon name="chevron-back" size={28} color="#000" />
         </TouchableOpacity>
         
-        <TouchableOpacity 
-          style={styles.likeButton} 
-          onPress={toggleFavorite}
-        >
-          <Icon 
-            name={isFavorite ? "heart" : "heart-outline"} 
-            size={28} 
-            color={isFavorite ? "red" : "#000"} 
-          />
-        </TouchableOpacity>
+        {/* Only show favorite button if user is not blocked */}
+        {!isBlocked && (
+          <TouchableOpacity 
+            style={styles.likeButton} 
+            onPress={toggleFavorite}
+          >
+            <Icon 
+              name={isFavorite ? "heart" : "heart-outline"} 
+              size={28} 
+              color={isFavorite ? "red" : "#000"} 
+            />
+          </TouchableOpacity>
+        )}
       </View>
       
       <ScrollView style={styles.scrollView}>
@@ -389,31 +536,42 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
           </Text>
           
           <View style={styles.onlineStatus}>
-            <View style={styles.onlineDot} />
-            <Text style={styles.onlineText}>User online</Text>
+            <View style={[
+              styles.onlineDot, 
+              { backgroundColor: (userStatus?.isOnline ?? user.isOnline) ? '#4CAF50' : '#F44336' }
+            ]} />
+            <Text style={[
+              styles.onlineText,
+              { color: (userStatus?.isOnline ?? user.isOnline) ? '#4CAF50' : '#F44336' }
+            ]}>
+              {(userStatus?.isOnline ?? user.isOnline) ? 'User online' : 'User offline'}
+            </Text>
           </View>
         </View>
         
-        {/* Action Buttons - only show if not blocked */}
-        {!isBlocked && (
-          <View style={styles.actionButtonsContainer}>
-            <TouchableOpacity 
-              style={styles.messageButton} 
-              onPress={handleMessageUser}
-            >
-              <Icon name="chatbubble-outline" size={24} color="#fff" />
-              <Text style={styles.buttonText}>Message</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.callButton, styles.callButtonFullWidth]} 
-              onPress={handleCallUser}
-            >
-              <Icon name="call-outline" size={24} color="#fff" />
-              <Text style={styles.buttonText}>Call</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+        {/* Action Buttons - always show */}
+        <View style={styles.actionButtonsContainer}>
+          <TouchableOpacity 
+            style={styles.messageButton} 
+            onPress={handleMessageUser}
+          >
+            <Icon name="chatbubble-outline" size={24} color="#fff" />
+            <Text style={styles.buttonText}>Message</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[
+              styles.callButton, 
+              styles.callButtonFullWidth,
+              isBlocked && styles.buttonDisabled
+            ]} 
+            onPress={handleCallUser}
+            disabled={isBlocked}
+          >
+            <Icon name="call-outline" size={24} color={isBlocked ? "#999" : "#fff"} />
+            <Text style={[styles.buttonText, isBlocked && styles.buttonTextDisabled]}>Call</Text>
+          </TouchableOpacity>
+        </View>
         
         {/* Stats section */}
         <View style={styles.statsContainer}>
@@ -645,6 +803,48 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  blockedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  userNotFoundIconContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#F5F5F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  blockedTitle: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 10,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  blockedMessage: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 40,
+    lineHeight: 24,
+    paddingHorizontal: 20,
+  },
+  goBackButton: {
+    backgroundColor: '#673AB7',
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 25,
+  },
+  goBackButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -748,6 +948,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     marginLeft: 8,
+  },
+  buttonDisabled: {
+    backgroundColor: '#CCCCCC',
+    opacity: 0.6,
+  },
+  buttonTextDisabled: {
+    color: '#999999',
   },
   statsContainer: {
     flexDirection: 'row',

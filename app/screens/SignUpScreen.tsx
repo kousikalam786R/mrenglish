@@ -15,6 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import { AuthScreenNavigationProp } from '../navigation/types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import CustomInput from '../components/CustomInput';
+import Logo from '../components/Logo';
 import { saveAuthData } from '../utils/authUtils';
 import { DIRECT_IP, DEV } from '../utils/config';
 import { useAppDispatch } from '../redux/hooks';
@@ -141,6 +142,9 @@ const SignUpScreen = () => {
         style={styles.keyboardAvoidingView}
       >
         <ScrollView contentContainerStyle={styles.scrollContainer}>
+          <View style={styles.logoContainer}>
+            <Logo size={300} rounded={true} />
+          </View>
           <Text style={styles.title}>Create Account</Text>
           <Text style={styles.subtitle}>Sign up to get started</Text>
 
@@ -204,18 +208,15 @@ const SignUpScreen = () => {
               style={[styles.socialButton, styles.googleButton]}
               onPress={handleGoogleSignUp}
             >
-              <Ionicons name="logo-google" size={20} color="#fff" />
-              <Text style={styles.socialButtonText}>Sign up with Google</Text>
+              <Ionicons name="logo-google" size={24} color="#fff" />
             </TouchableOpacity>
             
             <TouchableOpacity style={[styles.socialButton, styles.facebookButton]}>
-              <Ionicons name="logo-facebook" size={20} color="#fff" />
-              <Text style={styles.socialButtonText}>Sign up with Facebook</Text>
+              <Ionicons name="logo-facebook" size={24} color="#fff" />
             </TouchableOpacity>
             
             <TouchableOpacity style={[styles.socialButton, styles.phoneButton]}>
-              <Ionicons name="call-outline" size={20} color="#fff" />
-              <Text style={styles.socialButtonText}>Sign up with Phone</Text>
+              <Ionicons name="call-outline" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
 
@@ -243,6 +244,11 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: 20,
     justifyContent: 'center',
+  },
+  logoContainer: {
+    alignItems: 'center',
+    marginBottom: 30,
+    marginTop: 10,
   },
   title: {
     fontSize: 28,
@@ -287,15 +293,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   socialButtons: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: 30,
+    gap: 15,
   },
   socialButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     justifyContent: 'center',
-    height: 50,
-    borderRadius: 8,
-    marginBottom: 10,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   googleButton: {
     backgroundColor: '#DB4437',
@@ -305,12 +319,6 @@ const styles = StyleSheet.create({
   },
   phoneButton: {
     backgroundColor: '#48A14D',
-  },
-  socialButtonText: {
-    color: 'white',
-    marginLeft: 10,
-    fontSize: 14,
-    fontWeight: 'bold',
   },
   signinContainer: {
     flexDirection: 'row',

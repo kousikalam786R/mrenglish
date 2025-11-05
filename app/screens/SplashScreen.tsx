@@ -43,11 +43,11 @@ const SplashScreen = () => {
 
   return (
     <View style={styles.container}>
-      {/* <Image 
-        source={require('../assets/images/logo.png')} 
+      <Image 
+        source={require('../assets/images/mrenglish-logo.png')} 
         style={styles.logo}
         resizeMode="contain"
-      /> */}
+      />
       <Text style={styles.appName}>Mr. English</Text>
       <Text style={styles.tagline}>Practice your speaking skills</Text>
       
@@ -69,9 +69,9 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   logo: {
-    width: 120,
-    height: 120,
-    marginBottom: 20,
+    width: 200,
+    height: 200,
+    marginBottom: 30,
   },
   appName: {
     fontSize: 28,

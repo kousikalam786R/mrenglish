@@ -15,6 +15,7 @@ import { AuthScreenNavigationProp } from '../navigation/types';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../navigation';
 import CustomInput from '../components/CustomInput';
+import Logo from '../components/Logo';
 import auth from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -28,7 +29,6 @@ import { setUserData } from '../redux/slices/userSlice';
 
 // Server request timeout
 const SERVER_TIMEOUT_MS = 15000; // 15 seconds (reduced from 30 seconds for better UX)
-const DEBUG_MODE = true;
 
 const SignInScreen = () => {
   const [email, setEmail] = useState('');
@@ -435,27 +435,11 @@ const SignInScreen = () => {
         style={styles.keyboardAvoidingView}
       >
         <ScrollView contentContainerStyle={styles.scrollContainer}>
+          <View style={styles.logoContainer}>
+            <Logo size={300} rounded={true} />
+          </View>
           <Text style={styles.title}>Welcome Back</Text>
           <Text style={styles.subtitle}>Sign in to continue</Text>
-
-          {/* Add test buttons for debugging */}
-          {DEBUG_MODE && (
-            <View style={styles.debugButtonsContainer}>
-              <TouchableOpacity
-                style={[styles.debugButton, { backgroundColor: '#888' }]}
-                onPress={testServerConnection}
-              >
-                <Text style={styles.buttonText}>Test Server</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity
-                style={[styles.debugButton, { backgroundColor: '#5a5' }]}
-                onPress={testGoogleAuthEndpoint}
-              >
-                <Text style={styles.buttonText}>Test Google Auth</Text>
-              </TouchableOpacity>
-            </View>
-          )}
 
           <View style={styles.form}>
             <CustomInput
@@ -506,15 +490,15 @@ const SignInScreen = () => {
               onPress={handleGoogleSignIn}
               disabled={isSigninInProgress}
             >
-              <Text style={styles.socialButtonText}>Google</Text>
+              <Ionicons name="logo-google" size={24} color="#fff" />
             </TouchableOpacity>
             
             <TouchableOpacity style={[styles.socialButton, styles.facebookButton]}>
-              <Text style={styles.socialButtonText}>Facebook</Text>
+              <Ionicons name="logo-facebook" size={24} color="#fff" />
             </TouchableOpacity>
             
             <TouchableOpacity style={[styles.socialButton, styles.phoneButton]}>
-              <Text style={styles.socialButtonText}>Phone</Text>
+              <Ionicons name="call-outline" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
 
@@ -543,6 +527,11 @@ const styles = StyleSheet.create({
     padding: 20,
     justifyContent: 'center',
   },
+  logoContainer: {
+    alignItems: 'center',
+    marginBottom: 30,
+    marginTop: 10,
+  },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
@@ -553,20 +542,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 30,
     color: '#666',
-  },
-  debugButtonsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-    gap: 10,
-  },
-  debugButton: {
-    flex: 1,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 8,
-    paddingHorizontal: 10,
   },
   form: {
     marginBottom: 30,
@@ -626,15 +601,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   socialButtons: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: 30,
+    gap: 15,
   },
   socialButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     justifyContent: 'center',
-    height: 50,
-    borderRadius: 8,
-    marginBottom: 10,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   googleButton: {
     backgroundColor: '#DB4437',
@@ -644,12 +627,6 @@ const styles = StyleSheet.create({
   },
   phoneButton: {
     backgroundColor: '#48A14D',
-  },
-  socialButtonText: {
-    color: 'white',
-    marginLeft: 10,
-    fontSize: 14,
-    fontWeight: 'bold',
   },
   signupContainer: {
     flexDirection: 'row',

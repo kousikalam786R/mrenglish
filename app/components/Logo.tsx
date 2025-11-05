@@ -1,42 +1,60 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-// import Ionicons from 'react-native-vector-icons/Ionicons';
+import { View, Image, StyleSheet, ImageStyle } from 'react-native';
 
 interface LogoProps {
   size?: number;
-  color?: string;
+  style?: ImageStyle;
+  resizeMode?: 'contain' | 'cover' | 'stretch' | 'center';
+  rounded?: boolean;
 }
 
-const Logo: React.FC<LogoProps> = ({ size = 120, color = '#4A90E2' }) => {
+const Logo: React.FC<LogoProps> = ({ 
+  size = 120, 
+  style,
+  resizeMode = 'contain',
+  rounded = true
+}) => {
+  // Logo will fill almost the entire circle, accounting for border
+  // Account for 3px border on each side (6px total)
+  const logoSize = size - 6;
+  
   return (
-    <View style={[styles.container, { width: size, height: size }]}>
-      <Text style={[styles.logoText, { color, fontSize: size * 0.5 }]}>ME</Text>
-      <View style={styles.globeContainer}>
-        <Text style={[styles.subtitleText, { color, fontSize: size * 0.2 }]}>MrEnglish</Text>
-      </View>
+    <View style={[
+      styles.container,
+      rounded && { borderRadius: size / 2 },
+      { width: size, height: size },
+    ]}>
+      <Image 
+        source={require('../assets/images/mrenglish-logo.png')}
+        style={[
+          styles.logo,
+          { width: logoSize, height: logoSize },
+          rounded && { borderRadius: logoSize /0.5},
+          style
+        ]}
+        resizeMode="cover"
+      />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
-    borderWidth: 3,
-    borderRadius: 60,
-    borderColor: '#4A90E2',
+    overflow: 'hidden',
+    // borderWidth: 3,
+    // borderColor: '#4A90E2',
+    //backgroundColor: '#E3F2FD', // Light blue background
+    // shadowColor: '#000',
+    // shadowOffset: { width: 0, height: 2 },
+    // shadowOpacity: 0.1,
+    // shadowRadius: 4,
+    // elevation: 3,
+    // justifyContent: 'center',
+    // alignItems: 'center',
   },
-  globeContainer: {
-    position: 'absolute',
-    bottom: 10,
+  logo: {
+    backgroundColor: '#E3F2FD', // Light blue background
   },
-  logoText: {
-    fontWeight: 'bold',
-  },
-  subtitleText: {
-    fontWeight: 'bold',
-  }
 });
 
 export default Logo; 

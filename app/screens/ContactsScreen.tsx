@@ -19,6 +19,9 @@ import { AppDispatch, RootState } from '../redux/store';
 import { initiateCall, fetchCallHistory } from '../redux/thunks/callThunks';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { API_URL } from '../utils/config';
+import { getAuthToken } from '../utils/authUtils';
+import Toast from 'react-native-toast-message';
 
 // Friend interface
 interface Friend {
@@ -359,7 +362,23 @@ const ContactsScreen = () => {
   // Handle unblock user
   const handleUnblockUser = async (user: Friend) => {
     try {
-      // Get current blocked users from AsyncStorage
+      // First, sync with backend API
+      const token = await getAuthToken();
+      const response = await fetch(`${API_URL}/auth/users/${user._id}/block`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ block: false })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to unblock user');
+      }
+      
+      // Then update local storage
       const blockedUsersString = await AsyncStorage.getItem('blockedUsers');
       if (!blockedUsersString) return;
       
@@ -373,11 +392,23 @@ const ContactsScreen = () => {
       // Update state
       setBlockedUsers(updatedBlockedUsers);
       
-      // Notify user
-      Alert.alert('Success', `${user.name} has been unblocked`);
-    } catch (error) {
+      // Notify user with toast
+      Toast.show({
+        type: 'success',
+        text1: 'Unblocked',
+        text2: `${user.name} has been unblocked`,
+        position: 'top',
+        visibilityTime: 3000,
+      });
+    } catch (error: any) {
       console.error('Error unblocking user:', error);
-      Alert.alert('Error', 'Failed to unblock user');
+      Toast.show({
+        type: 'error',
+        text1: 'Error',
+        text2: error.message || 'Failed to unblock user. Please try again.',
+        position: 'top',
+        visibilityTime: 3000,
+      });
     }
   };
   

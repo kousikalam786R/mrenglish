@@ -14,6 +14,7 @@ import { useNavigation } from '@react-navigation/native';
 import { AuthScreenNavigationProp } from '../navigation/types';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Logo from '../components/Logo';
 
 const { width, height } = Dimensions.get('window');
 
@@ -144,6 +145,11 @@ const WelcomeScreen = () => {
         <Text style={styles.skipText}>Skip</Text>
       </TouchableOpacity>
 
+      {/* Logo at the top */}
+      <View style={styles.logoContainer}>
+        <Logo size={150} />
+      </View>
+
       {/* Slides */}
       <ScrollView
         ref={scrollViewRef}
@@ -212,13 +218,18 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
+  logoContainer: {
+    alignItems: 'center',
+    paddingTop: 20,
+    paddingBottom: 10,
+  },
   slide: {
     width,
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 40,
-    paddingTop: 100,
+    paddingTop: 60,
   },
   iconContainer: {
     marginBottom: 60,
