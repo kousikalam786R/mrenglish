@@ -142,3 +142,4 @@ If after following these steps it's still small:
 3. Check if your device has a custom launcher that affects icon size
 4. Compare with other app icons to ensure yours matches in size
 
+

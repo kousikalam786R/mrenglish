@@ -144,15 +144,97 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
         // Continue without rating data
       }
       
-      // Check if user is in favorites
-      const favoritesString = await AsyncStorage.getItem('favorites');
-      const favorites = favoritesString ? JSON.parse(favoritesString) : [];
-      const isUserFavorite = favorites.some((favUser: any) => favUser._id === userId);
+      // Check if user is in favorites and blocked - check from backend for accuracy (single API call)
+      let isUserFavorite = false;
+      let isUserBlocked = false;
+      try {
+        const currentUserResponse = await fetch(`${API_URL}/auth/me`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (currentUserResponse.ok) {
+          const currentUserData = await currentUserResponse.json();
+          const currentUser = currentUserData.user || currentUserData; // Handle both response formats
+          
+          // Check favorites
+          if (currentUser.favorites && Array.isArray(currentUser.favorites)) {
+            isUserFavorite = currentUser.favorites.some((favId: any) => {
+              const favIdStr = favId.toString ? favId.toString() : String(favId);
+              return favIdStr === userId;
+            });
+          }
+          
+          // Check blocked users
+          if (currentUser.blockedUsers && Array.isArray(currentUser.blockedUsers)) {
+            isUserBlocked = currentUser.blockedUsers.some((blockedId: any) => {
+              const blockedIdStr = blockedId.toString ? blockedId.toString() : String(blockedId);
+              return blockedIdStr === userId;
+            });
+          }
+        }
+      } catch (statusCheckError) {
+        console.error('Error checking user status from backend:', statusCheckError);
+        // Fallback to AsyncStorage if backend check fails
+        const favoritesString = await AsyncStorage.getItem('favorites');
+        const favorites = favoritesString ? JSON.parse(favoritesString) : [];
+        isUserFavorite = favorites.some((favUser: any) => favUser._id === userId);
+        
+        const blockedUsersString = await AsyncStorage.getItem('blockedUsers');
+        const blockedUsers = blockedUsersString ? JSON.parse(blockedUsersString) : [];
+        isUserBlocked = blockedUsers.some((blockedUser: any) => blockedUser._id === userId);
+      }
       
-      // Check if user is blocked
-      const blockedUsersString = await AsyncStorage.getItem('blockedUsers');
-      const blockedUsers = blockedUsersString ? JSON.parse(blockedUsersString) : [];
-      const isUserBlocked = blockedUsers.some((blockedUser: any) => blockedUser._id !== userId);
+      // Sync AsyncStorage with backend result for favorites
+      if (isUserFavorite) {
+        const favoritesString = await AsyncStorage.getItem('favorites');
+        const favorites = favoritesString ? JSON.parse(favoritesString) : [];
+        const alreadyInStorage = favorites.some((favUser: any) => favUser._id === userId);
+        if (!alreadyInStorage && userData) {
+          const userToAdd = {
+            _id: userData._id,
+            name: userData.name,
+            profilePic: userData.profilePic,
+            level: userData.englishLevel || userData.level,
+            country: userData.country
+          };
+          favorites.push(userToAdd);
+          await AsyncStorage.setItem('favorites', JSON.stringify(favorites));
+        }
+      } else {
+        // Remove from AsyncStorage if not favorite
+        const favoritesString = await AsyncStorage.getItem('favorites');
+        const favorites = favoritesString ? JSON.parse(favoritesString) : [];
+        const updatedFavorites = favorites.filter((favUser: any) => favUser._id !== userId);
+        await AsyncStorage.setItem('favorites', JSON.stringify(updatedFavorites));
+      }
+      
+      // Sync AsyncStorage with backend result for blocked users
+      if (isUserBlocked) {
+        const blockedUsersString = await AsyncStorage.getItem('blockedUsers');
+        const blockedUsers = blockedUsersString ? JSON.parse(blockedUsersString) : [];
+        const alreadyInStorage = blockedUsers.some((blockedUser: any) => blockedUser._id === userId);
+        if (!alreadyInStorage && userData) {
+          const userToBlock = {
+            _id: userData._id,
+            name: userData.name,
+            profilePic: userData.profilePic,
+            level: userData.englishLevel || userData.level,
+            country: userData.country
+          };
+          blockedUsers.push(userToBlock);
+          await AsyncStorage.setItem('blockedUsers', JSON.stringify(blockedUsers));
+        }
+      } else {
+        // Remove from AsyncStorage if not blocked
+        const blockedUsersString = await AsyncStorage.getItem('blockedUsers');
+        const blockedUsers = blockedUsersString ? JSON.parse(blockedUsersString) : [];
+        const updatedBlockedUsers = blockedUsers.filter((blockedUser: any) => blockedUser._id !== userId);
+        await AsyncStorage.setItem('blockedUsers', JSON.stringify(updatedBlockedUsers));
+      }
       
       // Use real stats from rating summary if available
       const totalFeedback = ratingData 
@@ -216,57 +298,80 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
   // Toggle favorite status
   const toggleFavorite = async () => {
     try {
-      const favoritesString = await AsyncStorage.getItem('favorites');
-      const favorites = favoritesString ? JSON.parse(favoritesString) : [];
+      const token = await getAuthToken();
       
-      if (isFavorite) {
-        // Remove from favorites
-        const updatedFavorites = favorites.filter((favUser: any) => favUser._id !== userId);
-        await AsyncStorage.setItem('favorites', JSON.stringify(updatedFavorites));
-        setIsFavorite(false);
+      // Call backend API first - ONLY update frontend if API call succeeds
+      const response = await fetch(`${API_URL}/auth/users/${userId}/favorite`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ favorite: !isFavorite })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to update friends list');
+      }
+      
+      // Only update frontend if API call was successful
+      const responseData = await response.json();
+      if (responseData.success) {
+        const favoritesString = await AsyncStorage.getItem('favorites');
+        const favorites = favoritesString ? JSON.parse(favoritesString) : [];
         
-        if (user) {
-          setUser({ ...user, isFavorite: false });
-        }
-        
-        Toast.show({
-          type: 'info',
-          text1: 'Removed from Friends',
-          text2: `${userName} has been removed from your friends list`,
-          position: 'top',
-          visibilityTime: 3000,
-        });
-      } else {
-        // Add to favorites
-        if (user) {
-          const userToAdd = {
-            _id: user._id,
-            name: user.name,
-            profilePic: user.profilePic,
-            level: user.level,
-            country: user.country
-          };
+        if (isFavorite) {
+          // Remove from favorites
+          const updatedFavorites = favorites.filter((favUser: any) => favUser._id !== userId);
+          await AsyncStorage.setItem('favorites', JSON.stringify(updatedFavorites));
+          setIsFavorite(false);
           
-          favorites.push(userToAdd);
-          await AsyncStorage.setItem('favorites', JSON.stringify(favorites));
-          setIsFavorite(true);
-          setUser({ ...user, isFavorite: true });
+          if (user) {
+            setUser({ ...user, isFavorite: false });
+          }
           
           Toast.show({
-            type: 'success',
-            text1: 'Added to Friends',
-            text2: `${userName} has been added to your friends list`,
+            type: 'info',
+            text1: 'Removed from Friends',
+            text2: `${userName} has been removed from your friends list`,
             position: 'top',
             visibilityTime: 3000,
           });
+        } else {
+          // Add to favorites
+          if (user) {
+            const userToAdd = {
+              _id: user._id,
+              name: user.name,
+              profilePic: user.profilePic,
+              level: user.level,
+              country: user.country
+            };
+            
+            favorites.push(userToAdd);
+            await AsyncStorage.setItem('favorites', JSON.stringify(favorites));
+            setIsFavorite(true);
+            setUser({ ...user, isFavorite: true });
+            
+            Toast.show({
+              type: 'success',
+              text1: 'Added to Friends',
+              text2: `${userName} has been added to your friends list`,
+              position: 'top',
+              visibilityTime: 3000,
+            });
+          }
         }
+      } else {
+        throw new Error(responseData.message || 'Failed to update friends list');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating favorites:', error);
       Toast.show({
         type: 'error',
         text1: 'Error',
-        text2: 'Failed to update friends list. Please try again.',
+        text2: error.message || 'Failed to update friends list. Please try again.',
         position: 'top',
         visibilityTime: 3000,
       });
@@ -299,7 +404,12 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
         const blockedUsers = blockedUsersString ? JSON.parse(blockedUsersString) : [];
         const updatedBlockedUsers = blockedUsers.filter((blockedUser: any) => blockedUser._id !== userId);
         await AsyncStorage.setItem('blockedUsers', JSON.stringify(updatedBlockedUsers));
+        
+        // Update state immediately
         setIsBlocked(false);
+        if (user) {
+          setUser({ ...user, isBlocked: false });
+        }
         
         // Refetch profile to update the view
         await fetchUserProfile();
@@ -377,9 +487,20 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
           setIsFavorite(false);
         }
         
+        // Update state immediately
         setIsBlocked(true);
-        setUser({ ...user, isBlocked: true, isFavorite: false });
+        if (user) {
+          setUser({ ...user, isBlocked: true, isFavorite: false });
+        }
         setShowBlockModal(false);
+        
+        Toast.show({
+          type: 'success',
+          text1: 'User Blocked',
+          text2: `${userName} has been blocked`,
+          position: 'top',
+          visibilityTime: 3000,
+        });
         
         // Navigate back after successful block
         navigation.goBack();

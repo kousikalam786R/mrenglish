@@ -34,6 +34,7 @@ import DebugPanel from '../components/DebugPanel';
 import MessageDebugger from '../components/MessageDebugger';
 import simpleUserStatusService from '../services/simpleUserStatusService';
 import { useUserStatus } from '../hooks/useUserStatus';
+import { useTheme } from '../context/ThemeContext';
 
 // Define the Extended user interface
 interface ExtendedUser extends User {
@@ -78,6 +79,7 @@ const ChatDetailScreen = () => {
   // Get dispatch and Redux state
   const dispatch = useAppDispatch();
   const { messages, loading, error, typingUsers } = useAppSelector(state => state.message);
+  const { theme } = useTheme();
   
   // Get navigation and route
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -584,14 +586,20 @@ const ChatDetailScreen = () => {
   
   // Render header with user info and actions
   const renderHeader = () => {
+    const dynamicStyles = {
+      header: { backgroundColor: theme.background, borderBottomColor: theme.border },
+      headerUserName: { color: theme.text },
+      headerAction: { color: theme.primary },
+    };
+
     return (
-      <View style={styles.header}>
+      <View style={[styles.header, dynamicStyles.header]}>
         <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
-          <Icon name="arrow-back" size={24} color="#333" />
+          <Icon name="arrow-back" size={24} color={theme.text} />
         </TouchableOpacity>
         
         <View style={styles.headerUserInfo}>
-          <Text style={styles.headerUserName}>{partnerDetails.name}</Text>
+          <Text style={[styles.headerUserName, dynamicStyles.headerUserName]}>{partnerDetails.name}</Text>
           <OnlineStatus 
             user={{
               _id: id,
@@ -606,7 +614,7 @@ const ChatDetailScreen = () => {
           />
           {/* Debug info */}
           {__DEV__ && (
-            <Text style={{ fontSize: 10, color: '#999' }}>
+            <Text style={{ fontSize: 10, color: theme.textTertiary }}>
               Debug: Online={userStatus?.isOnline ? 'Yes' : 'No'}, 
               LastSeen={userStatus?.lastSeenAt ? 'Yes' : 'No'}
             </Text>
@@ -614,7 +622,7 @@ const ChatDetailScreen = () => {
         </View>
         
         <TouchableOpacity style={styles.headerAction} onPress={handleCall}>
-          <Icon name="call" size={24} color="#6A3DE8" />
+          <Icon name="call" size={24} color={theme.primary} />
         </TouchableOpacity>
         
         <TouchableOpacity style={styles.headerAction} onPress={() => {
@@ -624,7 +632,7 @@ const ChatDetailScreen = () => {
             isVideoCall: true
           });
         }}>
-          <Icon name="videocam" size={24} color="#6A3DE8" />
+          <Icon name="videocam" size={24} color={theme.primary} />
         </TouchableOpacity>
       </View>
     );
@@ -708,8 +716,20 @@ const ChatDetailScreen = () => {
     return flatListData;
   };
   
+  const dynamicStyles = {
+    safeArea: { backgroundColor: theme.background },
+    loadingContainer: { backgroundColor: theme.background },
+    messagesContainer: { backgroundColor: theme.surface },
+    emptyContainer: { backgroundColor: theme.surface },
+    emptyText: { color: theme.textSecondary },
+    inputContainer: { backgroundColor: theme.background, borderTopColor: theme.border },
+    input: { backgroundColor: theme.inputBackground, color: theme.text },
+    sendButton: { backgroundColor: theme.primary },
+    scrollToBottomButton: { backgroundColor: theme.primary },
+  };
+
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={[styles.safeArea, dynamicStyles.safeArea]} edges={['top', 'left', 'right']}>
       {renderHeader()}
       
       {/* Debug Panels - Remove in production */}
@@ -721,8 +741,8 @@ const ChatDetailScreen = () => {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
       >
         {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#6A3DE8" />
+          <View style={[styles.loadingContainer, dynamicStyles.loadingContainer]}>
+            <ActivityIndicator size="large" color={theme.primary} />
           </View>
         ) : (
           <FlatList
@@ -730,7 +750,7 @@ const ChatDetailScreen = () => {
             data={prepareFlatListData()}
             keyExtractor={(item) => item._id || `message-${Date.now()}-${Math.random()}`}
             renderItem={renderMessageItem}
-            contentContainerStyle={styles.messagesContainer}
+            contentContainerStyle={[styles.messagesContainer, dynamicStyles.messagesContainer]}
             onContentSizeChange={() => {
               // Only scroll on initial load, not for new messages (useEffect handles those)
               if (flatListRef.current && chatMessages.length > 0 && prevMessageCountRef.current === 0) {
@@ -780,8 +800,8 @@ const ChatDetailScreen = () => {
               }, 500); // Shorter delay for momentum end
             }}
             ListEmptyComponent={
-              <View style={styles.emptyContainer}>
-                <Text style={styles.emptyText}>
+              <View style={[styles.emptyContainer, dynamicStyles.emptyContainer]}>
+                <Text style={[styles.emptyText, dynamicStyles.emptyText]}>
                   No messages yet. Start the conversation!
                 </Text>
               </View>
@@ -806,24 +826,24 @@ const ChatDetailScreen = () => {
         {/* Scroll to bottom button */}
         {showScrollToBottom && (
           <TouchableOpacity 
-            style={styles.scrollToBottomButton}
+            style={[styles.scrollToBottomButton, dynamicStyles.scrollToBottomButton]}
             onPress={handleScrollToBottom}
           >
             <Icon name="keyboard-arrow-down" size={24} color="white" />
           </TouchableOpacity>
         )}
         
-        <View style={styles.inputContainer}>
+        <View style={[styles.inputContainer, dynamicStyles.inputContainer]}>
           <TextInput
-            style={styles.input}
+            style={[styles.input, dynamicStyles.input]}
             placeholder="Message"
-            placeholderTextColor="#999"
+            placeholderTextColor={theme.textTertiary}
             value={message}
             onChangeText={handleInputChange}
             multiline
           />
           <TouchableOpacity 
-            style={[styles.sendButton, !message.trim() && styles.sendButtonDisabled]} 
+            style={[styles.sendButton, dynamicStyles.sendButton, !message.trim() && styles.sendButtonDisabled]} 
             onPress={handleSend}
             disabled={!message.trim()}
           >
@@ -838,7 +858,6 @@ const ChatDetailScreen = () => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
   },
   keyboardAvoidingContainer: {
     flex: 1,
@@ -847,16 +866,13 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
     paddingVertical: 10,
     paddingHorizontal: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
     height: 60,
   },
   backButton: {
@@ -870,11 +886,9 @@ const styles = StyleSheet.create({
   headerUserName: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
   },
   headerUserStatus: {
     fontSize: 14,
-    color: '#999',
   },
   headerAction: {
     padding: 8,
@@ -893,30 +907,24 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#666666',
     textAlign: 'center',
   },
   inputContainer: {
     flexDirection: 'row',
     padding: 10,
-    backgroundColor: '#FFF',
     borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
     alignItems: 'center',
   },
   input: {
     flex: 1,
-    backgroundColor: '#F0F0F0',
     borderRadius: 20,
     paddingHorizontal: 15,
     paddingVertical: 10,
     maxHeight: 100,
     fontSize: 16,
-    color: '#333333',
   },
   sendButton: {
     marginLeft: 10,
-    backgroundColor: '#6A3DE8',
     borderRadius: 24,
     width: 48,
     height: 48,
@@ -924,7 +932,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sendButtonDisabled: {
-    backgroundColor: '#B0C4DE',
+    opacity: 0.5,
   },
   sendButtonText: {
     color: '#FFF',
@@ -934,7 +942,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 80,
     right: 20,
-    backgroundColor: '#6A3DE8',
     borderRadius: 25,
     width: 50,
     height: 50,

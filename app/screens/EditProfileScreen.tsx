@@ -21,6 +21,7 @@ import { RootStackParamList } from '../navigation/types';
 import apiClient from '../utils/apiClient';
 import Toast from 'react-native-toast-message';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useTheme } from '../context/ThemeContext';
 
 interface User {
   id: string;
@@ -49,6 +50,7 @@ type EditProfileRouteProp = RouteProp<RootStackParamList, 'EditProfile'>;
 const EditProfileScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<EditProfileRouteProp>();
+  const { theme, isDark } = useTheme();
   
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -162,20 +164,30 @@ const EditProfileScreen = () => {
     value: string,
     onPress: () => void,
     isMultiline: boolean = false
-  ) => (
-    <TouchableOpacity style={styles.fieldContainer} onPress={onPress}>
-      <View style={styles.fieldLeft}>
-        <Icon name={icon} size={24} color="#666666" style={styles.fieldIcon} />
-        <View style={styles.fieldContent}>
-          <Text style={styles.fieldLabel}>{label}</Text>
-          <Text style={styles.fieldValue} numberOfLines={isMultiline ? 3 : 1}>
-            {value || `Add ${label.toLowerCase()}`}
-          </Text>
+  ) => {
+    const dynamicStyles = {
+      fieldContainer: { borderBottomColor: theme.divider },
+      fieldIcon: { color: theme.textSecondary },
+      fieldLabel: { color: theme.textSecondary },
+      fieldValue: { color: theme.text },
+      chevron: { color: theme.textTertiary },
+    };
+
+    return (
+      <TouchableOpacity style={[styles.fieldContainer, dynamicStyles.fieldContainer]} onPress={onPress}>
+        <View style={styles.fieldLeft}>
+          <Icon name={icon} size={24} color={theme.textSecondary} style={styles.fieldIcon} />
+          <View style={styles.fieldContent}>
+            <Text style={[styles.fieldLabel, dynamicStyles.fieldLabel]}>{label}</Text>
+            <Text style={[styles.fieldValue, dynamicStyles.fieldValue]} numberOfLines={isMultiline ? 3 : 1}>
+              {value || `Add ${label.toLowerCase()}`}
+            </Text>
+          </View>
         </View>
-      </View>
-      <Icon name="chevron-forward" size={20} color="#CCCCCC" />
-    </TouchableOpacity>
-  );
+        <Icon name="chevron-forward" size={20} color={theme.textTertiary} />
+      </TouchableOpacity>
+    );
+  };
 
   const renderModal = () => {
     if (!showModal || !modalType || !options) return null;
@@ -208,20 +220,30 @@ const EditProfileScreen = () => {
         break;
     }
 
+    const dynamicStyles = {
+      modalContainer: { backgroundColor: theme.background },
+      modalHeader: { borderBottomColor: theme.border, backgroundColor: theme.background },
+      modalTitle: { color: theme.text },
+      modalCancelText: { color: theme.textSecondary },
+      modalSaveText: { color: theme.primary },
+      modalItem: { borderBottomColor: theme.divider, backgroundColor: theme.background },
+      modalItemText: { color: theme.text },
+    };
+
     return (
       <Modal
         visible={showModal}
         animationType="slide"
         presentationStyle="pageSheet"
       >
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
+        <SafeAreaView style={[styles.modalContainer, dynamicStyles.modalContainer]}>
+          <View style={[styles.modalHeader, dynamicStyles.modalHeader]}>
             <TouchableOpacity onPress={() => setShowModal(false)}>
-              <Text style={styles.modalCancelText}>Cancel</Text>
+              <Text style={[styles.modalCancelText, dynamicStyles.modalCancelText]}>Cancel</Text>
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>{title}</Text>
+            <Text style={[styles.modalTitle, dynamicStyles.modalTitle]}>{title}</Text>
             <TouchableOpacity onPress={handleModalSave}>
-              <Text style={styles.modalSaveText}>Save</Text>
+              <Text style={[styles.modalSaveText, dynamicStyles.modalSaveText]}>Save</Text>
             </TouchableOpacity>
           </View>
 
@@ -231,18 +253,18 @@ const EditProfileScreen = () => {
               keyExtractor={(item) => item}
               renderItem={({ item }) => (
                 <TouchableOpacity
-                  style={styles.modalItem}
+                  style={[styles.modalItem, dynamicStyles.modalItem]}
                   onPress={() => toggleInterest(item)}
                 >
-                  <Text style={styles.modalItemText}>{item}</Text>
+                  <Text style={[styles.modalItemText, dynamicStyles.modalItemText]}>{item}</Text>
                   <Icon
                     name={Array.isArray(tempValue) && tempValue.includes(item) ? "checkmark" : "add"}
                     size={20}
-                    color={Array.isArray(tempValue) && tempValue.includes(item) ? "#4A90E2" : "#CCCCCC"}
+                    color={Array.isArray(tempValue) && tempValue.includes(item) ? theme.primary : theme.textTertiary}
                   />
                 </TouchableOpacity>
               )}
-              style={styles.modalList}
+              style={[styles.modalList, { backgroundColor: theme.surface }]}
             />
           ) : (
             <FlatList
@@ -250,18 +272,18 @@ const EditProfileScreen = () => {
               keyExtractor={(item) => item}
               renderItem={({ item }) => (
                 <TouchableOpacity
-                  style={styles.modalItem}
+                  style={[styles.modalItem, dynamicStyles.modalItem]}
                   onPress={() => setTempValue(item)}
                 >
-                  <Text style={styles.modalItemText}>{item}</Text>
+                  <Text style={[styles.modalItemText, dynamicStyles.modalItemText]}>{item}</Text>
                   <Icon
                     name={tempValue === item ? "checkmark" : "add"}
                     size={20}
-                    color={tempValue === item ? "#4A90E2" : "#CCCCCC"}
+                    color={tempValue === item ? theme.primary : theme.textTertiary}
                   />
                 </TouchableOpacity>
               )}
-              style={styles.modalList}
+              style={[styles.modalList, { backgroundColor: theme.surface }]}
             />
           )}
         </SafeAreaView>
@@ -269,20 +291,37 @@ const EditProfileScreen = () => {
     );
   };
   
+  const dynamicStyles = {
+    container: { backgroundColor: theme.background },
+    loadingContainer: { backgroundColor: theme.background },
+    loadingText: { color: theme.textSecondary },
+    errorContainer: { backgroundColor: theme.background },
+    errorText: { color: theme.text },
+    retryButton: { backgroundColor: theme.primary },
+    header: { borderBottomColor: theme.border, backgroundColor: theme.background },
+    headerTitle: { color: theme.text },
+    content: { backgroundColor: theme.surface },
+    profilePicture: { borderColor: theme.border },
+    cameraButton: { backgroundColor: theme.primary },
+    crownIcon: { backgroundColor: theme.card, borderColor: theme.border },
+    fieldsContainer: { backgroundColor: theme.surface },
+    saveButton: { backgroundColor: theme.primary },
+  };
+
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4A90E2" />
-        <Text style={styles.loadingText}>Loading profile...</Text>
+      <View style={[styles.loadingContainer, dynamicStyles.loadingContainer]}>
+        <ActivityIndicator size="large" color={theme.primary} />
+        <Text style={[styles.loadingText, dynamicStyles.loadingText]}>Loading profile...</Text>
       </View>
     );
   }
 
   if (!user) {
     return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>Failed to load profile data</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={fetchProfileData}>
+      <View style={[styles.errorContainer, dynamicStyles.errorContainer]}>
+        <Text style={[styles.errorText, dynamicStyles.errorText]}>Failed to load profile data</Text>
+        <TouchableOpacity style={[styles.retryButton, dynamicStyles.retryButton]} onPress={fetchProfileData}>
           <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
       </View>
@@ -290,37 +329,37 @@ const EditProfileScreen = () => {
   }
   
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+    <SafeAreaView style={[styles.container, dynamicStyles.container]}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={theme.background} />
       
       {/* Header */}
-          <View style={styles.header}>
+          <View style={[styles.header, dynamicStyles.header]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-back" size={24} color="#333333" />
+          <Icon name="arrow-back" size={24} color={theme.text} />
             </TouchableOpacity>
-        <Text style={styles.headerTitle}>Edit profile</Text>
+        <Text style={[styles.headerTitle, dynamicStyles.headerTitle]}>Edit profile</Text>
         <View style={styles.headerRight} />
           </View>
           
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={[styles.content, dynamicStyles.content]} showsVerticalScrollIndicator={false}>
         {/* Profile Picture */}
         <View style={styles.profilePictureContainer}>
             <Image
             source={{ 
               uri: user.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg' 
             }} 
-            style={styles.profilePicture} 
+            style={[styles.profilePicture, dynamicStyles.profilePicture]} 
           />
-          <TouchableOpacity style={styles.cameraButton}>
+          <TouchableOpacity style={[styles.cameraButton, dynamicStyles.cameraButton]}>
             <Icon name="camera" size={20} color="#FFFFFF" />
             </TouchableOpacity>
-          <View style={styles.crownIcon}>
+          <View style={[styles.crownIcon, dynamicStyles.crownIcon]}>
             <Icon name="star" size={16} color="#FFD700" />
           </View>
           </View>
           
         {/* Profile Fields */}
-        <View style={styles.fieldsContainer}>
+        <View style={[styles.fieldsContainer, dynamicStyles.fieldsContainer]}>
           {renderProfileField(
             'person-outline',
             'Name',
@@ -437,7 +476,7 @@ const EditProfileScreen = () => {
           
         {/* Save Button */}
           <TouchableOpacity
-          style={[styles.saveButton, saving && styles.saveButtonDisabled]} 
+          style={[styles.saveButton, dynamicStyles.saveButton, saving && styles.saveButtonDisabled]} 
           onPress={handleSave}
           disabled={saving}
           >
@@ -457,7 +496,6 @@ const EditProfileScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
   },
   loadingContainer: {
     flex: 1,
@@ -467,7 +505,6 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#666666',
   },
   errorContainer: {
     flex: 1,
@@ -477,12 +514,10 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 16,
-    color: '#666666',
     marginBottom: 20,
     textAlign: 'center',
   },
   retryButton: {
-    backgroundColor: '#4A90E2',
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 8,
@@ -498,12 +533,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333333',
   },
   headerRight: {
     width: 24,
@@ -521,13 +554,11 @@ const styles = StyleSheet.create({
     height: 120,
     borderRadius: 60,
     borderWidth: 3,
-    borderColor: '#E5E5E5',
   },
   cameraButton: {
     position: 'absolute',
     bottom: 24,
     right: '35%',
-    backgroundColor: '#4A90E2',
     width: 32,
     height: 32,
     borderRadius: 16,
@@ -538,14 +569,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 24,
     right: '35%',
-    backgroundColor: '#FFFFFF',
     width: 24,
     height: 24,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E5E5E5',
   },
   fieldsContainer: {
     paddingHorizontal: 16,
@@ -556,7 +585,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
   },
   fieldLeft: {
     flexDirection: 'row',
@@ -572,16 +600,13 @@ const styles = StyleSheet.create({
   },
   fieldLabel: {
     fontSize: 14,
-    color: '#666666',
     marginBottom: 4,
   },
   fieldValue: {
     fontSize: 16,
-    color: '#333333',
     fontWeight: '500',
   },
   saveButton: {
-    backgroundColor: '#4A90E2',
     marginHorizontal: 16,
     marginVertical: 24,
     paddingVertical: 16,
@@ -589,7 +614,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   saveButtonDisabled: {
-    backgroundColor: '#CCCCCC',
+    opacity: 0.5,
   },
   saveButtonText: {
     color: '#FFFFFF',
@@ -598,7 +623,6 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -607,20 +631,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333333',
   },
   modalCancelText: {
     fontSize: 16,
-    color: '#666666',
   },
   modalSaveText: {
     fontSize: 16,
-    color: '#4A90E2',
     fontWeight: '600',
   },
   modalList: {
@@ -633,11 +653,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
   },
   modalItemText: {
     fontSize: 16,
-    color: '#333333',
   },
 });
 

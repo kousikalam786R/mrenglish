@@ -19,6 +19,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import apiClient from '../utils/apiClient';
 import { RootStackParamList } from '../navigation/types';
+import { useTheme } from '../context/ThemeContext';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -30,6 +31,7 @@ interface PasswordVisibilityState {
 
 const ChangePasswordScreen = () => {
   const navigation = useNavigation<NavigationProp>();
+  const { theme } = useTheme();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -105,22 +107,36 @@ const ChangePasswordScreen = () => {
     );
   }, []);
 
+  const dynamicStyles = {
+    safeArea: { backgroundColor: theme.background },
+    header: { backgroundColor: theme.background, borderBottomColor: theme.border },
+    headerButton: { backgroundColor: theme.primary + '15' },
+    headerTitle: { color: theme.text },
+    formCard: { backgroundColor: theme.card },
+    inputLabel: { color: theme.text },
+    inputWrapper: { backgroundColor: theme.inputBackground, borderColor: theme.inputBorder },
+    input: { color: theme.text },
+    forgotPasswordText: { color: theme.primary },
+    footer: { backgroundColor: theme.background },
+    saveButton: { backgroundColor: theme.primary, shadowColor: theme.primary },
+  };
+
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
+    <SafeAreaView style={[styles.safeArea, dynamicStyles.safeArea]} edges={['top', 'left', 'right', 'bottom']}>
       <KeyboardAvoidingView
-        style={styles.safeArea}
+        style={[styles.safeArea, dynamicStyles.safeArea]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.header}>
+        <View style={[styles.header, dynamicStyles.header]}>
           <TouchableOpacity
-            style={styles.headerButton}
+            style={[styles.headerButton, dynamicStyles.headerButton]}
             onPress={() => navigation.goBack()}
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
-            <Ionicons name="chevron-back" size={26} color="#2C2C47" />
+            <Ionicons name="chevron-back" size={26} color={theme.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Change Password</Text>
+          <Text style={[styles.headerTitle, dynamicStyles.headerTitle]}>Change Password</Text>
           <View style={styles.headerSpacer} />
         </View>
 
@@ -128,9 +144,11 @@ const ChangePasswordScreen = () => {
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          style={{ backgroundColor: theme.surface }}
         >
-          <View style={styles.formCard}>
+          <View style={[styles.formCard, dynamicStyles.formCard]}>
             <PasswordField
+              theme={theme}
               label="Current Password"
               value={currentPassword}
               onChangeText={setCurrentPassword}
@@ -142,6 +160,7 @@ const ChangePasswordScreen = () => {
 
             <PasswordField
               ref={newPasswordRef}
+              theme={theme}
               label="New Password"
               value={newPassword}
               onChangeText={setNewPassword}
@@ -153,6 +172,7 @@ const ChangePasswordScreen = () => {
 
             <PasswordField
               ref={confirmPasswordRef}
+              theme={theme}
               label="Confirm New Password"
               value={confirmPassword}
               onChangeText={setConfirmPassword}
@@ -168,14 +188,14 @@ const ChangePasswordScreen = () => {
               style={styles.forgotPasswordButton}
               accessibilityRole="button"
             >
-              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+              <Text style={[styles.forgotPasswordText, dynamicStyles.forgotPasswordText]}>Forgot Password?</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
 
-        <View style={styles.footer}>
+        <View style={[styles.footer, dynamicStyles.footer]}>
           <TouchableOpacity
-            style={[styles.saveButton, submitting && styles.saveButtonDisabled]}
+            style={[styles.saveButton, dynamicStyles.saveButton, submitting && styles.saveButtonDisabled]}
             onPress={handleSave}
             disabled={submitting}
           >
@@ -192,6 +212,7 @@ const ChangePasswordScreen = () => {
 };
 
 type PasswordFieldProps = {
+  theme: any;
   label: string;
   value: string;
   onChangeText: (value: string) => void;
@@ -205,6 +226,7 @@ type PasswordFieldProps = {
 const PasswordField = React.forwardRef<TextInput, PasswordFieldProps>(
   (
     {
+      theme,
       label,
       value,
       onChangeText,
@@ -216,19 +238,25 @@ const PasswordField = React.forwardRef<TextInput, PasswordFieldProps>(
     },
     ref,
   ) => {
+    const dynamicStyles = {
+      inputLabel: { color: theme.text },
+      inputWrapper: { backgroundColor: theme.inputBackground, borderColor: theme.inputBorder },
+      input: { color: theme.text },
+    };
+
     return (
       <View style={[styles.inputGroup, isLast && styles.inputGroupLast]}> 
-        <Text style={styles.inputLabel}>{label}</Text>
-        <View style={styles.inputWrapper}>
-          <Ionicons name="lock-closed" size={18} color="#6F6F89" style={styles.inputIcon} />
+        <Text style={[styles.inputLabel, dynamicStyles.inputLabel]}>{label}</Text>
+        <View style={[styles.inputWrapper, dynamicStyles.inputWrapper]}>
+          <Ionicons name="lock-closed" size={18} color={theme.textSecondary} style={styles.inputIcon} />
           <TextInput
             ref={ref}
             value={value}
             onChangeText={onChangeText}
             secureTextEntry={secureTextEntry}
-            style={styles.input}
+            style={[styles.input, dynamicStyles.input]}
             placeholder={label}
-            placeholderTextColor="#A1A4B8"
+            placeholderTextColor={theme.textTertiary}
             autoCapitalize="none"
             autoCorrect={false}
             autoComplete="password"
@@ -245,7 +273,7 @@ const PasswordField = React.forwardRef<TextInput, PasswordFieldProps>(
             <Ionicons
               name={secureTextEntry ? 'eye-off-outline' : 'eye-outline'}
               size={20}
-              color="#4A4A62"
+              color={theme.textSecondary}
             />
           </TouchableOpacity>
         </View>
@@ -259,7 +287,6 @@ PasswordField.displayName = 'PasswordField';
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
   },
   header: {
     flexDirection: 'row',
@@ -267,8 +294,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#ECECF2',
-    backgroundColor: '#FFFFFF',
   },
   headerButton: {
     width: 36,
@@ -276,14 +301,12 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#EEF3FF',
   },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
     fontSize: 20,
     fontWeight: '600',
-    color: '#2C2C47',
   },
   headerSpacer: {
     width: 36,
@@ -295,7 +318,6 @@ const styles = StyleSheet.create({
     paddingBottom: 80,
   },
   formCard: {
-    backgroundColor: '#FFFFFF',
     borderRadius: 18,
     paddingHorizontal: 20,
     paddingVertical: 24,
@@ -314,17 +336,14 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#2C2C47',
     marginBottom: 8,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F5F6FB',
     borderRadius: 14,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: '#E3E6F0',
   },
   inputIcon: {
     marginRight: 8,
@@ -332,7 +351,6 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 16,
-    color: '#2C2C47',
     paddingVertical: Platform.OS === 'ios' ? 14 : 10,
   },
   visibilityButton: {
@@ -344,21 +362,17 @@ const styles = StyleSheet.create({
   },
   forgotPasswordText: {
     fontSize: 14,
-    color: '#4A90E2',
     fontWeight: '500',
   },
   footer: {
     paddingHorizontal: 24,
     paddingBottom: 24,
-    backgroundColor: '#FFFFFF',
   },
   saveButton: {
-    backgroundColor: '#4A90E2',
     borderRadius: 28,
     paddingVertical: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#4A90E2',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.25,
     shadowRadius: 10,

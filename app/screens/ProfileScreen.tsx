@@ -357,27 +357,27 @@ const ProfileScreen = () => {
             source={{ 
               uri: user.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg' 
             }} 
-            style={styles.avatar} 
+            style={[styles.avatar, { borderColor: theme.warning }]} 
           />
           <View style={[styles.levelBadge, { backgroundColor: theme.textTertiary }]}>
             <Text style={styles.levelBadgeText}>{user.englishLevel || 'A2'}</Text>
           </View>
-          <View style={styles.crownIcon}>
+          <View style={[styles.crownIcon, { backgroundColor: theme.card }]}>
             <Text style={styles.crownText}>👑</Text>
           </View>
         </View>
         
-        <Text style={styles.userName}>{user.name || 'User'}</Text>
+        <Text style={[styles.userName, { color: theme.text }]}>{user.name || 'User'}</Text>
         
         {user.bio && (
-          <Text style={styles.bioText}>"{user.bio}"</Text>
+          <Text style={[styles.bioText, { color: theme.textSecondary }]}>"{user.bio}"</Text>
         )}
         
         <TouchableOpacity 
-          style={styles.editButton}
+          style={[styles.editButton, { backgroundColor: theme.inputBackground }]}
           onPress={handleEditProfile}
         >
-          <Text style={styles.editButtonText}>Edit profile</Text>
+          <Text style={[styles.editButtonText, { color: theme.text }]}>Edit profile</Text>
         </TouchableOpacity>
       </View>
     );
@@ -401,10 +401,10 @@ const ProfileScreen = () => {
           <View style={styles.interestHeaderSpacer} />
         </View>
 
-        <View style={styles.interestInputRow}>
+        <View style={[styles.interestInputRow, { backgroundColor: theme.inputBackground }]}>
           <TextInput
-            style={[styles.interestInput, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.inputBorder }]}
-                  placeholder={t('profile.addYourInterest')}
+            style={[styles.interestInput, { color: theme.text }]}
+            placeholder={t('profile.addYourInterest')}
             placeholderTextColor={theme.textTertiary}
             value={interestInput}
             onChangeText={text => {
@@ -507,10 +507,10 @@ const ProfileScreen = () => {
     if (!user) return null;
     
     return (
-      <View style={styles.section}>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
         <Text style={[styles.sectionTitle, { color: theme.text }]}>Information</Text>
         
-        <View style={[styles.infoItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        <View style={[styles.infoItem, { borderBottomColor: theme.border }]}>
           <View style={[styles.infoIcon, { backgroundColor: theme.primary + '15' }]}>
             <Text style={[styles.infoIconText, { color: theme.primary }]}>Aa</Text>
           </View>
@@ -518,7 +518,7 @@ const ProfileScreen = () => {
           <Text style={[styles.infoValue, { color: theme.text }]}>{user.nativeLanguage || t('profile.notSpecified')}</Text>
         </View>
         
-        <View style={[styles.infoItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        <View style={[styles.infoItem, { borderBottomColor: theme.border }]}>
           <View style={[styles.infoIcon, { backgroundColor: theme.primary + '15' }]}>
             <Text style={[styles.infoIconText, { color: theme.primary }]}>ENG</Text>
           </View>
@@ -526,7 +526,7 @@ const ProfileScreen = () => {
           <Text style={[styles.infoValue, { color: theme.text }]}>{formatEnglishLevel(user.englishLevel)}</Text>
         </View>
         
-        <View style={[styles.infoItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        <View style={[styles.infoItem, { borderBottomColor: theme.border }]}>
           <View style={[styles.infoIcon, { backgroundColor: theme.primary + '15' }]}>
             <Text style={[styles.infoIconText, { color: theme.primary }]}>♂</Text>
           </View>
@@ -534,7 +534,7 @@ const ProfileScreen = () => {
           <Text style={[styles.infoValue, { color: theme.text }]}>{user.gender || t('profile.notSpecified')}</Text>
         </View>
         
-        <View style={[styles.infoItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        <View style={[styles.infoItem, { borderBottomColor: theme.border }]}>
           <View style={[styles.infoIcon, { backgroundColor: theme.primary + '15' }]}>
             <Text style={[styles.infoIconText, { color: theme.primary }]}>📅</Text>
           </View>
@@ -549,7 +549,7 @@ const ProfileScreen = () => {
     if (!user) return null;
     
     return (
-      <View style={styles.section}>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
         <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('profile.interests')}</Text>
         
         {user.interests && user.interests.length > 0 ? (
@@ -560,14 +560,14 @@ const ProfileScreen = () => {
               </View>
             ))}
             <TouchableOpacity style={[styles.addInterestButton, { backgroundColor: theme.primary }]} onPress={openInterestEditor}>
-              <Text style={styles.addInterestText}>{t('profile.addInterest')}</Text>
+              <Text style={[styles.addInterestText, { color: '#FFFFFF' }]}>{t('profile.addInterest')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <View style={[styles.noInterestsContainer, { backgroundColor: theme.card }]}>
             <Text style={[styles.noInterestsText, { color: theme.textSecondary }]}>{t('profile.noInterests')}</Text>
             <TouchableOpacity style={[styles.addInterestButton, { backgroundColor: theme.primary }]} onPress={openInterestEditor}>
-              <Text style={styles.addInterestText}>{t('profile.addInterest')}</Text>
+              <Text style={[styles.addInterestText, { color: '#FFFFFF' }]}>{t('profile.addInterest')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -579,21 +579,21 @@ const ProfileScreen = () => {
     if (!stats) return null;
     
     return (
-      <View style={styles.section}>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
         <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('profile.rating')}</Text>
         
-        <View style={[styles.ratingCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <Text style={[styles.satisfactionPercentage, { color: theme.primary }]}>{stats.satisfactionPercentage}%</Text>
+        <View style={[styles.ratingCard, { backgroundColor: theme.success + '20' }]}>
+          <Text style={[styles.satisfactionPercentage, { color: theme.success }]}>{stats.satisfactionPercentage}%</Text>
           <Text style={[styles.satisfactionText, { color: theme.textSecondary }]}>{t('profile.stats.satisfactionPercentage')}</Text>
         </View>
         
         <View style={styles.ratingStats}>
-          <View style={styles.ratingStatItem}>
+          <View style={[styles.ratingStatItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <Text style={styles.ratingIcon}>👍</Text>
             <Text style={[styles.ratingNumber, { color: theme.text }]}>{stats.positiveFeedback}</Text>
           </View>
           
-          <View style={styles.ratingStatItem}>
+          <View style={[styles.ratingStatItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <Text style={styles.ratingIcon}>👎</Text>
             <Text style={[styles.ratingNumber, { color: theme.text }]}>{stats.negativeFeedback}</Text>
           </View>
@@ -604,7 +604,7 @@ const ProfileScreen = () => {
 
   const renderComplimentsSection = () => {
     return (
-      <View style={styles.section}>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
         <TouchableOpacity 
           style={styles.sectionHeader}
           onPress={() => setComplimentsExpanded(!complimentsExpanded)}
@@ -618,7 +618,7 @@ const ProfileScreen = () => {
         {complimentsExpanded && (
           <View style={styles.complimentsList}>
             {compliments.map((compliment, index) => (
-              <View key={index} style={[styles.complimentItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <View key={index} style={[styles.complimentItem, { borderBottomColor: theme.border }]}>
                 <View style={[
                   styles.complimentBadge,
                   { backgroundColor: compliment.count === 0 ? theme.inputBackground : theme.primary + '15' },
@@ -643,7 +643,7 @@ const ProfileScreen = () => {
 
   const renderAdviceSection = () => {
     return (
-      <View style={styles.section}>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
         <TouchableOpacity 
           style={styles.sectionHeader}
           onPress={() => setAdviceExpanded(!adviceExpanded)}
@@ -657,7 +657,7 @@ const ProfileScreen = () => {
         {adviceExpanded && (
           <View style={styles.adviceList}>
             {advice.map((adviceItem, index) => (
-              <View key={index} style={[styles.adviceItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <View key={index} style={[styles.adviceItem, { borderBottomColor: theme.border }]}>
                 <View style={[
                   styles.adviceBadge,
                   { backgroundColor: adviceItem.count === 0 ? theme.inputBackground : theme.warning + '15' },
@@ -684,7 +684,7 @@ const ProfileScreen = () => {
     if (!feedback || feedback.length === 0) return null;
     
     return (
-      <View style={styles.section}>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
         <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('profile.feedback')}</Text>
           <TouchableOpacity>
@@ -693,7 +693,7 @@ const ProfileScreen = () => {
         </View>
         
         {feedback.slice(0, 3).map((item, index) => (
-          <View key={index} style={[styles.feedbackItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <View key={index} style={[styles.feedbackItem, { borderBottomColor: theme.border }]}>
             <Image 
               source={{ 
                 uri: item.feedbackBy.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg' 
@@ -710,7 +710,7 @@ const ProfileScreen = () => {
                 })}
               </Text>
             </View>
-            <View style={styles.feedbackIcon}>
+            <View style={[styles.feedbackIcon, { backgroundColor: theme.primary + '15' }]}>
               <Text style={styles.feedbackEmoji}>
                 {item.feedbackType === 'positive' ? '👍' : '👎'}
               </Text>
@@ -767,14 +767,14 @@ const ProfileScreen = () => {
         {renderFeedbackSection()}
 
         {/* Test Notification Button */}
-        <View style={styles.testContainer}>
+        {/* <View style={styles.testContainer}>
           <TouchableOpacity 
-            style={[styles.testButton, { backgroundColor: theme.primary }]}
+            style={[styles.testButton, { backgroundColor: theme.error }]}
             onPress={handleTestNotification}
           >
             <Text style={styles.testButtonText}>🔔 Test Push Notification</Text>
           </TouchableOpacity>
-        </View>
+        </View> */}
       </ScrollView>
       {renderInterestsModal()}
     </SafeAreaView>
@@ -784,13 +784,11 @@ const ProfileScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
   },
   profileHeader: {
     alignItems: 'center',
     paddingVertical: 24,
     paddingHorizontal: 16,
-    backgroundColor: '#FFFFFF',
     marginHorizontal: 16,
     borderRadius: 12,
     marginTop: 8,
@@ -810,7 +808,6 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#EEF3FF',
   },
   profileImageContainer: {
     position: 'relative',
@@ -821,13 +818,11 @@ const styles = StyleSheet.create({
     height: 120,
     borderRadius: 60,
     borderWidth: 3,
-    borderColor: '#FF8C00',
   },
   levelBadge: {
     position: 'absolute',
     bottom: 8,
     right: 8,
-    backgroundColor: '#666666',
     borderRadius: 12,
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -841,7 +836,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -8,
     right: 8,
-    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     width: 24,
     height: 24,
@@ -854,12 +848,10 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#333333',
     marginBottom: 8,
   },
   bioText: {
     fontSize: 16,
-    color: '#333333',
     textAlign: 'center',
     marginBottom: 16,
     paddingHorizontal: 20,
@@ -869,11 +861,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 25,
-    backgroundColor: '#F5F5F5',
     marginTop: 8,
   },
   editButtonText: {
-    color: '#333333',
     fontWeight: '600',
     fontSize: 16,
   },
@@ -883,7 +873,6 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     marginHorizontal: 16,
     borderRadius: 12,
-    backgroundColor: '#FFFFFF',
     marginVertical: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
@@ -901,15 +890,12 @@ const styles = StyleSheet.create({
   statNumber: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333333',
     marginBottom: 4,
   },
   statLabel: {
     fontSize: 14,
-    color: '#666666',
   },
   section: {
-    backgroundColor: '#FFFFFF',
     paddingHorizontal: 20,
     paddingVertical: 20,
     marginHorizontal: 16,
@@ -930,12 +916,10 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333333',
     marginBottom: 16,
   },
   chevronIcon: {
     fontSize: 20,
-    color: '#666666',
     transform: [{ rotate: '0deg' }],
   },
   chevronRotated: {
@@ -949,7 +933,6 @@ const styles = StyleSheet.create({
   },
   noDataText: {
     fontSize: 14,
-    color: '#999999',
     textAlign: 'center',
     paddingVertical: 16,
     fontStyle: 'italic',
@@ -959,13 +942,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
   },
   infoIcon: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#4A90E2',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -977,12 +958,10 @@ const styles = StyleSheet.create({
   },
   infoLabel: {
     fontSize: 16,
-    color: '#333333',
     flex: 1,
   },
   infoValue: {
     fontSize: 16,
-    color: '#666666',
   },
   interestsGrid: {
     flexDirection: 'row',
@@ -990,7 +969,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   interestChip: {
-    backgroundColor: '#F5F5F5',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
@@ -999,11 +977,9 @@ const styles = StyleSheet.create({
   },
   interestText: {
     fontSize: 14,
-    color: '#333333',
   },
   interestModalContainer: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
     paddingHorizontal: 20,
   },
   interestModalHeader: {
@@ -1021,7 +997,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 20,
     fontWeight: '600',
-    color: '#2C2C47',
   },
   interestHeaderSpacer: {
     width: 26,
@@ -1029,7 +1004,6 @@ const styles = StyleSheet.create({
   interestInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F5F5FA',
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 4,
@@ -1037,18 +1011,16 @@ const styles = StyleSheet.create({
   interestInput: {
     flex: 1,
     fontSize: 16,
-    color: '#2C2C47',
     paddingVertical: 8,
   },
   interestAddButton: {
     marginLeft: 12,
-    backgroundColor: '#6C5CE7',
     borderRadius: 16,
     paddingHorizontal: 18,
     paddingVertical: 10,
   },
   interestAddButtonDisabled: {
-    backgroundColor: '#C9C5F5',
+    opacity: 0.5,
   },
   interestAddButtonText: {
     color: '#FFFFFF',
@@ -1056,7 +1028,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   interestErrorText: {
-    color: '#E74C3C',
     marginTop: 8,
     marginBottom: 4,
   },
@@ -1073,7 +1044,6 @@ const styles = StyleSheet.create({
   interestEditChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F1EFFF',
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -1082,7 +1052,6 @@ const styles = StyleSheet.create({
   },
   interestEditChipText: {
     fontSize: 14,
-    color: '#4A4A62',
     marginRight: 8,
   },
   interestChipRemove: {
@@ -1095,11 +1064,9 @@ const styles = StyleSheet.create({
   },
   interestEmptyText: {
     fontSize: 15,
-    color: '#8B8BA4',
     textAlign: 'center',
   },
   interestDoneButton: {
-    backgroundColor: '#6C5CE7',
     borderRadius: 18,
     paddingVertical: 16,
     alignItems: 'center',
@@ -1115,7 +1082,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   addInterestButton: {
-    backgroundColor: '#E5E5E5',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
@@ -1124,7 +1090,6 @@ const styles = StyleSheet.create({
   },
   addInterestText: {
     fontSize: 14,
-    color: '#666666',
   },
   noInterestsContainer: {
     alignItems: 'center',
@@ -1132,11 +1097,9 @@ const styles = StyleSheet.create({
   },
   noInterestsText: {
     fontSize: 14,
-    color: '#999999',
     marginBottom: 12,
   },
   ratingCard: {
-    backgroundColor: '#E8F5E8',
     padding: 20,
     borderRadius: 12,
     alignItems: 'center',
@@ -1145,12 +1108,10 @@ const styles = StyleSheet.create({
   satisfactionPercentage: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#2E7D32',
     marginBottom: 8,
   },
   satisfactionText: {
     fontSize: 14,
-    color: '#333333',
     textAlign: 'center',
   },
   ratingStats: {
@@ -1160,12 +1121,10 @@ const styles = StyleSheet.create({
   ratingStatItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E5E5E5',
   },
   ratingIcon: {
     fontSize: 16,
@@ -1174,14 +1133,12 @@ const styles = StyleSheet.create({
   ratingNumber: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#333333',
   },
   feedbackItem: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
   },
   feedbackAvatar: {
     width: 40,
@@ -1195,18 +1152,15 @@ const styles = StyleSheet.create({
   feedbackName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333333',
     marginBottom: 4,
   },
   feedbackDate: {
     fontSize: 14,
-    color: '#666666',
   },
   feedbackIcon: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#E3F2FD',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1217,12 +1171,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
+    borderBottomWidth: 1,
   },
   complimentBadge: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#4CAF50',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -1234,25 +1188,22 @@ const styles = StyleSheet.create({
   },
   complimentText: {
     fontSize: 14,
-    color: '#333333',
     flex: 1,
   },
   complimentBadgeEmpty: {
-    backgroundColor: '#E0E0E0',
   },
   complimentTextEmpty: {
-    color: '#999999',
   },
   adviceItem: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
+    borderBottomWidth: 1,
   },
   adviceBadge: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#9C27B0',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -1264,27 +1215,22 @@ const styles = StyleSheet.create({
   },
   adviceText: {
     fontSize: 14,
-    color: '#333333',
     flex: 1,
   },
   adviceBadgeEmpty: {
-    backgroundColor: '#E0E0E0',
   },
   adviceTextEmpty: {
-    color: '#999999',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F5F5F5',
   },
   testContainer: {
     paddingHorizontal: 24,
     paddingVertical: 16,
   },
   testButton: {
-    backgroundColor: '#FF6B6B',
     paddingVertical: 12,
     borderRadius: 25,
     alignItems: 'center',

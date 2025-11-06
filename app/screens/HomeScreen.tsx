@@ -172,6 +172,13 @@ const HomeScreen = () => {
       },
     ];
 
+    const dynamicStyles = {
+      topicCard: { backgroundColor: theme.card },
+      difficultyText: { color: theme.textSecondary },
+      topicTitle: { color: theme.text },
+      lastChatText: { color: theme.textTertiary },
+    };
+
     return (
       <View style={styles.topicsContainer}>
         <FlatList
@@ -181,13 +188,13 @@ const HomeScreen = () => {
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
             <TouchableOpacity 
-              style={styles.topicCard}
+              style={[styles.topicCard, dynamicStyles.topicCard]}
               onPress={() => handleTopicSelect(item)}
             >
               <View style={styles.cardHeader}>
                 <View style={styles.difficultyContainer}>
-                  <View style={styles.difficultyIndicator} />
-                  <Text style={styles.difficultyText}>{item.difficulty}</Text>
+                  <View style={[styles.difficultyIndicator, { backgroundColor: theme.success }]} />
+                  <Text style={[styles.difficultyText, dynamicStyles.difficultyText]}>{item.difficulty}</Text>
                 </View>
                 {item.practiced && (
                   <View style={styles.practicedBadge}>
@@ -201,10 +208,10 @@ const HomeScreen = () => {
                 style={styles.topicImage}
               />
               
-              <Text style={styles.topicTitle}>{item.title}</Text>
+              <Text style={[styles.topicTitle, dynamicStyles.topicTitle]}>{item.title}</Text>
               
               {item.lastChat && (
-                <Text style={styles.lastChatText}>Last chat: {item.lastChat}</Text>
+                <Text style={[styles.lastChatText, dynamicStyles.lastChatText]}>Last chat: {item.lastChat}</Text>
               )}
             </TouchableOpacity>
           )}
@@ -259,6 +266,13 @@ const HomeScreen = () => {
       },
     ];
 
+    const dynamicStyles = {
+      topicCard: { backgroundColor: theme.card },
+      difficultyText: { color: theme.textSecondary },
+      topicTitle: { color: theme.text },
+      lastChatText: { color: theme.textTertiary },
+    };
+
     return (
       <View style={styles.topicsContainer}>
         <FlatList
@@ -268,13 +282,13 @@ const HomeScreen = () => {
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
             <TouchableOpacity 
-              style={styles.topicCard}
+              style={[styles.topicCard, dynamicStyles.topicCard]}
               onPress={() => handleTopicSelect(item)}
             >
               <View style={styles.cardHeader}>
                 <View style={styles.difficultyContainer}>
-                  <View style={styles.difficultyIndicator} />
-                  <Text style={styles.difficultyText}>{item.difficulty}</Text>
+                  <View style={[styles.difficultyIndicator, { backgroundColor: theme.success }]} />
+                  <Text style={[styles.difficultyText, dynamicStyles.difficultyText]}>{item.difficulty}</Text>
                 </View>
                 {item.practiced && (
                   <View style={styles.practicedBadge}>
@@ -288,10 +302,10 @@ const HomeScreen = () => {
                 style={styles.topicImage}
               />
               
-              <Text style={styles.topicTitle}>{item.title}</Text>
+              <Text style={[styles.topicTitle, dynamicStyles.topicTitle]}>{item.title}</Text>
               
               {item.lastChat && (
-                <Text style={styles.lastChatText}>Last chat: {item.lastChat}</Text>
+                <Text style={[styles.lastChatText, dynamicStyles.lastChatText]}>Last chat: {item.lastChat}</Text>
               )}
             </TouchableOpacity>
           )}
@@ -312,7 +326,7 @@ const HomeScreen = () => {
         <View style={[styles.modalOverlay, { backgroundColor: theme.overlay }]}>
           <View style={[styles.modalContainer, { backgroundColor: theme.card }]}>
             <TouchableOpacity 
-              style={styles.closeButton} 
+              style={[styles.closeButton, { backgroundColor: theme.inputBackground }]} 
               onPress={() => setModalVisible(false)}
             >
               <Icon name="close" size={24} color={theme.text} />
@@ -323,7 +337,7 @@ const HomeScreen = () => {
             {/* Progress bar */}
             <View style={styles.progressContainer}>
               <View style={[styles.progressBar, { backgroundColor: theme.inputBackground }]}>
-                <View style={[styles.progressFill, { backgroundColor: theme.primary }]} />
+                <View style={[styles.progressFill, { backgroundColor: theme.warning }]} />
               </View>
               <Text style={[styles.timerText, { color: theme.textSecondary }]}>18:05 {t('home.minutesRemaining')}</Text>
             </View>
@@ -375,7 +389,7 @@ const HomeScreen = () => {
       
       {/* User Profile */}
       <TouchableOpacity 
-        style={[styles.userProfileContainer, { backgroundColor: theme.card }]}
+        style={[styles.userProfileContainer, { backgroundColor: theme.card, borderBottomColor: theme.border }]}
         onPress={navigateToUserProfile}
       >
         <Image 
@@ -394,7 +408,7 @@ const HomeScreen = () => {
       </TouchableOpacity>
       
       {/* Header with RAHA AI title */}
-      <View style={[styles.header, { backgroundColor: theme.card }]}>
+      <View style={[styles.header, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
         <View style={styles.aiHeaderContainer}>
           <Image 
             source={{ uri: 'https://img.icons8.com/color/96/000000/robot.png' }} 
@@ -409,7 +423,7 @@ const HomeScreen = () => {
       </View>
       
       {/* Custom Tabs */}
-      <View style={[styles.tabBar, { backgroundColor: theme.card }]}>
+      <View style={[styles.tabBar, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
         <TouchableOpacity 
           style={[
             styles.tabButton, 
@@ -460,9 +474,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
   },
   userAvatar: {
     width: 50,
@@ -476,7 +488,6 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
     marginBottom: 4,
   },
   levelContainer: {
@@ -485,7 +496,6 @@ const styles = StyleSheet.create({
   },
   levelText: {
     fontSize: 14,
-    color: '#666',
   },
   header: {
     flexDirection: 'row',
@@ -493,9 +503,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
   },
   aiHeaderContainer: {
     flexDirection: 'row',
@@ -510,20 +518,16 @@ const styles = StyleSheet.create({
   aiTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#333',
   },
   historyButton: {
     padding: 8,
   },
   historyText: {
-    color: '#666',
     fontSize: 16,
   },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
   },
   tabButton: {
     flex: 1,
@@ -534,14 +538,11 @@ const styles = StyleSheet.create({
   tabText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#888',
   },
   activeTab: {
     borderBottomWidth: 2,
-    borderBottomColor: '#4A90E2',
   },
   activeTabText: {
-    color: '#4A90E2',
   },
   topicsContainer: {
     flex: 1,
@@ -549,7 +550,6 @@ const styles = StyleSheet.create({
   },
   topicCard: {
     width: cardWidth,
-    backgroundColor: '#ffffff',
     margin: 8,
     borderRadius: 12,
     overflow: 'hidden',
@@ -579,11 +579,9 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#4CAF50',
     marginRight: 4,
   },
   difficultyText: {
-    color: '#888',
     fontSize: 12,
   },
   practicedBadge: {
@@ -607,25 +605,21 @@ const styles = StyleSheet.create({
   topicTitle: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#333',
     textAlign: 'center',
     marginBottom: 8,
   },
   lastChatText: {
     fontSize: 12,
-    color: '#888',
     textAlign: 'center',
   },
   // Modal styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   modalContainer: {
     width: '90%',
-    backgroundColor: '#ffffff',
     borderRadius: 20,
     padding: 20,
     alignItems: 'center',
@@ -637,7 +631,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#f0f0f0',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1,
@@ -645,7 +638,6 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#333',
     marginTop: 20,
     marginBottom: 20,
   },
@@ -655,7 +647,6 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     height: 8,
-    backgroundColor: '#e0e0e0',
     borderRadius: 4,
     marginBottom: 10,
     width: '100%',
@@ -663,17 +654,14 @@ const styles = StyleSheet.create({
   progressFill: {
     height: '100%',
     width: '20%',
-    backgroundColor: '#FF9B42',
     borderRadius: 4,
   },
   timerText: {
-    color: '#666',
     fontSize: 14,
   },
   practiceOption: {
     flexDirection: 'row',
     width: '100%',
-    backgroundColor: '#f5f5f5',
     borderRadius: 12,
     padding: 20,
     marginBottom: 16,
@@ -683,7 +671,6 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#4A90E2',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
@@ -694,16 +681,13 @@ const styles = StyleSheet.create({
   optionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
     marginBottom: 4,
   },
   optionDescription: {
     fontSize: 14,
-    color: '#666',
   },
   startPracticeButton: {
     width: '100%',
-    backgroundColor: '#4A90E2',
     borderRadius: 30,
     paddingVertical: 15,
     alignItems: 'center',

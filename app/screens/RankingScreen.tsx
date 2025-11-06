@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import apiClient from '../utils/apiClient';
 import Toast from 'react-native-toast-message';
+import { useTheme } from '../context/ThemeContext';
 
 interface User {
   id: string;
@@ -30,9 +31,10 @@ type RankingPeriod = 'today' | 'week' | 'month';
 interface RankingItemProps {
   user: User;
   index: number;
+  theme: any;
 }
 
-const RankingItem: React.FC<RankingItemProps> = ({ user, index }) => {
+const RankingItem: React.FC<RankingItemProps> = ({ user, index, theme }) => {
   // Style based on rank
   const isTopThree = index < 3;
   
@@ -55,8 +57,16 @@ const RankingItem: React.FC<RankingItemProps> = ({ user, index }) => {
     return null;
   };
   
+  const dynamicStyles = {
+    rankingItem: { backgroundColor: theme.card },
+    userName: { color: theme.text },
+    userLevel: { color: theme.textSecondary },
+    scoreText: { color: theme.primary },
+    scoreLabel: { color: theme.textTertiary },
+  };
+
   return (
-    <View style={styles.rankingItem}>
+    <View style={[styles.rankingItem, dynamicStyles.rankingItem]}>
       <View style={[styles.rankContainer, isTopThree && getRankBadgeStyle()]}>
         <Text style={[styles.rankText, isTopThree && styles.topRankText]}>
           {index + 1}
@@ -66,13 +76,13 @@ const RankingItem: React.FC<RankingItemProps> = ({ user, index }) => {
       <Image source={{ uri: user.avatar }} style={styles.avatar} />
       
       <View style={styles.userInfo}>
-        <Text style={styles.userName}>{user.name}</Text>
-        <Text style={styles.userLevel}>{user.level}</Text>
+        <Text style={[styles.userName, dynamicStyles.userName]}>{user.name}</Text>
+        <Text style={[styles.userLevel, dynamicStyles.userLevel]}>{user.level}</Text>
       </View>
       
       <View style={styles.scoreContainer}>
-        <Text style={styles.scoreText}>{formatScore(user.score)}</Text>
-        <Text style={styles.scoreLabel}>talk time</Text>
+        <Text style={[styles.scoreText, dynamicStyles.scoreText]}>{formatScore(user.score)}</Text>
+        <Text style={[styles.scoreLabel, dynamicStyles.scoreLabel]}>talk time</Text>
       </View>
     </View>
   );
@@ -83,6 +93,7 @@ interface RankingScreenProps {
 }
 
 const RankingScreen: React.FC<RankingScreenProps> = ({ navigation }) => {
+  const { theme } = useTheme();
   const [activePeriod, setActivePeriod] = useState<RankingPeriod>('today');
   const [rankings, setRankings] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -158,30 +169,38 @@ const RankingScreen: React.FC<RankingScreenProps> = ({ navigation }) => {
   };
   
   const renderRankingTabs = () => {
+    const dynamicStyles = {
+      tabContainer: { backgroundColor: theme.background, borderBottomColor: theme.border },
+      tab: { backgroundColor: 'transparent' },
+      activeTab: { backgroundColor: theme.primary },
+      tabText: { color: theme.textSecondary },
+      activeTabText: { color: theme.background },
+    };
+
     return (
-      <View style={styles.tabContainer}>
+      <View style={[styles.tabContainer, dynamicStyles.tabContainer]}>
         <TouchableOpacity 
-          style={[styles.tab, activePeriod === 'today' && styles.activeTab]} 
+          style={[styles.tab, dynamicStyles.tab, activePeriod === 'today' && [styles.activeTab, dynamicStyles.activeTab]]} 
           onPress={() => handlePeriodChange('today')}
           disabled={loading}
         >
-          <Text style={[styles.tabText, activePeriod === 'today' && styles.activeTabText]}>Today</Text>
+          <Text style={[styles.tabText, dynamicStyles.tabText, activePeriod === 'today' && [styles.activeTabText, dynamicStyles.activeTabText]]}>Today</Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
-          style={[styles.tab, activePeriod === 'week' && styles.activeTab]} 
+          style={[styles.tab, dynamicStyles.tab, activePeriod === 'week' && [styles.activeTab, dynamicStyles.activeTab]]} 
           onPress={() => handlePeriodChange('week')}
           disabled={loading}
         >
-          <Text style={[styles.tabText, activePeriod === 'week' && styles.activeTabText]}>This Week</Text>
+          <Text style={[styles.tabText, dynamicStyles.tabText, activePeriod === 'week' && [styles.activeTabText, dynamicStyles.activeTabText]]}>This Week</Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
-          style={[styles.tab, activePeriod === 'month' && styles.activeTab]} 
+          style={[styles.tab, dynamicStyles.tab, activePeriod === 'month' && [styles.activeTab, dynamicStyles.activeTab]]} 
           onPress={() => handlePeriodChange('month')}
           disabled={loading}
         >
-          <Text style={[styles.tabText, activePeriod === 'month' && styles.activeTabText]}>This Month</Text>
+          <Text style={[styles.tabText, dynamicStyles.tabText, activePeriod === 'month' && [styles.activeTabText, dynamicStyles.activeTabText]]}>This Month</Text>
         </TouchableOpacity>
       </View>
     );
@@ -190,11 +209,21 @@ const RankingScreen: React.FC<RankingScreenProps> = ({ navigation }) => {
   const renderMyRanking = () => {
     if (!myRanking) return null;
     
+    const dynamicStyles = {
+      myRankingContainer: { backgroundColor: theme.background, borderBottomColor: theme.border },
+      myRankingTitle: { color: theme.textSecondary },
+      myRankingCard: { backgroundColor: theme.primary + '15', borderColor: theme.primary },
+      userName: { color: theme.text },
+      userLevel: { color: theme.textSecondary },
+      scoreText: { color: theme.primary },
+      scoreLabel: { color: theme.textTertiary },
+    };
+    
     return (
-      <View style={styles.myRankingContainer}>
-        <Text style={styles.myRankingTitle}>Your Ranking</Text>
-        <View style={styles.myRankingCard}>
-          <View style={[styles.rankContainer, styles.myRankBadge]}>
+      <View style={[styles.myRankingContainer, dynamicStyles.myRankingContainer]}>
+        <Text style={[styles.myRankingTitle, dynamicStyles.myRankingTitle]}>Your Ranking</Text>
+        <View style={[styles.myRankingCard, dynamicStyles.myRankingCard]}>
+          <View style={[styles.rankContainer, styles.myRankBadge, { backgroundColor: theme.primary }]}>
             <Text style={[styles.rankText, styles.topRankText]}>
               #{myRanking.rank}
             </Text>
@@ -203,13 +232,13 @@ const RankingScreen: React.FC<RankingScreenProps> = ({ navigation }) => {
           <Image source={{ uri: myRanking.avatar }} style={styles.avatar} />
           
           <View style={styles.userInfo}>
-            <Text style={styles.userName}>{myRanking.name}</Text>
-            <Text style={styles.userLevel}>{myRanking.level}</Text>
+            <Text style={[styles.userName, dynamicStyles.userName]}>{myRanking.name}</Text>
+            <Text style={[styles.userLevel, dynamicStyles.userLevel]}>{myRanking.level}</Text>
           </View>
           
           <View style={styles.scoreContainer}>
-            <Text style={styles.scoreText}>{formatScore(myRanking.score)}</Text>
-            <Text style={styles.scoreLabel}>talk time</Text>
+            <Text style={[styles.scoreText, dynamicStyles.scoreText]}>{formatScore(myRanking.score)}</Text>
+            <Text style={[styles.scoreLabel, dynamicStyles.scoreLabel]}>talk time</Text>
           </View>
         </View>
       </View>
@@ -217,29 +246,49 @@ const RankingScreen: React.FC<RankingScreenProps> = ({ navigation }) => {
   };
   
   const renderEmptyList = () => {
+    const dynamicStyles = {
+      emptyText: { color: theme.textSecondary },
+      emptySubtext: { color: theme.textTertiary },
+    };
+
     if (loading) {
       return (
         <View style={styles.emptyContainer}>
-          <ActivityIndicator size="large" color="#4A90E2" />
-          <Text style={styles.emptyText}>Loading rankings...</Text>
+          <ActivityIndicator size="large" color={theme.primary} />
+          <Text style={[styles.emptyText, dynamicStyles.emptyText]}>Loading rankings...</Text>
         </View>
       );
     }
     
     return (
       <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>No rankings available yet</Text>
-        <Text style={styles.emptySubtext}>
+        <Text style={[styles.emptyText, dynamicStyles.emptyText]}>No rankings available yet</Text>
+        <Text style={[styles.emptySubtext, dynamicStyles.emptySubtext]}>
           Start making calls to appear on the leaderboard!
         </Text>
       </View>
     );
   };
   
+  const dynamicStyles = {
+    container: { backgroundColor: theme.surface },
+    header: { borderBottomColor: theme.border, backgroundColor: theme.background },
+    title: { color: theme.text },
+    tabContainer: { backgroundColor: theme.background, borderBottomColor: theme.border },
+    tab: { backgroundColor: 'transparent' },
+    activeTab: { backgroundColor: theme.primary },
+    tabText: { color: theme.textSecondary },
+    activeTabText: { color: theme.background },
+    myRankingContainer: { backgroundColor: theme.background, borderBottomColor: theme.border },
+    myRankingTitle: { color: theme.textSecondary },
+    myRankingCard: { backgroundColor: theme.primary + '15', borderColor: theme.primary },
+    rankingItem: { backgroundColor: theme.card },
+  };
+
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Leaderboard</Text>
+    <SafeAreaView style={[styles.container, dynamicStyles.container]} edges={['top', 'left', 'right']}>
+      <View style={[styles.header, dynamicStyles.header]}>
+        <Text style={[styles.title, dynamicStyles.title]}>Leaderboard</Text>
       </View>
       
       {renderRankingTabs()}
@@ -249,7 +298,7 @@ const RankingScreen: React.FC<RankingScreenProps> = ({ navigation }) => {
         data={rankings}
         keyExtractor={(item) => item.id}
         renderItem={({ item, index }) => (
-          <RankingItem user={item} index={index} />
+          <RankingItem user={item} index={index} theme={theme} />
         )}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={renderEmptyList}
@@ -257,11 +306,12 @@ const RankingScreen: React.FC<RankingScreenProps> = ({ navigation }) => {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            colors={['#4A90E2']}
-            tintColor="#4A90E2"
+            colors={[theme.primary]}
+            tintColor={theme.primary}
           />
         }
         contentContainerStyle={rankings.length === 0 ? styles.emptyListContainer : undefined}
+        style={{ backgroundColor: theme.surface }}
       />
     </SafeAreaView>
   );
@@ -270,26 +320,20 @@ const RankingScreen: React.FC<RankingScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
   },
   header: {
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
-    backgroundColor: '#FFFFFF',
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#333333',
   },
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
   },
   tab: {
     flex: 1,
@@ -299,46 +343,36 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
   },
   activeTab: {
-    backgroundColor: '#4A90E2',
   },
   tabText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#666666',
   },
   activeTabText: {
-    color: '#FFFFFF',
   },
   myRankingContainer: {
-    backgroundColor: '#FFFFFF',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
   },
   myRankingTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#666666',
     marginBottom: 8,
   },
   myRankingCard: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
-    backgroundColor: '#F0F8FF',
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#4A90E2',
   },
   myRankBadge: {
-    backgroundColor: '#4A90E2',
   },
   rankingItem: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: '#FFFFFF',
     marginHorizontal: 16,
     marginTop: 12,
     borderRadius: 12,
@@ -386,11 +420,9 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333333',
   },
   userLevel: {
     fontSize: 12,
-    color: '#666666',
   },
   scoreContainer: {
     alignItems: 'flex-end',
@@ -398,11 +430,9 @@ const styles = StyleSheet.create({
   scoreText: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#4A90E2',
   },
   scoreLabel: {
     fontSize: 12,
-    color: '#999999',
   },
   emptyContainer: {
     flex: 1,
@@ -414,13 +444,11 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#666666',
     marginTop: 16,
     textAlign: 'center',
   },
   emptySubtext: {
     fontSize: 14,
-    color: '#999999',
     marginTop: 8,
     textAlign: 'center',
   },

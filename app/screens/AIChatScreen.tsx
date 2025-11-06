@@ -23,6 +23,7 @@ import { useAppDispatch, useAppSelector } from '../redux/hooks';
 import { sendAIMessage, fetchConversation } from '../redux/thunks/aiThunks';
 import { RootStackParamList } from '../navigation/types';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTheme } from '../context/ThemeContext';
 
 // Define types for the chat interface
 interface MessageProps {
@@ -66,15 +67,16 @@ interface AIState {
 }
 
 // Message component to display individual chat messages
-const MessageBubble: React.FC<MessageProps> = ({ message, isAI }) => {
+const MessageBubble: React.FC<MessageProps & { theme: any }> = ({ message, isAI, theme }) => {
   return (
     <View style={[
       styles.messageBubble,
+      isAI ? { backgroundColor: theme.card } : { backgroundColor: theme.primary },
       isAI ? styles.aiMessage : styles.userMessage
     ]}>
       <Text style={[
         styles.messageText,
-        isAI ? styles.aiMessageText : styles.userMessageText
+        isAI ? { color: theme.text } : { color: '#FFFFFF' }
       ]}>
         {message}
       </Text>
@@ -83,13 +85,13 @@ const MessageBubble: React.FC<MessageProps> = ({ message, isAI }) => {
 };
 
 // Typing indicator component
-const TypingIndicator: React.FC = () => {
+const TypingIndicator: React.FC<{ theme: any }> = ({ theme }) => {
   return (
-    <View style={[styles.messageBubble, styles.aiMessage, styles.typingIndicator]}>
+    <View style={[styles.messageBubble, { backgroundColor: theme.card }, styles.typingIndicator]}>
       <View style={styles.typingDots}>
-        <View style={styles.dot} />
-        <View style={styles.dot} />
-        <View style={styles.dot} />
+        <View style={[styles.dot, { backgroundColor: theme.textSecondary }]} />
+        <View style={[styles.dot, { backgroundColor: theme.textSecondary }]} />
+        <View style={[styles.dot, { backgroundColor: theme.textSecondary }]} />
       </View>
     </View>
   );
@@ -99,6 +101,7 @@ const AIChatScreen: React.FC = () => {
   const dispatch = useAppDispatch();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, 'AIChat'>>();
+  const { theme, isDark } = useTheme();
   const [message, setMessage] = useState('');
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
   const [topic, setTopic] = useState(route.params?.topic || 'general');
@@ -375,28 +378,28 @@ const AIChatScreen: React.FC = () => {
   // Render the Voice Chat UI
   const renderVoiceChatUI = () => {
     return (
-      <SafeAreaView style={[styles.voiceChatContainer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-        <StatusBar barStyle="dark-content" backgroundColor="#f0f0f7" />
+      <SafeAreaView style={[styles.voiceChatContainer, { backgroundColor: theme.surface, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={theme.background} />
         
         {/* Header */}
-        <View style={styles.voiceChatHeader}>
+        <View style={[styles.voiceChatHeader, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Icon name="arrow-back" size={24} color="#333" />
+            <Icon name="arrow-back" size={24} color={theme.text} />
           </TouchableOpacity>
-          <Text style={styles.voiceChatHeaderTitle}>{formatTopicTitle(topic)}</Text>
+          <Text style={[styles.voiceChatHeaderTitle, { color: theme.text }]}>{formatTopicTitle(topic)}</Text>
           <TouchableOpacity style={styles.settingsButton}>
-            <Icon name="settings-outline" size={24} color="#333" />
+            <Icon name="settings-outline" size={24} color={theme.text} />
           </TouchableOpacity>
         </View>
         
         {/* Progress Bar */}
         <View style={styles.progressBarContainer}>
-          <View style={styles.progressBar}>
-            <View style={styles.progressFilled} />
+          <View style={[styles.progressBar, { backgroundColor: theme.inputBackground }]}>
+            <View style={[styles.progressFilled, { backgroundColor: theme.success }]} />
           </View>
-          <TouchableOpacity style={styles.feedbackButton}>
-            <Text style={styles.feedbackText}>Feedback</Text>
-            <Icon name="lock-closed" size={12} color="#FFC107" />
+          <TouchableOpacity style={[styles.feedbackButton, { backgroundColor: theme.inputBackground }]}>
+            <Text style={[styles.feedbackText, { color: theme.textSecondary }]}>Feedback</Text>
+            <Icon name="lock-closed" size={12} color={theme.warning} />
           </TouchableOpacity>
         </View>
         
@@ -411,7 +414,7 @@ const AIChatScreen: React.FC = () => {
               {item.isUser && (
                 <>
                   <View style={[styles.voiceChatMessageHeader, styles.userMessageHeader]}>
-                    <Text style={styles.messageSender}>
+                    <Text style={[styles.messageSender, { color: theme.text }]}>
                       KOUSIK
                     </Text>
                     <Image 
@@ -420,15 +423,15 @@ const AIChatScreen: React.FC = () => {
                     />
                   </View>
                   
-                  <View style={[styles.voiceChatMessage, styles.voiceChatUserMessage]}>
-                    <Text style={styles.voiceChatMessageText}>{item.text}</Text>
+                  <View style={[styles.voiceChatMessage, { backgroundColor: theme.primary }]}>
+                    <Text style={[styles.voiceChatMessageText, { color: '#FFFFFF' }]}>{item.text}</Text>
                   </View>
                   
                   {/* Show "Well done" indicator if this message has a response */}
                   {hasCorrectResponse && index === voiceChatMessages.length - 2 && (
-                    <View style={styles.correctResponseContainer}>
-                      <Icon name="sunny" size={16} color="#FFC107" />
-                      <Text style={styles.correctResponseText}>Well done! Correct response</Text>
+                    <View style={[styles.correctResponseContainer, { backgroundColor: theme.success + '20' }]}>
+                      <Icon name="sunny" size={16} color={theme.warning} />
+                      <Text style={[styles.correctResponseText, { color: theme.success }]}>Well done! Correct response</Text>
                     </View>
                   )}
                 </>
@@ -442,25 +445,25 @@ const AIChatScreen: React.FC = () => {
                       source={{ uri: 'https://img.icons8.com/color/96/000000/robot.png' }} 
                       style={styles.messageAvatar}
                     />
-                    <Text style={styles.messageSender}>
+                    <Text style={[styles.messageSender, { color: theme.text }]}>
                       RAHA AI Teacher
                     </Text>
                     <View style={styles.aiControls}>
                       <TouchableOpacity>
-                        <Text style={styles.translateText}>ꜳ</Text>
+                        <Text style={[styles.translateText, { color: theme.primary }]}>ꜳ</Text>
                       </TouchableOpacity>
                       <TouchableOpacity onPress={() => setIsPaused(!isPaused)}>
-                        <Icon name={isPaused ? "play" : "pause"} size={20} color="#4A67FF" />
+                        <Icon name={isPaused ? "play" : "pause"} size={20} color={theme.primary} />
                       </TouchableOpacity>
                     </View>
                   </View>
                   
-                  <View style={[styles.voiceChatMessage, styles.voiceChatAIMessage]}>
-                    <Text style={styles.voiceChatMessageText}>{item.text}</Text>
+                  <View style={[styles.voiceChatMessage, { backgroundColor: theme.card }]}>
+                    <Text style={[styles.voiceChatMessageText, { color: theme.text }]}>{item.text}</Text>
                     {item.translation && (
                       <>
-                        <View style={styles.translationDivider} />
-                        <Text style={styles.translationText}>{item.translation}</Text>
+                        <View style={[styles.translationDivider, { backgroundColor: theme.border }]} />
+                        <Text style={[styles.translationText, { color: theme.textSecondary }]}>{item.translation}</Text>
                       </>
                     )}
                   </View>
@@ -482,14 +485,14 @@ const AIChatScreen: React.FC = () => {
         {/* Input area */}
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.voiceChatInputContainer}
+          style={[styles.voiceChatInputContainer, { backgroundColor: theme.card, borderTopColor: theme.border }]}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
-          <View style={styles.voiceChatInputWrapper}>
+          <View style={[styles.voiceChatInputWrapper, { backgroundColor: theme.inputBackground }]}>
             <TextInput
-              style={styles.voiceChatInput}
+              style={[styles.voiceChatInput, { color: theme.text }]}
               placeholder={isListening ? "Listening..." : "Type your message.."}
-              placeholderTextColor={isListening ? "#4A67FF" : "#999"}
+              placeholderTextColor={isListening ? theme.primary : theme.textTertiary}
               value={message}
               onChangeText={setMessage}
             />
@@ -500,8 +503,9 @@ const AIChatScreen: React.FC = () => {
               <Animated.View 
                 style={[
                   styles.sendIconButton, 
+                  { backgroundColor: theme.primary },
                   !message.trim() ? styles.disabledSendButton : null,
-                  isListening && !message.trim() ? styles.recordingButton : null,
+                  isListening && !message.trim() ? [styles.recordingButton, { backgroundColor: theme.error }] : null,
                   {transform: [{ scale: message.trim() ? 1 : micAnimation }]}
                 ]}
               >
@@ -516,14 +520,14 @@ const AIChatScreen: React.FC = () => {
           
           {/* Add recording instructions */}
           {isListening && !message.trim() && (
-            <View style={styles.recordingInstructions}>
+            <View style={[styles.recordingInstructions, { backgroundColor: theme.overlay }]}>
               <Text style={styles.recordingText}>Speak now... tap stop when finished</Text>
             </View>
           )}
           
           <TouchableOpacity style={styles.hintButton}>
-            <Icon name="sparkles-outline" size={24} color="#999" />
-            <Text style={styles.hintText}>Hint</Text>
+            <Icon name="sparkles-outline" size={24} color={theme.textTertiary} />
+            <Text style={[styles.hintText, { color: theme.textTertiary }]}>Hint</Text>
           </TouchableOpacity>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -533,22 +537,22 @@ const AIChatScreen: React.FC = () => {
   // Render the Text Chat UI
   const renderTextChatUI = () => {
     return (
-      <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
-        <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.surface, paddingTop: insets.top }]}>
+        <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={theme.background} />
         
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
           <TouchableOpacity 
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <Icon name="arrow-back" size={24} color="#333" />
+            <Icon name="arrow-back" size={24} color={theme.text} />
           </TouchableOpacity>
           
-          <Text style={styles.headerTitle}>Chat with RAHA AI</Text>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Chat with RAHA AI</Text>
           
           <TouchableOpacity style={styles.settingsButton}>
-            <Icon name="settings-outline" size={24} color="#333" />
+            <Icon name="settings-outline" size={24} color={theme.text} />
           </TouchableOpacity>
         </View>
         
@@ -563,10 +567,10 @@ const AIChatScreen: React.FC = () => {
             { paddingBottom: insets.bottom > 0 ? insets.bottom : 16 }
           ]}
           renderItem={({ item }) => (
-            <MessageBubble message={item.text} isAI={item.isAI} />
+            <MessageBubble message={item.text} isAI={item.isAI} theme={theme} />
           )}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-          ListFooterComponent={() => isTyping ? <TypingIndicator /> : null}
+          ListFooterComponent={() => isTyping ? <TypingIndicator theme={theme} /> : null}
         />
         
         {/* Input area */}
@@ -575,12 +579,13 @@ const AIChatScreen: React.FC = () => {
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
           style={[
             styles.inputContainer,
-            { paddingBottom: insets.bottom > 0 ? insets.bottom : 8 }
+            { backgroundColor: theme.card, borderTopColor: theme.border, paddingBottom: insets.bottom > 0 ? insets.bottom : 8 }
           ]}
         >
           <TextInput
-            style={styles.input}
+            style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text }]}
             placeholder="Type your message..."
+            placeholderTextColor={theme.textTertiary}
             value={message}
             onChangeText={setMessage}
             multiline
@@ -590,7 +595,8 @@ const AIChatScreen: React.FC = () => {
           <TouchableOpacity 
             style={[
               styles.sendButton,
-              (!message.trim() || loading) && styles.disabledButton
+              { backgroundColor: theme.primary },
+              (!message.trim() || loading) && { backgroundColor: theme.textTertiary, opacity: 0.5 }
             ]}
             onPress={() => handleSend()}
             disabled={!message.trim() || loading}
@@ -605,8 +611,8 @@ const AIChatScreen: React.FC = () => {
         
         {/* Error message if any */}
         {error && (
-          <View style={[styles.errorContainer, { marginBottom: insets.bottom > 0 ? insets.bottom : 16 }]}>
-            <Text style={styles.errorText}>{error}</Text>
+          <View style={[styles.errorContainer, { backgroundColor: theme.error + '20', marginBottom: insets.bottom > 0 ? insets.bottom : 16 }]}>
+            <Text style={[styles.errorText, { color: theme.error }]}>{error}</Text>
           </View>
         )}
       </SafeAreaView>
@@ -629,7 +635,6 @@ const styles = StyleSheet.create({
   // Text Chat UI styles
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
   },
   header: {
     flexDirection: 'row',
@@ -637,14 +642,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333333',
   },
   messageList: {
     flex: 1,
@@ -662,22 +664,14 @@ const styles = StyleSheet.create({
   },
   userMessage: {
     alignSelf: 'flex-end',
-    backgroundColor: '#4A90E2',
     borderTopRightRadius: 0,
   },
   aiMessage: {
     alignSelf: 'flex-start',
-    backgroundColor: '#E5E5EA',
     borderTopLeftRadius: 0,
   },
   messageText: {
     fontSize: 16,
-  },
-  userMessageText: {
-    color: '#FFFFFF',
-  },
-  aiMessageText: {
-    color: '#333333',
   },
   typingIndicator: {
     paddingHorizontal: 20,
@@ -693,7 +687,6 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#999',
     marginHorizontal: 3,
     opacity: 0.7,
   },
@@ -702,13 +695,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
   },
   input: {
     flex: 1,
-    backgroundColor: '#F0F0F0',
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 8,
@@ -717,31 +707,24 @@ const styles = StyleSheet.create({
   },
   sendButton: {
     marginLeft: 8,
-    backgroundColor: '#4A90E2',
     width: 40,
     height: 40,
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  disabledButton: {
-    backgroundColor: '#B0C4DE',
-  },
   errorContainer: {
-    backgroundColor: '#FFD2D2',
     padding: 8,
     margin: 16,
     borderRadius: 8,
   },
   errorText: {
-    color: '#D8000C',
     textAlign: 'center',
   },
 
   // Voice Chat UI styles
   voiceChatContainer: {
     flex: 1,
-    backgroundColor: '#f0f0f7',
   },
   voiceChatHeader: {
     flexDirection: 'row',
@@ -749,12 +732,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#f0f0f7',
+    borderBottomWidth: 1,
   },
   voiceChatHeaderTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
   },
   progressBarContainer: {
     flexDirection: 'row',
@@ -764,7 +746,6 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     height: 4,
-    backgroundColor: '#e0e0e0',
     borderRadius: 2,
     flex: 1,
     marginRight: 16,
@@ -772,20 +753,17 @@ const styles = StyleSheet.create({
   progressFilled: {
     height: '100%',
     width: '30%',
-    backgroundColor: '#4CAF50',
     borderRadius: 2,
   },
   feedbackButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.05)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 15,
   },
   feedbackText: {
     fontSize: 12,
-    color: '#666',
     marginRight: 4,
   },
   voiceChatMessageList: {
@@ -816,7 +794,6 @@ const styles = StyleSheet.create({
   messageSender: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#333',
   },
   aiControls: {
     flexDirection: 'row',
@@ -825,7 +802,6 @@ const styles = StyleSheet.create({
   },
   translateText: {
     fontSize: 18,
-    color: '#4A67FF',
     marginRight: 12,
   },
   voiceChatMessage: {
@@ -834,28 +810,23 @@ const styles = StyleSheet.create({
     maxWidth: '80%',
   },
   voiceChatUserMessage: {
-    backgroundColor: '#E6F0FF',
     alignSelf: 'flex-end',
     marginRight: 10,
   },
   voiceChatAIMessage: {
-    backgroundColor: '#ffffff',
     alignSelf: 'flex-start',
     marginLeft: 10,
   },
   voiceChatMessageText: {
     fontSize: 16,
-    color: '#333',
     lineHeight: 24,
   },
   translationDivider: {
     height: 1,
-    backgroundColor: '#e0e0e0',
     marginVertical: 12,
   },
   translationText: {
     fontSize: 14,
-    color: '#666',
     lineHeight: 20,
   },
   proTipContainer: {
@@ -882,15 +853,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: '#ffffff',
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
   },
   voiceChatInputWrapper: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
     borderRadius: 22,
     paddingLeft: 16,
   },
@@ -898,7 +866,6 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 44,
     fontSize: 16,
-    color: '#333',
   },
   sendButtonWrapper: {
     margin: 4,
@@ -907,12 +874,11 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#4A67FF',
     justifyContent: 'center',
     alignItems: 'center',
   },
   disabledSendButton: {
-    backgroundColor: '#4A67FF', // Keep same color for mic
+    // Keep same color for mic
   },
   hintButton: {
     flexDirection: 'row',
@@ -921,26 +887,22 @@ const styles = StyleSheet.create({
   },
   hintText: {
     fontSize: 14,
-    color: '#999',
     marginLeft: 4,
   },
   correctResponseContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'center',
-    backgroundColor: '#E8F5E9',
     padding: 8,
     borderRadius: 16,
     marginTop: 8,
     marginBottom: 16,
   },
   correctResponseText: {
-    color: '#2E7D32',
     fontSize: 14,
     marginLeft: 4,
   },
   recordingButton: {
-    backgroundColor: '#FF4A4A', // Red color when recording
     borderWidth: 4,
     borderColor: 'rgba(255, 74, 74, 0.3)',
   },
@@ -950,7 +912,6 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.7)',
     paddingVertical: 10,
   },
   recordingText: {

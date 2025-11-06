@@ -19,17 +19,24 @@ import Tts from 'react-native-tts';
 import { AICallScreenRouteProp } from '../navigation/types';
 import { translationService, SUPPORTED_LANGUAGES } from '../utils/libreTranslateService';
 import { APP_CONFIG } from '../utils/config';
+import { useTheme } from '../context/ThemeContext';
 
 const { width, height } = Dimensions.get('window');
 
 const AICallScreen = () => {
   const navigation = useNavigation();
   const route = useRoute<AICallScreenRouteProp>();
+  const { theme, isDark } = useTheme();
   
   // Logging route params for debugging
   console.log('AICallScreen.tsx received route params:', route.params);
   
   const { topic, level, id, name } = route.params;
+  
+  // Gradient colors based on theme
+  const gradientColors = isDark 
+    ? ['#1E0071', '#00BFFF'] // Dark gradient (original)
+    : ['#6B46C1', '#3B82F6']; // Light gradient (lighter purple to blue)
   
   const [callDuration, setCallDuration] = useState(0);
   const [isRobotSpeaking, setIsRobotSpeaking] = useState(true);
@@ -404,6 +411,7 @@ const AICallScreen = () => {
   const generateWaveform = () => {
     const bars = [];
     const count = 5;
+    const waveformColor = isDark ? '#00FFFF' : '#60A5FA'; // Cyan for dark, light blue for light
     
     for (let i = 0; i < count; i++) {
       const animatedHeight = audioAnimation.interpolate({
@@ -416,7 +424,7 @@ const AICallScreen = () => {
           key={i} 
           style={[
             styles.waveformBar,
-            { height: animatedHeight }
+            { height: animatedHeight, backgroundColor: waveformColor }
           ]} 
         />
       );
@@ -427,12 +435,12 @@ const AICallScreen = () => {
 
   return (
     <LinearGradient 
-      colors={['#1E0071', '#00BFFF']} 
+      colors={gradientColors} 
       style={styles.container}
       start={{x: 0, y: 0}}
       end={{x: 1, y: 1}}
     >
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar barStyle={isDark ? "light-content" : "light-content"} backgroundColor="transparent" translucent />
       
       {/* SafeArea wrapper */}
       <SafeAreaView style={styles.safeArea}>
@@ -454,7 +462,8 @@ const AICallScreen = () => {
           <View style={styles.speakerContainer}>
             <View style={[
               styles.avatarContainer,
-              isRobotSpeaking && !isPaused ? styles.activeSpeaker : {}
+              { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(255, 255, 255, 0.3)', borderColor: isDark ? 'rgba(255, 255, 255, 0.5)' : 'rgba(255, 255, 255, 0.6)' },
+              isRobotSpeaking && !isPaused ? { borderColor: isDark ? '#00FFFF' : '#60A5FA', borderWidth: 3, shadowColor: isDark ? '#00FFFF' : '#60A5FA' } : {}
             ]}>
               <Image 
                 source={{ uri: 'https://img.icons8.com/color/96/000000/robot.png' }} 
@@ -473,19 +482,20 @@ const AICallScreen = () => {
           
           {/* Center divider with or text */}
           <View style={styles.dividerContainer}>
-            <View style={styles.dividerLine} />
-            <View style={styles.orContainer}>
+            <View style={[styles.dividerLine, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.5)' }]} />
+            <View style={[styles.orContainer, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.2)' }]}>
               <Text style={styles.orText}>OR</Text>
             </View>
-            <View style={styles.dividerLine} />
+            <View style={[styles.dividerLine, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.5)' }]} />
           </View>
           
           {/* User avatar and info */}
           <View style={styles.speakerContainer}>
             <View style={[
               styles.avatarContainer,
-              !isRobotSpeaking && !isPaused ? styles.activeSpeaker : {},
-              isRecording ? styles.recordingActive : {}
+              { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(255, 255, 255, 0.3)', borderColor: isDark ? 'rgba(255, 255, 255, 0.5)' : 'rgba(255, 255, 255, 0.6)' },
+              !isRobotSpeaking && !isPaused ? { borderColor: isDark ? '#00FFFF' : '#60A5FA', borderWidth: 3, shadowColor: isDark ? '#00FFFF' : '#60A5FA' } : {},
+              isRecording ? { borderColor: '#FF4500', shadowColor: '#FF4500' } : {}
             ]}>
               <Image 
                 source={{ uri: 'https://randomuser.me/api/portraits/men/32.jpg' }} 
@@ -505,14 +515,15 @@ const AICallScreen = () => {
             <TouchableOpacity 
               style={[
                 styles.recordButton,
-                isRecording ? styles.recordingButton : {}
+                { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(255, 255, 255, 0.3)' },
+                isRecording ? { backgroundColor: '#FF4500' } : {}
               ]} 
               onPress={toggleRecording}
             >
               <Icon 
                 name={isRecording ? "stop-circle" : "mic"} 
                 size={28} 
-                color={isRecording ? "#fff" : "#fff"} 
+                color="#fff" 
               />
               <Text style={styles.recordButtonText}>
                 {isRecording ? "STOP" : "TAP TO SPEAK"}
@@ -523,11 +534,11 @@ const AICallScreen = () => {
         
         {/* Captions area */}
         {showCaptions && isRobotSpeaking && (
-          <View style={styles.captionContainer}>
+          <View style={[styles.captionContainer, { backgroundColor: isDark ? 'rgba(0, 0, 0, 0.6)' : 'rgba(0, 0, 0, 0.4)' }]}>
             <View style={styles.captionHeader}>
               <View style={styles.captionTitleContainer}>
-                <Icon name="chatbubble-ellipses-outline" size={18} color="#FFD700" />
-                <Text style={styles.captionTitle}>RAHA said:</Text>
+                <Icon name="chatbubble-ellipses-outline" size={18} color={theme.warning} />
+                <Text style={[styles.captionTitle, { color: theme.warning }]}>RAHA said:</Text>
               </View>
               <View style={styles.captionControls}>
                 {isTranslationServiceReady && (
@@ -535,7 +546,7 @@ const AICallScreen = () => {
                     <Icon 
                       name="language" 
                       size={18} 
-                      color={isTranslationEnabled ? "#FFD700" : "#999"} 
+                      color={isTranslationEnabled ? theme.warning : theme.textTertiary} 
                     />
                   </TouchableOpacity>
                 )}
@@ -550,15 +561,15 @@ const AICallScreen = () => {
             {isTranslationEnabled && currentTranslation && (
               <View style={styles.translationContainer}>
                 <View style={styles.translationHeader}>
-                  <Icon name="language" size={14} color="#4CAF50" />
-                  <Text style={styles.translationLabel}>
+                  <Icon name="language" size={14} color={theme.success} />
+                  <Text style={[styles.translationLabel, { color: theme.success }]}>
                     {translationService.getLanguageName(translationLanguage)}:
                   </Text>
                   {isTranslating && (
-                    <Icon name="refresh" size={14} color="#4CAF50" />
+                    <Icon name="refresh" size={14} color={theme.success} />
                   )}
                 </View>
-                <Text style={styles.translationText}>{currentTranslation}</Text>
+                <Text style={[styles.translationText, { color: theme.textSecondary }]}>{currentTranslation}</Text>
               </View>
             )}
           </View>
@@ -566,11 +577,11 @@ const AICallScreen = () => {
         
         {/* Hint modal */}
         {showHintModal && (
-          <View style={styles.hintContainer}>
+          <View style={[styles.hintContainer, { backgroundColor: isDark ? 'rgba(0, 0, 0, 0.6)' : 'rgba(0, 0, 0, 0.4)' }]}>
             <View style={styles.hintHeader}>
               <View style={styles.hintTitleContainer}>
-                <Icon name="bulb-outline" size={18} color="#FFD700" />
-                <Text style={styles.hintTitle}>HINT:</Text>
+                <Icon name="bulb-outline" size={18} color={theme.warning} />
+                <Text style={[styles.hintTitle, { color: theme.warning }]}>HINT:</Text>
               </View>
               <View style={styles.captionControls}>
                 {isTranslationServiceReady && (
@@ -578,7 +589,7 @@ const AICallScreen = () => {
                     <Icon 
                       name="language" 
                       size={18} 
-                      color={isTranslationEnabled ? "#FFD700" : "#999"} 
+                      color={isTranslationEnabled ? theme.warning : theme.textTertiary} 
                     />
                   </TouchableOpacity>
                 )}
@@ -593,15 +604,15 @@ const AICallScreen = () => {
             {isTranslationEnabled && translationHint && (
               <View style={styles.translationContainer}>
                 <View style={styles.translationHeader}>
-                  <Icon name="language" size={14} color="#4CAF50" />
-                  <Text style={styles.translationLabel}>
+                  <Icon name="language" size={14} color={theme.success} />
+                  <Text style={[styles.translationLabel, { color: theme.success }]}>
                     {translationService.getLanguageName(translationLanguage)}:
                   </Text>
                   {isTranslating && (
-                    <Icon name="refresh" size={14} color="#4CAF50" />
+                    <Icon name="refresh" size={14} color={theme.success} />
                   )}
                 </View>
-                <Text style={styles.translationText}>{translationHint}</Text>
+                <Text style={[styles.translationText, { color: theme.textSecondary }]}>{translationHint}</Text>
               </View>
             )}
           </View>
@@ -636,7 +647,7 @@ const AICallScreen = () => {
         ) : null}
         
         {/* Bottom control bar */}
-        <View style={styles.controlBar}>
+        <View style={[styles.controlBar, { backgroundColor: isDark ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.2)' }]}>
           <TouchableOpacity style={styles.controlButton} onPress={toggleHint}>
             <Icon name="bulb-outline" size={22} color="#fff" />
             <Text style={styles.controlText}>Hint</Text>
@@ -651,8 +662,8 @@ const AICallScreen = () => {
             style={styles.controlButton} 
             onPress={() => isTtsInitialized ? speakText(currentCaption) : null}
           >
-            <Icon name="volume-high-outline" size={22} color={isTtsInitialized ? "#fff" : "#666"} />
-            <Text style={[styles.controlText, {color: isTtsInitialized ? "#fff" : "#666"}]}>Speak</Text>
+            <Icon name="volume-high-outline" size={22} color={isTtsInitialized ? "#fff" : theme.textTertiary} />
+            <Text style={[styles.controlText, {color: isTtsInitialized ? "#fff" : theme.textTertiary}]}>Speak</Text>
           </TouchableOpacity>
           
           {isTranslationServiceReady && (
@@ -660,9 +671,9 @@ const AICallScreen = () => {
               <Icon 
                 name="language" 
                 size={22} 
-                color={isTranslationEnabled ? "#4CAF50" : "#666"} 
+                color={isTranslationEnabled ? theme.success : theme.textTertiary} 
               />
-              <Text style={[styles.controlText, {color: isTranslationEnabled ? "#4CAF50" : "#666"}]}>
+              <Text style={[styles.controlText, {color: isTranslationEnabled ? theme.success : theme.textTertiary}]}>
                 Translate
               </Text>
             </TouchableOpacity>
@@ -732,25 +743,14 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 10,
     borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
-  },
-  activeSpeaker: {
-    borderColor: '#00FFFF',
-    borderWidth: 3,
-    shadowColor: '#00FFFF',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.8,
     shadowRadius: 10,
     elevation: 10,
-  },
-  recordingActive: {
-    borderColor: '#FF4500',
-    shadowColor: '#FF4500',
   },
   avatarImage: {
     width: 70,
@@ -771,13 +771,11 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
   },
   orContainer: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
     marginHorizontal: 5,
@@ -795,7 +793,6 @@ const styles = StyleSheet.create({
   },
   waveformBar: {
     width: 4,
-    backgroundColor: '#00FFFF',
     borderRadius: 2,
   },
   recordingIndicator: {
@@ -812,13 +809,9 @@ const styles = StyleSheet.create({
   recordButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     borderRadius: 20,
     paddingVertical: 8,
     paddingHorizontal: 12,
-  },
-  recordingButton: {
-    backgroundColor: '#FF4500',
   },
   recordButtonText: {
     color: '#fff',
@@ -827,7 +820,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   captionContainer: {
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     margin: 16,
     borderRadius: 12,
     padding: 16,
@@ -842,7 +834,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   captionTitle: {
-    color: '#FFD700',
     fontWeight: 'bold',
     fontSize: 14,
     marginLeft: 6,
@@ -853,7 +844,6 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   hintContainer: {
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     margin: 16,
     borderRadius: 12,
     padding: 16,
@@ -868,7 +858,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   hintTitle: {
-    color: '#FFD700',
     fontWeight: 'bold',
     fontSize: 14,
     marginLeft: 6,
@@ -883,7 +872,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     alignItems: 'center',
     paddingVertical: 16,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
   },
   controlButton: {
     alignItems: 'center',
@@ -939,14 +927,12 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   translationLabel: {
-    color: '#4CAF50',
     fontSize: 12,
     fontWeight: 'bold',
     marginLeft: 4,
     marginRight: 4,
   },
   translationText: {
-    color: '#E0E0E0',
     fontSize: 15,
     lineHeight: 22,
     fontStyle: 'italic',

@@ -53,9 +53,8 @@ export const getAllUsers = async (): Promise<User[]> => {
       console.log('Current user ID from userId key:', currentUserId);
     }
     
-    // Construct URL for fetching users - IMPORTANT: Fix the URL
-    // The correct endpoint might be /api/auth/users or /api/users
-    const url = getApiUrl(`${API_ENDPOINTS.USER}s`); // Add 's' to make it /api/auth/users
+    // Construct URL for fetching users - Use the correct endpoint
+    const url = getApiUrl(`${API_URL}/auth/users`);
     console.log('Fetching users from:', url);
     console.log('Using token (first 10 chars):', token.substring(0, 10) + '...');
     
@@ -123,8 +122,8 @@ export const getAllUsers = async (): Promise<User[]> => {
 // Fallback function to try different API endpoint
 async function fetchUsersAlternate(token: string, currentUserId: string): Promise<User[]> {
   try {
-    // Try alternate endpoint
-    const alternateUrl = getApiUrl(`${API_URL}/users`);
+    // Try alternate endpoint - use the correct auth endpoint
+    const alternateUrl = getApiUrl(`${API_URL}/auth/users`);
     console.log('Trying alternate endpoint for users:', alternateUrl);
     
     const response = await fetch(alternateUrl, {

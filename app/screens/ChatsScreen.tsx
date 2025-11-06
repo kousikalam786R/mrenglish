@@ -23,6 +23,7 @@ import socketService from '../utils/socketService';
 import OnlineStatus from '../components/OnlineStatus';
 import simpleUserStatusService from '../services/simpleUserStatusService';
 import { useUserStatusService } from '../hooks/useUserStatus';
+import { useTheme } from '../context/ThemeContext';
 
 // Chat item component
 interface ChatItemProps {
@@ -31,7 +32,7 @@ interface ChatItemProps {
 }
 
 // Use memo to prevent unnecessary re-renders
-const ChatItem = memo<ChatItemProps>(({ chat, onPress }) => {
+const ChatItem = memo<ChatItemProps & { theme: any }>(({ chat, onPress, theme }) => {
   // Get user status from centralized service with subscription
   const [userStatus, setUserStatus] = useState(() => simpleUserStatusService.getUserStatus(chat._id));
 
@@ -123,9 +124,21 @@ const ChatItem = memo<ChatItemProps>(({ chat, onPress }) => {
   // Generate a unique key for the TouchableOpacity
   const itemKey = `chat-item-${chat._id}`;
   
+  const dynamicStyles = {
+    chatItem: { borderBottomColor: theme.divider },
+    avatarCircle: { backgroundColor: theme.primary },
+    onlineIndicator: { borderColor: theme.success },
+    avatarText: { color: theme.background },
+    chatName: { color: theme.text },
+    chatTime: { color: theme.textSecondary },
+    lastMessage: { color: theme.textSecondary },
+    unreadMessage: { color: theme.text },
+    unreadBadge: { backgroundColor: theme.primary },
+  };
+
   return (
     <TouchableOpacity 
-      style={styles.chatItem} 
+      style={[styles.chatItem, dynamicStyles.chatItem]} 
       onPress={onPress}
       key={itemKey}
       activeOpacity={0.7}
@@ -133,18 +146,18 @@ const ChatItem = memo<ChatItemProps>(({ chat, onPress }) => {
       {hasProfilePic ? (
         <Image 
           source={{ uri: chat.profilePic }} 
-          style={[styles.avatarCircle, chat.isOnline && styles.onlineIndicator]} 
+          style={[styles.avatarCircle, dynamicStyles.avatarCircle, chat.isOnline && [styles.onlineIndicator, dynamicStyles.onlineIndicator]]} 
         />
       ) : (
-        <View style={[styles.avatarCircle, chat.isOnline && styles.onlineIndicator]}>
-          <Text style={styles.avatarText}>{firstLetter}</Text>
+        <View style={[styles.avatarCircle, dynamicStyles.avatarCircle, chat.isOnline && [styles.onlineIndicator, dynamicStyles.onlineIndicator]]}>
+          <Text style={[styles.avatarText, dynamicStyles.avatarText]}>{firstLetter}</Text>
         </View>
       )}
       
       <View style={styles.chatContent}>
         <View style={styles.chatHeader}>
           <View style={styles.nameAndStatus}>
-            <Text style={styles.chatName}>{displayName}</Text>
+            <Text style={[styles.chatName, dynamicStyles.chatName]}>{displayName}</Text>
             <OnlineStatus 
               user={{
                 _id: chat._id,
@@ -163,14 +176,15 @@ const ChatItem = memo<ChatItemProps>(({ chat, onPress }) => {
               </Text>
             )} */}
           </View>
-          {lastMessageTime && <Text style={styles.chatTime}>{formatTime(lastMessageTime)}</Text>}
+          {lastMessageTime && <Text style={[styles.chatTime, dynamicStyles.chatTime]}>{formatTime(lastMessageTime)}</Text>}
         </View>
         
         <View style={styles.chatFooter}>
           <Text 
             style={[
               styles.lastMessage, 
-              chat.unreadCount > 0 ? styles.unreadMessage : null
+              dynamicStyles.lastMessage,
+              chat.unreadCount > 0 ? [styles.unreadMessage, dynamicStyles.unreadMessage] : null
             ]} 
             numberOfLines={1}
           >
@@ -178,7 +192,7 @@ const ChatItem = memo<ChatItemProps>(({ chat, onPress }) => {
           </Text>
           
           {chat.unreadCount > 0 && (
-            <View style={styles.unreadBadge}>
+            <View style={[styles.unreadBadge, dynamicStyles.unreadBadge]}>
               <Text style={styles.unreadText}>{chat.unreadCount}</Text>
             </View>
           )}
@@ -192,11 +206,11 @@ const ChatItem = memo<ChatItemProps>(({ chat, onPress }) => {
 ChatItem.displayName = 'ChatItem';
 
 // Chat list empty component
-const EmptyChats = memo(() => (
+const EmptyChats = memo(({ theme }: { theme: any }) => (
   <View style={styles.emptyContainer}>
-    <Icon name="chat-bubble-outline" size={60} color="#D1D1D1" />
-    <Text style={styles.emptyTitle}>No conversations yet</Text>
-    <Text style={styles.emptyText}>
+    <Icon name="chat-bubble-outline" size={60} color={theme.textTertiary} />
+    <Text style={[styles.emptyTitle, { color: theme.text }]}>No conversations yet</Text>
+    <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
       Start chatting with language partners to begin conversations.
     </Text>
   </View>
@@ -209,6 +223,7 @@ const ChatsScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const dispatch = useAppDispatch();
   const { recentChats, loading } = useAppSelector(state => state.message);
+  const { theme } = useTheme();
   
   // Initialize user status service
   const { isInitialized: statusServiceReady } = useUserStatusService();
@@ -345,9 +360,10 @@ const ChatsScreen = () => {
   const renderItem = useCallback(({ item }: { item: ChatUser }) => (
     <ChatItem 
       chat={item} 
-      onPress={() => handleChatPress(item)} 
+      onPress={() => handleChatPress(item)}
+      theme={theme}
     />
-  ), [handleChatPress]);
+  ), [handleChatPress, theme]);
   
   // Optimize list rendering
   const keyExtractor = useCallback((item: ChatUser) => item._id, []);
@@ -361,33 +377,43 @@ const ChatsScreen = () => {
     });
   }, [recentChats]);
   
+  const dynamicStyles = {
+    container: { backgroundColor: theme.background },
+    header: { borderBottomColor: theme.border, backgroundColor: theme.background },
+    headerTitle: { color: theme.text },
+    debugButton: { backgroundColor: theme.inputBackground },
+    newChatButton: { backgroundColor: theme.inputBackground },
+    loaderContainer: { backgroundColor: theme.background },
+    chatsList: { backgroundColor: theme.surface },
+  };
+
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Chats</Text>
+    <SafeAreaView style={[styles.container, dynamicStyles.container]} edges={['top', 'left', 'right']}>
+      <View style={[styles.header, dynamicStyles.header]}>
+        <Text style={[styles.headerTitle, dynamicStyles.headerTitle]}>Chats</Text>
         <View style={styles.headerActions}>
           {__DEV__ && (
-            <TouchableOpacity style={styles.debugButton} onPress={handleRefreshStatuses}>
-              <Icon name="refresh" size={20} color="#6A3DE8" />
+            <TouchableOpacity style={[styles.debugButton, dynamicStyles.debugButton]} onPress={handleRefreshStatuses}>
+              <Icon name="refresh" size={20} color={theme.primary} />
             </TouchableOpacity>
           )}
-          <TouchableOpacity style={styles.newChatButton} onPress={handleNewChat}>
-            <Icon name="edit" size={24} color="#6A3DE8" />
+          <TouchableOpacity style={[styles.newChatButton, dynamicStyles.newChatButton]} onPress={handleNewChat}>
+            <Icon name="edit" size={24} color={theme.primary} />
           </TouchableOpacity>
         </View>
       </View>
       
       {loading ? (
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color="#6A3DE8" />
+        <View style={[styles.loaderContainer, dynamicStyles.loaderContainer]}>
+          <ActivityIndicator size="large" color={theme.primary} />
         </View>
       ) : (
         <FlatList
           data={sortedChats}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
-          contentContainerStyle={styles.chatsList}
-          ListEmptyComponent={<EmptyChats />}
+          contentContainerStyle={[styles.chatsList, dynamicStyles.chatsList]}
+          ListEmptyComponent={<EmptyChats theme={theme} />}
           refreshing={loading}
           onRefresh={loadChats}
           initialNumToRender={10}
@@ -408,7 +434,6 @@ const ChatsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
   },
   header: {
     flexDirection: 'row',
@@ -417,12 +442,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#333333',
   },
   headerActions: {
     flexDirection: 'row',
@@ -431,13 +454,11 @@ const styles = StyleSheet.create({
   debugButton: {
     padding: 8,
     borderRadius: 20,
-    backgroundColor: '#F0F0F0',
     marginRight: 8,
   },
   newChatButton: {
     padding: 8,
     borderRadius: 20,
-    backgroundColor: '#F0F0F0',
   },
   chatsList: {
     flexGrow: 1,
@@ -452,25 +473,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
   },
   avatarCircle: {
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#6A3DE8',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
   onlineIndicator: {
     borderWidth: 2,
-    borderColor: '#4CAF50',
   },
   avatarText: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#FFFFFF',
   },
   chatContent: {
     flex: 1,
@@ -490,12 +507,10 @@ const styles = StyleSheet.create({
   chatName: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#333333',
     marginRight: 8,
   },
   chatTime: {
     fontSize: 12,
-    color: '#999999',
   },
   chatFooter: {
     flexDirection: 'row',
@@ -504,16 +519,13 @@ const styles = StyleSheet.create({
   },
   lastMessage: {
     fontSize: 14,
-    color: '#666666',
     flex: 1,
     marginRight: 8,
   },
   unreadMessage: {
     fontWeight: 'bold',
-    color: '#333333',
   },
   unreadBadge: {
-    backgroundColor: '#6A3DE8',
     minWidth: 20,
     height: 20,
     borderRadius: 10,
@@ -536,13 +548,11 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333333',
     marginTop: 16,
     marginBottom: 8,
   },
   emptyText: {
     fontSize: 16,
-    color: '#666666',
     textAlign: 'center',
     lineHeight: 22,
   },

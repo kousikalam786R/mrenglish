@@ -23,6 +23,7 @@ import { signOut } from '../redux/thunks/authThunks';
 import { fetchUserProfile } from '../redux/thunks/userThunks';
 import apiClient from '../utils/apiClient';
 import { RootStackParamList } from '../navigation/types';
+import { useTheme } from '../context/ThemeContext';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -30,6 +31,7 @@ const DeleteAccountScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const dispatch = useAppDispatch();
   const user = useAppSelector(state => state.user);
+  const { theme } = useTheme();
 
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -132,65 +134,103 @@ const DeleteAccountScreen = () => {
     setPasswordVisible(prev => !prev);
   }, []);
 
+  const dynamicStyles = {
+    safeArea: { backgroundColor: theme.background },
+    header: { backgroundColor: theme.background, borderBottomColor: theme.border },
+    headerButton: { backgroundColor: theme.primary + '15' },
+    headerTitle: { color: theme.text },
+    scrollView: { backgroundColor: theme.surface },
+    title: { color: theme.text },
+    bodyText: { color: theme.textSecondary },
+    loadingText: { color: theme.textSecondary },
+    warningIconWrapper: { backgroundColor: theme.error + '20' },
+    inputLabel: { color: theme.text },
+    inputWrapper: { backgroundColor: theme.inputBackground, borderColor: theme.inputBorder },
+    input: { color: theme.text },
+    footer: { backgroundColor: theme.background },
+    cancelButton: { borderColor: theme.border, backgroundColor: theme.background },
+    cancelText: { color: theme.text },
+    deleteButton: { backgroundColor: theme.error, shadowColor: theme.error },
+    modalOverlay: { backgroundColor: theme.overlay },
+    modalCard: { backgroundColor: theme.card },
+    modalTitle: { color: theme.text },
+    modalBody: { color: theme.textSecondary },
+    modalIconWrapper: { backgroundColor: theme.error + '20' },
+    modalCancelButton: { backgroundColor: theme.inputBackground },
+    modalCancelText: { color: theme.text },
+    modalDeleteButton: { backgroundColor: theme.error },
+    emailInfoBox: { backgroundColor: theme.primary + '15', borderColor: theme.primary + '30' },
+    emailInfoTitle: { color: theme.text },
+    emailInfoText: { color: theme.textSecondary },
+    emailAddressBox: { backgroundColor: theme.card, borderColor: theme.border },
+    emailAddressText: { color: theme.text },
+    emailSentTitle: { color: theme.text },
+    emailSentText: { color: theme.textSecondary },
+    emailHighlight: { color: theme.text },
+    emailSentNoteBox: { backgroundColor: theme.inputBackground, borderColor: theme.border },
+    emailSentNote: { color: theme.textSecondary },
+    resendButton: { backgroundColor: theme.primary, shadowColor: theme.primary },
+  };
+
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
+    <SafeAreaView style={[styles.safeArea, dynamicStyles.safeArea]} edges={['top', 'left', 'right', 'bottom']}>
       <KeyboardAvoidingView
-        style={styles.safeArea}
+        style={[styles.safeArea, dynamicStyles.safeArea]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.header}>
+        <View style={[styles.header, dynamicStyles.header]}>
           <TouchableOpacity
-            style={styles.headerButton}
+            style={[styles.headerButton, dynamicStyles.headerButton]}
             onPress={() => navigation.goBack()}
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
-            <Ionicons name="chevron-back" size={26} color="#2C2C47" />
+            <Ionicons name="chevron-back" size={26} color={theme.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Delete Account</Text>
+          <Text style={[styles.headerTitle, dynamicStyles.headerTitle]}>Delete Account</Text>
           <View style={styles.headerSpacer} />
         </View>
 
         <ScrollView 
-          style={styles.scrollView}
+          style={[styles.scrollView, dynamicStyles.scrollView]}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.content}>
-            <View style={styles.warningIconWrapper}>
-              <Ionicons name="warning-outline" size={40} color="#D64545" />
+            <View style={[styles.warningIconWrapper, dynamicStyles.warningIconWrapper]}>
+              <Ionicons name="warning-outline" size={40} color={theme.error} />
             </View>
-            <Text style={styles.title}>Delete Your Account?</Text>
-            <Text style={styles.bodyText}>
+            <Text style={[styles.title, dynamicStyles.title]}>Delete Your Account?</Text>
+            <Text style={[styles.bodyText, dynamicStyles.bodyText]}>
               All your data and progress will be permanently removed. This action cannot be undone.
             </Text>
 
             {loadingUser ? (
               <View style={styles.loadingContainer}>
-                <ActivityIndicator size="small" color="#4A90E2" />
-                <Text style={styles.loadingText}>Loading account information...</Text>
+                <ActivityIndicator size="small" color={theme.primary} />
+                <Text style={[styles.loadingText, dynamicStyles.loadingText]}>Loading account information...</Text>
               </View>
             ) : isGoogleUser ? (
               <View style={styles.emailFlowContainer}>
                 {emailSent ? (
                   <View style={styles.emailSentContainer}>
-                    <View style={styles.emailSentIconWrapper}>
-                      <Ionicons name="mail-outline" size={36} color="#4A90E2" />
+                    <View style={[styles.emailSentIconWrapper, { backgroundColor: theme.primary + '20', borderColor: theme.primary + '30' }]}>
+                      <Ionicons name="mail-outline" size={36} color={theme.primary} />
                     </View>
-                    <Text style={styles.emailSentTitle}>Check Your Email</Text>
-                    <Text style={styles.emailSentText}>
+                    <Text style={[styles.emailSentTitle, dynamicStyles.emailSentTitle]}>Check Your Email</Text>
+                    <Text style={[styles.emailSentText, dynamicStyles.emailSentText]}>
                       We've sent a confirmation link to{' '}
-                      <Text style={styles.emailHighlight}>{user?.email || 'your email address'}</Text>.
+                      <Text style={[styles.emailHighlight, dynamicStyles.emailHighlight]}>{user?.email || 'your email address'}</Text>.
                       Click the link in the email to permanently delete your account.
                     </Text>
-                    <View style={styles.emailSentNoteBox}>
-                      <Ionicons name="information-circle-outline" size={18} color="#6F6F89" style={styles.noteIcon} />
-                      <Text style={styles.emailSentNote}>
+                    <View style={[styles.emailSentNoteBox, dynamicStyles.emailSentNoteBox]}>
+                      <Ionicons name="information-circle-outline" size={18} color={theme.textSecondary} style={styles.noteIcon} />
+                      <Text style={[styles.emailSentNote, dynamicStyles.emailSentNote]}>
                         The link will expire in 24 hours. If you didn't receive the email, check your spam folder or request a new one below.
                       </Text>
                     </View>
                     <TouchableOpacity
-                      style={[styles.resendButton, submitting && styles.disabledButton]}
+                      style={[styles.resendButton, dynamicStyles.resendButton, submitting && styles.disabledButton]}
                       onPress={handleRequestEmailDeletion}
                       disabled={submitting}
                     >
@@ -206,18 +246,18 @@ const DeleteAccountScreen = () => {
                   </View>
                 ) : (
                   <View style={styles.emailInfoContainer}>
-                    <View style={styles.emailInfoBox}>
+                    <View style={[styles.emailInfoBox, dynamicStyles.emailInfoBox]}>
                       <View style={styles.emailInfoHeader}>
-                        <Ionicons name="mail-outline" size={24} color="#4A90E2" />
-                        <Text style={styles.emailInfoTitle}>Email Verification Required</Text>
+                        <Ionicons name="mail-outline" size={24} color={theme.primary} />
+                        <Text style={[styles.emailInfoTitle, dynamicStyles.emailInfoTitle]}>Email Verification Required</Text>
                       </View>
-                      <Text style={styles.emailInfoText}>
+                      <Text style={[styles.emailInfoText, dynamicStyles.emailInfoText]}>
                         Since you signed in with Google, we'll send a confirmation link to your email address to verify the deletion.
                       </Text>
                       {user?.email && (
-                        <View style={styles.emailAddressBox}>
-                          <Ionicons name="at-outline" size={16} color="#6F6F89" />
-                          <Text style={styles.emailAddressText}>{user.email}</Text>
+                        <View style={[styles.emailAddressBox, dynamicStyles.emailAddressBox]}>
+                          <Ionicons name="at-outline" size={16} color={theme.textSecondary} />
+                          <Text style={[styles.emailAddressText, dynamicStyles.emailAddressText]}>{user.email}</Text>
                         </View>
                       )}
                     </View>
@@ -226,17 +266,17 @@ const DeleteAccountScreen = () => {
               </View>
             ) : (
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Confirm with Password</Text>
-                <View style={styles.inputWrapper}>
-                  <Ionicons name="lock-closed" size={18} color="#A1A4B8" style={styles.inputIcon} />
+                <Text style={[styles.inputLabel, dynamicStyles.inputLabel]}>Confirm with Password</Text>
+                <View style={[styles.inputWrapper, dynamicStyles.inputWrapper]}>
+                  <Ionicons name="lock-closed" size={18} color={theme.textTertiary} style={styles.inputIcon} />
                   <TextInput
                     ref={passwordRef}
                     value={password}
                     onChangeText={setPassword}
                     secureTextEntry={!isPasswordVisible}
                     placeholder="Enter your password"
-                    placeholderTextColor="#B0B3C7"
-                    style={styles.input}
+                    placeholderTextColor={theme.textTertiary}
+                    style={[styles.input, dynamicStyles.input]}
                     autoCapitalize="none"
                     autoCorrect={false}
                     autoComplete="password"
@@ -256,7 +296,7 @@ const DeleteAccountScreen = () => {
                     <Ionicons
                       name={isPasswordVisible ? 'eye-outline' : 'eye-off-outline'}
                       size={20}
-                      color="#4A4A62"
+                      color={theme.textSecondary}
                     />
                   </TouchableOpacity>
                 </View>
@@ -266,16 +306,16 @@ const DeleteAccountScreen = () => {
         </ScrollView>
 
         {!emailSent && (
-          <View style={styles.footer}>
+          <View style={[styles.footer, dynamicStyles.footer]}>
             <TouchableOpacity
-              style={[styles.cancelButton, submitting && styles.disabledButton]}
+              style={[styles.cancelButton, dynamicStyles.cancelButton, submitting && styles.disabledButton]}
               onPress={() => navigation.goBack()}
               disabled={submitting}
             >
-              <Text style={styles.cancelText}>Cancel</Text>
+              <Text style={[styles.cancelText, dynamicStyles.cancelText]}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.deleteButton, submitting && styles.disabledButton]}
+              style={[styles.deleteButton, dynamicStyles.deleteButton, submitting && styles.disabledButton]}
               onPress={
                 isGoogleUser
                   ? handleRequestEmailDeletion
@@ -308,25 +348,25 @@ const DeleteAccountScreen = () => {
           animationType="fade"
           onRequestClose={() => setShowConfirmModal(false)}
         >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalIconWrapper}>
-              <Ionicons name="warning-outline" size={32} color="#D64545" />
+        <View style={[styles.modalOverlay, dynamicStyles.modalOverlay]}>
+          <View style={[styles.modalCard, dynamicStyles.modalCard]}>
+            <View style={[styles.modalIconWrapper, dynamicStyles.modalIconWrapper]}>
+              <Ionicons name="warning-outline" size={32} color={theme.error} />
             </View>
-            <Text style={styles.modalTitle}>Are you sure?</Text>
-            <Text style={styles.modalBody}>
+            <Text style={[styles.modalTitle, dynamicStyles.modalTitle]}>Are you sure?</Text>
+            <Text style={[styles.modalBody, dynamicStyles.modalBody]}>
               Deleting your account will remove your conversations, stats, and saved preferences. This action cannot be undone.
             </Text>
             <View style={styles.modalActions}>
               <TouchableOpacity
-                style={[styles.modalButton, styles.modalCancelButton]}
+                style={[styles.modalButton, styles.modalCancelButton, dynamicStyles.modalCancelButton]}
                 onPress={() => setShowConfirmModal(false)}
                 disabled={submitting}
               >
-                <Text style={styles.modalCancelText}>Keep Account</Text>
+                <Text style={[styles.modalCancelText, dynamicStyles.modalCancelText]}>Keep Account</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalButton, styles.modalDeleteButton, submitting && styles.disabledButton]}
+                style={[styles.modalButton, styles.modalDeleteButton, dynamicStyles.modalDeleteButton, submitting && styles.disabledButton]}
                 onPress={handleDelete}
                 disabled={submitting}
               >
@@ -348,7 +388,6 @@ const DeleteAccountScreen = () => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
   },
   header: {
     flexDirection: 'row',
@@ -356,8 +395,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#EDEDF4',
-    backgroundColor: '#FFFFFF',
   },
   headerButton: {
     width: 36,
@@ -365,14 +402,12 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#EEF3FF',
   },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
     fontSize: 20,
     fontWeight: '600',
-    color: '#2C2C47',
   },
   headerSpacer: {
     width: 36,
@@ -399,27 +434,23 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 12,
     fontSize: 14,
-    color: '#6F6F89',
   },
   warningIconWrapper: {
     width: 74,
     height: 74,
     borderRadius: 37,
     alignSelf: 'center',
-    backgroundColor: '#FDECEC',
     justifyContent: 'center',
     alignItems: 'center',
   },
   title: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#2C2C47',
     textAlign: 'center',
     marginTop: 24,
   },
   bodyText: {
     fontSize: 15,
-    color: '#6F6F89',
     textAlign: 'center',
     lineHeight: 22,
     marginTop: 12,
@@ -430,17 +461,14 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#2C2C47',
     marginBottom: 10,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F7F7FC',
     borderRadius: 14,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: '#ECECF4',
   },
   inputIcon: {
     marginRight: 10,
@@ -448,7 +476,6 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 16,
-    color: '#2C2C47',
     paddingVertical: Platform.OS === 'ios' ? 14 : 10,
   },
   visibilityButton: {
@@ -460,21 +487,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 28,
     paddingTop: 12,
-    backgroundColor: '#FFFFFF',
   },
   cancelButton: {
     flex: 1,
     marginRight: 12,
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: '#D5D7E3',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 16,
-    backgroundColor: '#FFFFFF',
   },
   cancelText: {
-    color: '#4A4A62',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -482,11 +505,9 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 12,
     borderRadius: 28,
-    backgroundColor: '#D64545',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 16,
-    shadowColor: '#D64545',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.3,
     shadowRadius: 12,
@@ -502,14 +523,12 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
   modalCard: {
     width: '100%',
-    backgroundColor: '#FFFFFF',
     borderRadius: 22,
     padding: 24,
     shadowColor: '#000000',
@@ -522,7 +541,6 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: '#FCEAEA',
     justifyContent: 'center',
     alignItems: 'center',
     alignSelf: 'center',
@@ -531,12 +549,10 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#2C2C47',
     textAlign: 'center',
   },
   modalBody: {
     fontSize: 15,
-    color: '#6F6F89',
     lineHeight: 22,
     textAlign: 'center',
     marginTop: 12,
@@ -554,15 +570,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalCancelButton: {
-    backgroundColor: '#F5F5F8',
     marginRight: 12,
   },
   modalDeleteButton: {
-    backgroundColor: '#D64545',
     marginLeft: 12,
   },
   modalCancelText: {
-    color: '#4A4A62',
     fontSize: 15,
     fontWeight: '600',
   },
@@ -580,11 +593,9 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   emailInfoBox: {
-    backgroundColor: '#EEF3FF',
     borderRadius: 16,
     padding: 20,
     borderWidth: 1,
-    borderColor: '#D6E4FF',
   },
   emailInfoHeader: {
     flexDirection: 'row',
@@ -594,27 +605,22 @@ const styles = StyleSheet.create({
   emailInfoTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#2C2C47',
     marginLeft: 10,
   },
   emailInfoText: {
     fontSize: 14,
     lineHeight: 20,
-    color: '#4A4A62',
     marginBottom: 16,
   },
   emailAddressBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
     borderRadius: 10,
     padding: 12,
     borderWidth: 1,
-    borderColor: '#D6E4FF',
   },
   emailAddressText: {
     fontSize: 14,
-    color: '#2C2C47',
     fontWeight: '500',
     marginLeft: 8,
     flex: 1,
@@ -627,23 +633,19 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: '#E8F4FD',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 24,
     borderWidth: 2,
-    borderColor: '#D6E4FF',
   },
   emailSentTitle: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#2C2C47',
     textAlign: 'center',
     marginBottom: 16,
   },
   emailSentText: {
     fontSize: 15,
-    color: '#4A4A62',
     lineHeight: 22,
     textAlign: 'center',
     marginBottom: 20,
@@ -651,17 +653,14 @@ const styles = StyleSheet.create({
   },
   emailHighlight: {
     fontWeight: '600',
-    color: '#2C2C47',
   },
   emailSentNoteBox: {
     flexDirection: 'row',
-    backgroundColor: '#F7F7FC',
     borderRadius: 12,
     padding: 16,
     marginBottom: 28,
     width: '100%',
     borderWidth: 1,
-    borderColor: '#ECECF4',
   },
   noteIcon: {
     marginRight: 10,
@@ -670,18 +669,15 @@ const styles = StyleSheet.create({
   emailSentNote: {
     flex: 1,
     fontSize: 13,
-    color: '#6F6F89',
     lineHeight: 18,
   },
   resendButton: {
     flexDirection: 'row',
-    backgroundColor: '#4A90E2',
     borderRadius: 18,
     paddingVertical: 14,
     paddingHorizontal: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#4A90E2',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,

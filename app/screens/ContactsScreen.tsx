@@ -22,6 +22,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { API_URL } from '../utils/config';
 import { getAuthToken } from '../utils/authUtils';
 import Toast from 'react-native-toast-message';
+import { useTheme } from '../context/ThemeContext';
 
 // Friend interface
 interface Friend {
@@ -78,17 +79,31 @@ const FriendItem = ({
   onPress,
   onCallPress,
   onMessagePress,
-  onRemovePress
+  onRemovePress,
+  theme
 }: { 
   friend: Friend; 
   onPress: () => void;
   onCallPress: () => void;
   onMessagePress: () => void;
   onRemovePress: () => void;
+  theme: any;
 }) => {
+  const dynamicStyles = {
+    contactItem: { backgroundColor: theme.card },
+    avatarCircle: { backgroundColor: theme.inputBackground },
+    avatarText: { color: theme.primary },
+    levelBadge: { backgroundColor: theme.background, borderColor: theme.primary },
+    levelText: { color: theme.primary },
+    contactName: { color: theme.text },
+    lastInteraction: { color: theme.textSecondary },
+    removeButton: { borderColor: theme.border, backgroundColor: theme.background },
+    removeButtonText: { color: theme.text },
+  };
+
   return (
     <TouchableOpacity 
-      style={styles.contactItem} 
+      style={[styles.contactItem, dynamicStyles.contactItem]} 
       onPress={onPress}
     >
       <View style={styles.avatarContainer}>
@@ -98,29 +113,29 @@ const FriendItem = ({
             style={styles.avatar} 
           />
         ) : (
-          <View style={styles.avatarCircle}>
-            <Text style={styles.avatarText}>{friend.name.charAt(0)}</Text>
+          <View style={[styles.avatarCircle, dynamicStyles.avatarCircle]}>
+            <Text style={[styles.avatarText, dynamicStyles.avatarText]}>{friend.name.charAt(0)}</Text>
           </View>
         )}
         {friend.level && (
-          <View style={styles.levelBadge}>
-            <Text style={styles.levelText}>{friend.level}</Text>
+          <View style={[styles.levelBadge, dynamicStyles.levelBadge]}>
+            <Text style={[styles.levelText, dynamicStyles.levelText]}>{friend.level}</Text>
           </View>
         )}
       </View>
       
       <View style={styles.contactInfo}>
-        <Text style={styles.contactName}>{friend.name}</Text>
+        <Text style={[styles.contactName, dynamicStyles.contactName]}>{friend.name}</Text>
         {friend.country && (
-          <Text style={styles.lastInteraction}>{friend.country}</Text>
+          <Text style={[styles.lastInteraction, dynamicStyles.lastInteraction]}>{friend.country}</Text>
         )}
       </View>
       
       <TouchableOpacity 
-        style={styles.removeButton} 
+        style={[styles.removeButton, dynamicStyles.removeButton]} 
         onPress={onRemovePress}
       >
-        <Text style={styles.removeButtonText}>Remove</Text>
+        <Text style={[styles.removeButtonText, dynamicStyles.removeButtonText]}>Remove</Text>
       </TouchableOpacity>
     </TouchableOpacity>
   );
@@ -131,33 +146,44 @@ const CallItem = ({
   call, 
   onPress,
   onCallPress,
+  theme
 }: { 
   call: CallHistoryItem; 
   onPress: () => void;
   onCallPress: () => void;
+  theme: any;
 }) => {
+  const dynamicStyles = {
+    contactItem: { backgroundColor: theme.card },
+    avatarCircle: { backgroundColor: theme.inputBackground },
+    avatarText: { color: theme.primary },
+    contactName: { color: theme.text },
+    lastInteraction: { color: theme.textSecondary },
+    durationText: { color: theme.text },
+  };
+
   return (
     <TouchableOpacity 
-      style={styles.contactItem} 
+      style={[styles.contactItem, dynamicStyles.contactItem]} 
       onPress={onPress}
     >
-      <View style={styles.avatarCircle}>
-        <Text style={styles.avatarText}>{call.userName.charAt(0)}</Text>
+      <View style={[styles.avatarCircle, dynamicStyles.avatarCircle]}>
+        <Text style={[styles.avatarText, dynamicStyles.avatarText]}>{call.userName.charAt(0)}</Text>
       </View>
       
       <View style={styles.contactInfo}>
-        <Text style={styles.contactName}>{call.userName}</Text>
-        <Text style={styles.lastInteraction}>{formatDate(call.timestamp)}</Text>
+        <Text style={[styles.contactName, dynamicStyles.contactName]}>{call.userName}</Text>
+        <Text style={[styles.lastInteraction, dynamicStyles.lastInteraction]}>{formatDate(call.timestamp)}</Text>
       </View>
       
       <View style={styles.callInfo}>
         <Icon 
           name={call.wasVideoCall ? "videocam" : "call"} 
           size={16} 
-          color="#4A90E2" 
+          color={theme.primary} 
           style={styles.callIcon}
         />
-        <Text style={styles.durationText}>{formatDuration(call.duration)}</Text>
+        <Text style={[styles.durationText, dynamicStyles.durationText]}>{formatDuration(call.duration)}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -165,6 +191,7 @@ const CallItem = ({
 
 // Main component
 const ContactsScreen = () => {
+  const { theme, isDark } = useTheme();
   const [activeTab, setActiveTab] = useState<ContactTab>('calls');
   const [friends, setFriends] = useState<Friend[]>([]);
   const [blockedUsers, setBlockedUsers] = useState<Friend[]>([]);
@@ -225,27 +252,34 @@ const ContactsScreen = () => {
   
   // Simple tab navigation
   const renderTabs = () => {
+    const dynamicStyles = {
+      tabContainer: { backgroundColor: theme.background, borderBottomColor: theme.border },
+      activeTab: { borderBottomColor: theme.primary },
+      tabText: { color: theme.textTertiary },
+      activeTabText: { color: theme.primary },
+    };
+
     return (
-      <View style={styles.tabContainer}>
+      <View style={[styles.tabContainer, dynamicStyles.tabContainer]}>
         <TouchableOpacity 
-          style={[styles.tab, activeTab === 'calls' && styles.activeTab]} 
+          style={[styles.tab, activeTab === 'calls' && [styles.activeTab, dynamicStyles.activeTab]]} 
           onPress={() => setActiveTab('calls')}
         >
-          <Text style={[styles.tabText, activeTab === 'calls' && styles.activeTabText]}>Calls</Text>
+          <Text style={[styles.tabText, dynamicStyles.tabText, activeTab === 'calls' && [styles.activeTabText, dynamicStyles.activeTabText]]}>Calls</Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
-          style={[styles.tab, activeTab === 'friends' && styles.activeTab]} 
+          style={[styles.tab, activeTab === 'friends' && [styles.activeTab, dynamicStyles.activeTab]]} 
           onPress={() => setActiveTab('friends')}
         >
-          <Text style={[styles.tabText, activeTab === 'friends' && styles.activeTabText]}>Friends</Text>
+          <Text style={[styles.tabText, dynamicStyles.tabText, activeTab === 'friends' && [styles.activeTabText, dynamicStyles.activeTabText]]}>Friends</Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
-          style={[styles.tab, activeTab === 'blocked' && styles.activeTab]} 
+          style={[styles.tab, activeTab === 'blocked' && [styles.activeTab, dynamicStyles.activeTab]]} 
           onPress={() => setActiveTab('blocked')}
         >
-          <Text style={[styles.tabText, activeTab === 'blocked' && styles.activeTabText]}>Blocked</Text>
+          <Text style={[styles.tabText, dynamicStyles.tabText, activeTab === 'blocked' && [styles.activeTabText, dynamicStyles.activeTabText]]}>Blocked</Text>
         </TouchableOpacity>
       </View>
     );
@@ -281,18 +315,22 @@ const ContactsScreen = () => {
   
   // Simple empty state component
   const EmptyList = () => {
+    const dynamicStyles = {
+      emptyText: { color: theme.textSecondary },
+    };
+
     if (loading) {
       return (
         <View style={styles.emptyContainer}>
-          <ActivityIndicator size="large" color="#673AB7" />
-          <Text style={[styles.emptyText, { marginTop: 16 }]}>Loading...</Text>
+          <ActivityIndicator size="large" color={theme.primary} />
+          <Text style={[styles.emptyText, dynamicStyles.emptyText, { marginTop: 16 }]}>Loading...</Text>
         </View>
       );
     }
     
     return (
       <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>{getEmptyMessage()}</Text>
+        <Text style={[styles.emptyText, dynamicStyles.emptyText]}>{getEmptyMessage()}</Text>
       </View>
     );
   };
@@ -362,7 +400,7 @@ const ContactsScreen = () => {
   // Handle unblock user
   const handleUnblockUser = async (user: Friend) => {
     try {
-      // First, sync with backend API
+      // First, sync with backend API - ONLY update frontend if API call succeeds
       const token = await getAuthToken();
       const response = await fetch(`${API_URL}/auth/users/${user._id}/block`, {
         method: 'POST',
@@ -378,28 +416,34 @@ const ContactsScreen = () => {
         throw new Error(errorData.message || 'Failed to unblock user');
       }
       
-      // Then update local storage
-      const blockedUsersString = await AsyncStorage.getItem('blockedUsers');
-      if (!blockedUsersString) return;
-      
-      const blockedUsers = JSON.parse(blockedUsersString);
-      // Remove the user from blocked list
-      const updatedBlockedUsers = blockedUsers.filter((item: Friend) => item._id !== user._id);
-      
-      // Save updated blocked users back to AsyncStorage
-      await AsyncStorage.setItem('blockedUsers', JSON.stringify(updatedBlockedUsers));
-      
-      // Update state
-      setBlockedUsers(updatedBlockedUsers);
-      
-      // Notify user with toast
-      Toast.show({
-        type: 'success',
-        text1: 'Unblocked',
-        text2: `${user.name} has been unblocked`,
-        position: 'top',
-        visibilityTime: 3000,
-      });
+      // Only update frontend if API call was successful
+      const responseData = await response.json();
+      if (responseData.success) {
+        // Update local storage
+        const blockedUsersString = await AsyncStorage.getItem('blockedUsers');
+        if (!blockedUsersString) return;
+        
+        const blockedUsers = JSON.parse(blockedUsersString);
+        // Remove the user from blocked list
+        const updatedBlockedUsers = blockedUsers.filter((item: Friend) => item._id !== user._id);
+        
+        // Save updated blocked users back to AsyncStorage
+        await AsyncStorage.setItem('blockedUsers', JSON.stringify(updatedBlockedUsers));
+        
+        // Update state
+        setBlockedUsers(updatedBlockedUsers);
+        
+        // Notify user with toast
+        Toast.show({
+          type: 'success',
+          text1: 'Unblocked',
+          text2: `${user.name} has been unblocked`,
+          position: 'top',
+          visibilityTime: 3000,
+        });
+      } else {
+        throw new Error(responseData.message || 'Failed to unblock user');
+      }
     } catch (error: any) {
       console.error('Error unblocking user:', error);
       Toast.show({
@@ -420,6 +464,7 @@ const ContactsScreen = () => {
           call={item as CallHistoryItem}
           onPress={() => handleContactPress(item)}
           onCallPress={() => handleCallPress(item)}
+          theme={theme}
         />
       );
     } else if (activeTab === 'friends') {
@@ -430,6 +475,7 @@ const ContactsScreen = () => {
           onCallPress={() => handleCallPress(item)}
           onMessagePress={() => handleMessagePress(item)}
           onRemovePress={() => handleRemoveFriend(item as Friend)}
+          theme={theme}
         />
       );
     } else {
@@ -441,6 +487,7 @@ const ContactsScreen = () => {
           onCallPress={() => handleCallPress(item)}
           onMessagePress={() => handleMessagePress(item)}
           onRemovePress={() => handleUnblockUser(item as Friend)}
+          theme={theme}
         />
       );
     }
@@ -470,25 +517,33 @@ const ContactsScreen = () => {
     // Convert to array for FlatList
     return Object.entries(groupedCalls).map(([date, calls]) => (
       <View key={date}>
-        <Text style={styles.dateHeader}>{date}</Text>
+        <Text style={[styles.dateHeader, { backgroundColor: theme.surface, color: theme.text }]}>{date}</Text>
         {calls.map((call, index) => (
           <CallItem
             key={`${call.userId}-${call.timestamp}-${index}`}
             call={call}
             onPress={() => handleContactPress(call)}
             onCallPress={() => handleCallPress(call)}
+            theme={theme}
           />
         ))}
       </View>
     ));
   };
   
+  const dynamicStyles = {
+    container: { backgroundColor: theme.background },
+    header: { borderBottomColor: theme.border, backgroundColor: theme.background },
+    title: { color: theme.text },
+    dateHeader: { backgroundColor: theme.surface, color: theme.text },
+  };
+
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+    <SafeAreaView style={[styles.container, dynamicStyles.container]} edges={['top', 'left', 'right']}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={theme.background} />
       
-      <View style={styles.header}>
-        <Text style={styles.title}>Contacts</Text>
+      <View style={[styles.header, dynamicStyles.header]}>
+        <Text style={[styles.title, dynamicStyles.title]}>Contacts</Text>
       </View>
       
       {renderTabs()}
@@ -499,6 +554,7 @@ const ContactsScreen = () => {
           ListHeaderComponent={renderCallsByDate}
           renderItem={null}
           keyExtractor={() => 'dummy'}
+          style={{ backgroundColor: theme.surface }}
         />
       ) : (
         <FlatList
@@ -511,6 +567,7 @@ const ContactsScreen = () => {
           }}
           renderItem={renderItem}
           ListEmptyComponent={<EmptyList />}
+          style={{ backgroundColor: theme.surface }}
         />
       )}
     </SafeAreaView>
@@ -520,26 +577,20 @@ const ContactsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
   },
   header: {
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
-    backgroundColor: '#FFFFFF',
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#333333',
   },
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
   },
   tab: {
     flex: 1,
@@ -549,29 +600,24 @@ const styles = StyleSheet.create({
     borderBottomColor: 'transparent',
   },
   activeTab: {
-    borderBottomColor: '#673AB7',
     backgroundColor: 'transparent',
   },
   tabText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#999999',
   },
   activeTabText: {
-    color: '#673AB7',
     fontWeight: 'bold',
   },
   dateHeader: {
     fontSize: 16,
     fontWeight: 'bold',
-    backgroundColor: '#F5F5F5',
     paddingHorizontal: 16,
     paddingVertical: 8,
     marginTop: 8,
   },
   contactItem: {
     flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
     padding: 16,
     marginHorizontal: 16,
     marginTop: 12,
@@ -595,32 +641,27 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#E0E0E0',
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarText: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#673AB7',
   },
   levelBadge: {
     position: 'absolute',
     bottom: -5,
     right: -5,
-    backgroundColor: 'white',
     borderRadius: 10,
     width: 24,
     height: 24,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#673AB7',
   },
   levelText: {
     fontSize: 10,
     fontWeight: 'bold',
-    color: '#673AB7',
   },
   contactInfo: {
     flex: 1,
@@ -629,11 +670,9 @@ const styles = StyleSheet.create({
   contactName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333333',
   },
   lastInteraction: {
     fontSize: 12,
-    color: '#666666',
     marginTop: 4,
   },
   callInfo: {
@@ -645,7 +684,6 @@ const styles = StyleSheet.create({
   },
   durationText: {
     fontSize: 14,
-    color: '#333333',
     fontWeight: '500',
   },
   actionButtons: {
@@ -682,16 +720,13 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#666666',
     textAlign: 'center',
   },
   removeButton: {
-    backgroundColor: 'white',
     paddingHorizontal: 15,
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
     marginLeft: 8,
     elevation: 1,
     shadowColor: '#000',
@@ -700,7 +735,6 @@ const styles = StyleSheet.create({
     shadowRadius: 1,
   },
   removeButtonText: {
-    color: '#333333',
     fontSize: 14,
     fontWeight: '600',
   },

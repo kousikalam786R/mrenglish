@@ -87,7 +87,7 @@ class SimpleUserStatusService {
   private setupSocketListeners(): void {
     console.log('🔧 SimpleUserStatusService: Setting up socket listeners...');
 
-    // Listen for user status updates
+    // Listen for user status updates (single user)
     socketService.socketOn('user-status', (data: any) => {
       console.log('📡 SimpleUserStatusService: Received user-status event:', data);
       
@@ -108,6 +108,23 @@ class SimpleUserStatusService {
       
       console.log('📡 SimpleUserStatusService: Processed user status data:', userStatusData);
       this.updateUserStatus(userStatusData);
+    });
+
+    // Listen for bulk user status updates (multiple users at once)
+    socketService.socketOn('bulk-user-statuses', (data: any) => {
+      console.log(`📡 SimpleUserStatusService: Received bulk status for ${data.statuses?.length || 0} users`);
+      
+      if (data.statuses && Array.isArray(data.statuses)) {
+        data.statuses.forEach((statusData: any) => {
+          const userStatusData: UserStatusUpdate = {
+            userId: statusData.userId,
+            isOnline: statusData.status === 'online',
+            lastSeenAt: statusData.lastSeen ? new Date(statusData.lastSeen).toISOString() : undefined
+          };
+          this.updateUserStatus(userStatusData);
+        });
+        console.log(`✅ SimpleUserStatusService: Updated ${data.statuses.length} user statuses from bulk response`);
+      }
     });
 
     // Listen for typing indicators
@@ -167,19 +184,32 @@ class SimpleUserStatusService {
   }
 
   /**
-   * Request status for all users we're tracking
+   * Request status for all users we're tracking (bulk request)
    */
   private requestAllUserStatuses(): void {
-    console.log('📡 SimpleUserStatusService: Requesting status for all tracked users');
-    
+    const socket = socketService.getSocket();
+    if (!socket || !socket.connected) {
+      console.log('📡 SimpleUserStatusService: Socket not connected, cannot request bulk status');
+      return;
+    }
+
+    // Collect all user IDs we're tracking (excluding current user)
+    const userIds: string[] = [];
     this.userStatuses.forEach((status, userId) => {
       if (userId !== this.currentUserId) {
-        const socket = socketService.getSocket();
-        if (socket && socket.connected) {
-          socket.emit('get-user-status', { userId });
-        }
+        userIds.push(userId);
       }
     });
+
+    if (userIds.length === 0) {
+      console.log('📡 SimpleUserStatusService: No users to track');
+      return;
+    }
+
+    console.log(`📡 SimpleUserStatusService: Requesting bulk status for ${userIds.length} users`);
+    
+    // Request bulk status for all users at once
+    socket.emit('get-bulk-user-statuses', { userIds });
   }
 
   /**
@@ -188,19 +218,19 @@ class SimpleUserStatusService {
   private refreshAllUserStatuses(): void {
     console.log('🔄 SimpleUserStatusService: Force refreshing all user statuses');
     
+    // Reset all statuses to unknown
     this.userStatuses.forEach((status, userId) => {
       if (userId !== this.currentUserId) {
-        // Reset status to unknown and request fresh status
         this.userStatuses.set(userId, {
           ...status,
           isOnline: false,
           lastSeenAt: undefined
         });
-        
-        // Request fresh status
-        this.requestUserStatus(userId);
       }
     });
+    
+    // Request bulk status for all users at once
+    this.requestAllUserStatuses();
     
     // Notify callbacks of the refresh
     this.notifyStatusUpdate();
