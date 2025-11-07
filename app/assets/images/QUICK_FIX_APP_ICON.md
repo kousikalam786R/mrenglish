@@ -143,3 +143,4 @@ If after following these steps it's still small:
 4. Compare with other app icons to ensure yours matches in size
 
 
+

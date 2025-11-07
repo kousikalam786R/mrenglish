@@ -1,8 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import axios from 'axios';
+import apiClient from './apiClient';
 import { API_ENDPOINTS, API_URL, DIRECT_IP, DEV } from './config';
 import { getAuthToken } from './authUtils';
-import axios from 'axios';
+import {
+  uploadImageToImageKit,
+  UploadImageParams,
+} from './imageKitService';
 
 // Declare the global property for TypeScript
 declare global {
@@ -71,6 +76,8 @@ export interface UserProfile {
   name?: string;
   email?: string;
   profilePic?: string;
+  profilePicFileId?: string | null;
+  profilePicThumbnail?: string | null;
   level?: string;
   points?: number;
   streak?: number;
@@ -374,77 +381,58 @@ export const updateUserProfile = async (profileData: Partial<UserProfile>): Prom
 /**
  * Update user profile picture
  */
-export const updateProfilePicture = async (imageUri: string): Promise<UserProfile | null> => {
+type ProfilePictureInput = string | UploadImageParams;
+
+const normalizeProfilePictureInput = (input: ProfilePictureInput): UploadImageParams => {
+  if (typeof input === 'string') {
+    return { uri: input };
+  }
+
+  return input;
+};
+
+export const updateProfilePicture = async (
+  image: ProfilePictureInput
+): Promise<UserProfile | null> => {
   try {
-    const token = await getAuthToken();
-    if (!token) {
-      console.error('No token found for profile picture update');
+    const uploadParams = normalizeProfilePictureInput(image);
+
+    if (!uploadParams?.uri) {
+      console.error('Invalid image provided for profile picture update');
       return null;
     }
-    
-    // Create form data for image upload
-    const formData = new FormData();
-    formData.append('profilePic', {
-      uri: imageUri,
-      type: 'image/jpeg',
-      name: 'profile.jpg'
-    } as any);
-    
-    // Use the correct API endpoint with /profile-picture suffix
-    const url = getApiUrl(`${API_ENDPOINTS.USER}/profile-picture`);
-    console.log('Updating profile picture at:', url);
-    
-    // Add timeout to prevent hanging requests - longer timeout for image upload
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout for image uploads
-    
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data'
-        },
-        body: formData,
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Error updating profile picture:', errorText);
-        return null;
-      }
-      
-      const data = await response.json();
-      
-      // Update local storage with new profile picture
+
+    const uploadResult = await uploadImageToImageKit(uploadParams, {
+      tags: ['profile-picture'],
+      useUniqueFileName: true,
+    });
+
+    const response = await apiClient.post('/profile/profile-picture', {
+      fileId: uploadResult.fileId,
+      url: uploadResult.url,
+      thumbnailUrl: uploadResult.thumbnailUrl,
+    });
+
+    if (!response.data?.success) {
+      console.error(
+        'Error updating profile picture metadata:',
+        response.data?.message
+      );
+      return null;
+    }
+
+    const updatedUser = response.data.user || response.data;
+
+    if (updatedUser) {
       try {
-        const userJson = await AsyncStorage.getItem('user');
-        if (userJson) {
-          const user = JSON.parse(userJson);
-          const updatedUser = { ...user, profilePic: data.profilePic || data.user?.profilePic };
-          await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
-        }
+        await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
       } catch (storageError) {
         console.error('Error updating local profile picture:', storageError);
       }
-      
-      return data.user || data;
-    } catch (fetchError: any) {
-      clearTimeout(timeoutId);
-      
-      // Check if it's a timeout/network error
-      if (fetchError.name === 'AbortError') {
-        console.error('Request timed out when uploading profile picture');
-      } else {
-        console.error('Fetch error during profile picture upload:', fetchError);
-      }
-      
-      return null;
     }
-  } catch (error) {
+
+    return updatedUser || null;
+  } catch (error: any) {
     console.error('Error updating profile picture:', error);
     return null;
   }

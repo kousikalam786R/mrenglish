@@ -10,6 +10,7 @@ interface CallSliceState {
     duration: number;
     wasVideoCall: boolean;
     wasIncoming: boolean;
+    profilePic?: string | null;
   }[];
   permissionsGranted: boolean;
 }
@@ -58,6 +59,7 @@ const callSlice = createSlice({
             duration: duration,
             wasVideoCall: state.activeCall.isVideoEnabled,
             wasIncoming: false, // Would need to track this separately
+            profilePic: undefined,
           });
         }
       }

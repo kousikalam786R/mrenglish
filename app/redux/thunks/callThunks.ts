@@ -238,6 +238,7 @@ export const fetchCallHistory = createAsyncThunk(
             duration: call.duration,
             wasVideoCall: call.isVideoCall || false,
             wasIncoming: wasIncoming,
+            profilePic: otherUser.profilePic || null,
           };
         });
       

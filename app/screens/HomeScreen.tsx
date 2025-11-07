@@ -394,14 +394,20 @@ const HomeScreen = () => {
       >
         <Image 
           source={{ 
-            uri: userData?.profilePic || 'https://randomuser.me/api/portraits/men/32.jpg' 
+            uri: userData?.profilePic && userData.profilePic.trim().length > 0
+              ? userData.profilePic
+              : `https://ui-avatars.com/api/?name=${encodeURIComponent(userData?.name || userData?.email || 'User')}&background=7F56D9&color=fff`
           }} 
           style={styles.userAvatar}
         />
         <View style={styles.userInfo}>
-          <Text style={[styles.userName, { color: theme.text }]}>{userData?.name || 'User'}</Text>
+          <Text style={[styles.userName, { color: theme.text }]} numberOfLines={1}>
+            {userData?.name || userData?.email || 'User'}
+          </Text>
           <View style={styles.levelContainer}>
-            <Text style={[styles.levelText, { color: theme.textSecondary }]}>Level: {userData?.level || 'Beginner'}</Text>
+            <Text style={[styles.levelText, { color: theme.textSecondary }]}>
+              Level: {userData?.englishLevel || userData?.level || 'A2'}
+            </Text>
           </View>
         </View>
         <Icon name="chevron-forward" size={20} color={theme.textTertiary} />

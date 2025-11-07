@@ -41,6 +41,7 @@ interface CallHistoryItem {
   duration: number;
   wasVideoCall: boolean;
   wasIncoming: boolean;
+  profilePic?: string | null;
 }
 
 // Tab types
@@ -167,8 +168,17 @@ const CallItem = ({
       style={[styles.contactItem, dynamicStyles.contactItem]} 
       onPress={onPress}
     >
-      <View style={[styles.avatarCircle, dynamicStyles.avatarCircle]}>
-        <Text style={[styles.avatarText, dynamicStyles.avatarText]}>{call.userName.charAt(0)}</Text>
+      <View style={styles.avatarContainer}>
+        {call.profilePic ? (
+          <Image 
+            source={{ uri: call.profilePic }} 
+            style={styles.avatar}
+          />
+        ) : (
+          <View style={[styles.avatarCircle, dynamicStyles.avatarCircle]}>
+            <Text style={[styles.avatarText, dynamicStyles.avatarText]}>{call.userName.charAt(0)}</Text>
+          </View>
+        )}
       </View>
       
       <View style={styles.contactInfo}>

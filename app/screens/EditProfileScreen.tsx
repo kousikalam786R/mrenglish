@@ -7,13 +7,13 @@ import {
   TouchableOpacity,
   Image,
   TextInput,
-  Alert,
   ActivityIndicator,
   Modal,
   FlatList,
-  Platform,
   StatusBar,
+  Dimensions,
 } from 'react-native';
+import type { KeyboardTypeOptions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -22,6 +22,10 @@ import apiClient from '../utils/apiClient';
 import Toast from 'react-native-toast-message';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
+import ImagePicker, { ImageOrVideo } from 'react-native-image-crop-picker';
+import { updateProfilePicture } from '../utils/profileService';
+import { useAppDispatch } from '../redux/hooks';
+import { setUserData } from '../redux/slices/userSlice';
 
 interface User {
   id: string;
@@ -35,6 +39,8 @@ interface User {
   englishLevel?: string;
   interests?: string[];
   profilePic?: string;
+  profilePicFileId?: string;
+  profilePicThumbnail?: string;
 }
 
 interface ProfileOptions {
@@ -47,10 +53,14 @@ interface ProfileOptions {
 
 type EditProfileRouteProp = RouteProp<RootStackParamList, 'EditProfile'>;
 
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const PREVIEW_IMAGE_SIZE = Math.min(SCREEN_WIDTH - 64, 320);
+
 const EditProfileScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<EditProfileRouteProp>();
   const { theme, isDark } = useTheme();
+  const dispatch = useAppDispatch();
   
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,6 +69,24 @@ const EditProfileScreen = () => {
   const [showModal, setShowModal] = useState(false);
   const [modalType, setModalType] = useState<'englishLevel' | 'nativeLanguage' | 'country' | 'interests' | 'gender' | null>(null);
   const [tempValue, setTempValue] = useState<string | string[] | null>(null);
+  const [showInputModal, setShowInputModal] = useState(false);
+  const [inputValue, setInputValue] = useState('');
+  const [inputModalConfig, setInputModalConfig] = useState<{
+    field: 'name' | 'bio' | 'age';
+    title: string;
+    placeholder: string;
+    keyboardType?: KeyboardTypeOptions;
+    multiline?: boolean;
+  } | null>(null);
+  const [modalSaving, setModalSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<{
+    uri: string;
+    type: string;
+    name: string;
+  } | null>(null);
+  const [selectedImagePath, setSelectedImagePath] = useState<string | null>(null);
 
   useEffect(() => {
     fetchProfileData();
@@ -93,39 +121,186 @@ const EditProfileScreen = () => {
     }
   };
   
+  const handleSelectProfilePicture = async () => {
+    if (uploadingImage) {
+      return;
+    }
+
+    try {
+      setUploadingImage(true);
+      await cleanupSelectedImage();
+      const image: ImageOrVideo = await ImagePicker.openPicker({
+        mediaType: 'photo',
+        cropping: true,
+        width: 720,
+        height: 720,
+        cropperCircleOverlay: true,
+        compressImageQuality: 0.8,
+        forceJpg: true,
+        cropperToolbarTitle: 'Adjust Profile Picture',
+      });
+
+      if (!image.path) {
+        throw new Error('No image path returned from picker');
+      }
+
+      const normalizedPath = image.path.startsWith('file://')
+        ? image.path
+        : `file://${image.path}`;
+
+      setSelectedImage({
+        uri: normalizedPath,
+        type: image.mime || 'image/jpeg',
+        name:
+          image.filename ||
+          `profile-${Date.now()}.${(image.mime || 'image/jpeg').split('/')[1] || 'jpg'}`,
+      });
+      setSelectedImagePath(image.path);
+      setPreviewVisible(true);
+    } catch (error: any) {
+      if (error?.message !== 'User cancelled image selection') {
+        console.error('Error selecting profile picture:', error);
+        Toast.show({
+          type: 'error',
+          text1: 'Could not open gallery',
+          text2: error?.message || 'Please try again.',
+        });
+      }
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+  
+  const cleanupSelectedImage = async () => {
+    if (selectedImagePath) {
+      try {
+        await ImagePicker.cleanSingle(selectedImagePath);
+      } catch (cleanupError) {
+        console.warn('Error cleaning up image picker file:', cleanupError);
+      }
+    }
+    setSelectedImagePath(null);
+  };
+
+  const handleCancelPreview = async () => {
+    setPreviewVisible(false);
+    setSelectedImage(null);
+    await cleanupSelectedImage();
+  };
+
+  const handleUploadSelectedImage = async () => {
+    if (!selectedImage) {
+      return;
+    }
+
+    try {
+      setUploadingImage(true);
+      const updatedProfile = await updateProfilePicture(selectedImage);
+
+      if (!updatedProfile?.profilePic) {
+        Toast.show({
+          type: 'error',
+          text1: 'Upload failed',
+          text2: 'We could not update your profile picture. Please try again.',
+        });
+        return;
+      }
+
+      setUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              profilePic: updatedProfile.profilePic,
+              profilePicFileId: updatedProfile.profilePicFileId || undefined,
+              profilePicThumbnail: updatedProfile.profilePicThumbnail || undefined,
+            }
+          : {
+              id: updatedProfile._id || updatedProfile.id || '',
+              name: updatedProfile.name || '',
+              email: updatedProfile.email || '',
+              bio: updatedProfile.bio,
+              age: updatedProfile.age,
+              gender: updatedProfile.gender,
+              country: updatedProfile.country,
+              nativeLanguage: updatedProfile.nativeLanguage,
+              englishLevel: updatedProfile.englishLevel,
+              interests: updatedProfile.interests,
+              profilePic: updatedProfile.profilePic,
+              profilePicFileId: updatedProfile.profilePicFileId || undefined,
+              profilePicThumbnail: updatedProfile.profilePicThumbnail || undefined,
+            }
+      );
+
+      dispatch(setUserData(updatedProfile));
+
+      Toast.show({
+        type: 'success',
+        text1: 'Profile picture updated!',
+      });
+      setPreviewVisible(false);
+      setSelectedImage(null);
+      await cleanupSelectedImage();
+    } catch (error: any) {
+      console.error('Error uploading profile picture:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Could not update picture',
+        text2: error?.message || 'Please try again later.',
+      });
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+  
   const handleSave = async () => {
     if (!user) return;
 
     try {
       setSaving(true);
-      
-      const response = await apiClient.put('/profile', {
-        name: user.name,
-        bio: user.bio,
-        age: user.age,
-        gender: user.gender,
-        country: user.country,
-        nativeLanguage: user.nativeLanguage,
-        englishLevel: user.englishLevel,
-        interests: user.interests,
-      });
-
-      if (response.data.success) {
+      const success = await updateProfileOnServer(user);
+      if (success) {
         Toast.show({
           type: 'success',
           text1: 'Profile updated successfully!',
         });
         navigation.goBack();
       }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateProfileOnServer = async (updatedUser: User) => {
+    try {
+      const response = await apiClient.put('/profile', {
+        name: updatedUser.name,
+        bio: updatedUser.bio,
+        age: updatedUser.age,
+        gender: updatedUser.gender,
+        country: updatedUser.country,
+        nativeLanguage: updatedUser.nativeLanguage,
+        englishLevel: updatedUser.englishLevel,
+        interests: updatedUser.interests,
+      });
+
+      if (response.data.success) {
+        return true;
+      }
+
+      Toast.show({
+        type: 'error',
+        text1: 'Error updating profile',
+        text2: response.data?.message || 'Please try again later',
+      });
+      return false;
     } catch (error: any) {
       console.error('Error updating profile:', error);
       Toast.show({
         type: 'error',
         text1: 'Error updating profile',
-        text2: error.response?.data?.message || 'Please try again later'
+        text2: error.response?.data?.message || 'Please try again later',
       });
-    } finally {
-      setSaving(false);
+      return false;
     }
   };
 
@@ -135,16 +310,121 @@ const EditProfileScreen = () => {
     setShowModal(true);
   };
 
-  const handleModalSave = () => {
+  const openInputModal = (
+    field: 'name' | 'bio' | 'age',
+    title: string,
+    placeholder: string,
+    value: string,
+    keyboardType?: KeyboardTypeOptions,
+    multiline?: boolean
+  ) => {
+    setInputModalConfig({ field, title, placeholder, keyboardType, multiline });
+    setInputValue(value);
+    setShowInputModal(true);
+  };
+
+  const handleInputSave = async () => {
+    if (!user || !inputModalConfig) return;
+
+    const { field } = inputModalConfig;
+    let updatedUserValue: string | number = inputValue;
+
+    if (field === 'name') {
+      const trimmed = inputValue.trim();
+      if (!trimmed) {
+        Toast.show({
+          type: 'error',
+          text1: 'Invalid name',
+          text2: 'Name cannot be empty',
+        });
+        return;
+      }
+      updatedUserValue = trimmed;
+    }
+
+    if (field === 'bio') {
+      updatedUserValue = inputValue.trim();
+    }
+
+    if (field === 'age') {
+      const age = parseInt(inputValue, 10);
+      if (isNaN(age) || age < 13 || age > 120) {
+        Toast.show({
+          type: 'error',
+          text1: 'Invalid age',
+          text2: 'Please enter an age between 13 and 120',
+        });
+        return;
+      }
+      updatedUserValue = age;
+    }
+
+    const updatedUser: User = {
+      ...user,
+      [field]: updatedUserValue,
+    };
+
+    setModalSaving(true);
+    const success = await updateProfileOnServer(updatedUser);
+    setModalSaving(false);
+
+    if (success) {
+      setUser(updatedUser);
+      Toast.show({
+        type: 'success',
+        text1: 'Changes saved',
+      });
+      setShowInputModal(false);
+      setInputModalConfig(null);
+      setInputValue('');
+    }
+  };
+
+  const handleInputCancel = () => {
+    setShowInputModal(false);
+    setInputModalConfig(null);
+    setInputValue('');
+  };
+
+  const handleModalSave = async () => {
     if (!user || !modalType || tempValue === null) return;
 
-    setUser({
-      ...user,
-      [modalType]: tempValue
-    });
-    setShowModal(false);
-    setModalType(null);
-    setTempValue(null);
+    const updatedUser: User = { ...user };
+
+    switch (modalType) {
+      case 'englishLevel':
+        updatedUser.englishLevel = tempValue as string;
+        break;
+      case 'nativeLanguage':
+        updatedUser.nativeLanguage = tempValue as string;
+        break;
+      case 'country':
+        updatedUser.country = tempValue as string;
+        break;
+      case 'gender':
+        updatedUser.gender = tempValue as string;
+        break;
+      case 'interests':
+        updatedUser.interests = Array.isArray(tempValue) ? tempValue : [];
+        break;
+      default:
+        break;
+    }
+
+    setModalSaving(true);
+    const success = await updateProfileOnServer(updatedUser);
+    setModalSaving(false);
+
+    if (success) {
+      setUser(updatedUser);
+      Toast.show({
+        type: 'success',
+        text1: 'Changes saved',
+      });
+      setShowModal(false);
+      setModalType(null);
+      setTempValue(null);
+    }
   };
 
   const toggleInterest = (interest: string) => {
@@ -242,8 +522,12 @@ const EditProfileScreen = () => {
               <Text style={[styles.modalCancelText, dynamicStyles.modalCancelText]}>Cancel</Text>
             </TouchableOpacity>
             <Text style={[styles.modalTitle, dynamicStyles.modalTitle]}>{title}</Text>
-            <TouchableOpacity onPress={handleModalSave}>
-              <Text style={[styles.modalSaveText, dynamicStyles.modalSaveText]}>Save</Text>
+            <TouchableOpacity onPress={handleModalSave} disabled={modalSaving}>
+              {modalSaving ? (
+                <ActivityIndicator size="small" color={theme.primary} />
+              ) : (
+                <Text style={[styles.modalSaveText, dynamicStyles.modalSaveText]}>Save</Text>
+              )}
             </TouchableOpacity>
           </View>
 
@@ -290,6 +574,135 @@ const EditProfileScreen = () => {
       </Modal>
     );
   };
+
+  const renderImagePreviewModal = () => (
+    <Modal
+      visible={previewVisible}
+      animationType="slide"
+      transparent
+      onRequestClose={() => {
+        if (!uploadingImage) {
+          void handleCancelPreview();
+        }
+      }}
+    >
+      <SafeAreaView style={styles.previewOverlay}>
+        <View style={[styles.previewContainer, { backgroundColor: theme.card }]}>
+          <Text style={[styles.previewTitle, { color: theme.text }]}>Adjust profile picture</Text>
+          {selectedImage ? (
+            <Image
+              source={{ uri: selectedImage.uri }}
+              style={[
+                styles.previewImage,
+                { borderColor: theme.border, backgroundColor: theme.surface },
+              ]}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={[styles.previewImage, styles.previewPlaceholder]}>
+              <Text style={[styles.previewPlaceholderText, { color: theme.textSecondary }]}>
+                No image selected
+              </Text>
+            </View>
+          )}
+          <Text style={[styles.previewHint, { color: theme.textSecondary }]}>
+            Make sure your face is centered. Use the crop tool to adjust before uploading.
+          </Text>
+          <View style={styles.previewActions}>
+            <TouchableOpacity
+              style={[styles.previewButton, { backgroundColor: theme.inputBackground }]}
+              onPress={() => {
+                if (!uploadingImage) {
+                  void handleCancelPreview();
+                }
+              }}
+              disabled={uploadingImage}
+            >
+              <Text style={[styles.previewButtonText, { color: theme.text }]}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.previewButton,
+                styles.previewConfirmButton,
+                { backgroundColor: theme.primary },
+                uploadingImage && styles.previewButtonDisabled,
+              ]}
+              onPress={() => {
+                if (!uploadingImage) {
+                  void handleUploadSelectedImage();
+                }
+              }}
+              disabled={uploadingImage}
+            >
+              {uploadingImage ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={[styles.previewButtonText, { color: '#FFFFFF' }]}>Use Photo</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </SafeAreaView>
+    </Modal>
+  );
+
+  const renderInputModal = () => {
+    if (!showInputModal || !inputModalConfig) return null;
+
+    const dynamicStyles = {
+      modalContainer: { backgroundColor: theme.background },
+      modalHeader: { borderBottomColor: theme.border, backgroundColor: theme.background },
+      modalTitle: { color: theme.text },
+      modalCancelText: { color: theme.textSecondary },
+      modalSaveText: { color: theme.primary },
+      inputModalInput: { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text },
+      placeholder: { color: theme.textSecondary },
+    };
+
+    return (
+      <Modal
+        visible={showInputModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <SafeAreaView style={[styles.modalContainer, dynamicStyles.modalContainer]}>
+          <View style={[styles.modalHeader, dynamicStyles.modalHeader]}>
+            <TouchableOpacity onPress={handleInputCancel}>
+              <Text style={[styles.modalCancelText, dynamicStyles.modalCancelText]}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={[styles.modalTitle, dynamicStyles.modalTitle]}>{inputModalConfig.title}</Text>
+            <TouchableOpacity onPress={handleInputSave} disabled={modalSaving}>
+              {modalSaving ? (
+                <ActivityIndicator size="small" color={theme.primary} />
+              ) : (
+                <Text style={[styles.modalSaveText, dynamicStyles.modalSaveText]}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.inputModalContent}>
+            <TextInput
+              value={inputValue}
+              onChangeText={setInputValue}
+              placeholder={inputModalConfig.placeholder}
+              placeholderTextColor={dynamicStyles.placeholder.color}
+              keyboardType={inputModalConfig.keyboardType}
+              multiline={inputModalConfig.multiline}
+              numberOfLines={inputModalConfig.multiline ? 5 : 1}
+              style={[
+                styles.inputModalInput,
+                inputModalConfig.multiline && styles.inputModalTextArea,
+                dynamicStyles.inputModalInput,
+              ]}
+              autoFocus
+              editable={!modalSaving}
+              textAlignVertical={inputModalConfig.multiline ? 'top' : 'center'}
+            />
+          </View>
+        </SafeAreaView>
+      </Modal>
+    );
+  };
   
   const dynamicStyles = {
     container: { backgroundColor: theme.background },
@@ -306,6 +719,7 @@ const EditProfileScreen = () => {
     crownIcon: { backgroundColor: theme.card, borderColor: theme.border },
     fieldsContainer: { backgroundColor: theme.surface },
     saveButton: { backgroundColor: theme.primary },
+    inputModalInput: { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text },
   };
 
   if (loading) {
@@ -350,9 +764,21 @@ const EditProfileScreen = () => {
             }} 
             style={[styles.profilePicture, dynamicStyles.profilePicture]} 
           />
-          <TouchableOpacity style={[styles.cameraButton, dynamicStyles.cameraButton]}>
+        <TouchableOpacity
+          style={[
+            styles.cameraButton,
+            dynamicStyles.cameraButton,
+            uploadingImage && styles.cameraButtonDisabled,
+          ]}
+          onPress={handleSelectProfilePicture}
+          disabled={uploadingImage}
+        >
+          {uploadingImage ? (
+            <ActivityIndicator color="#FFFFFF" size="small" />
+          ) : (
             <Icon name="camera" size={20} color="#FFFFFF" />
-            </TouchableOpacity>
+          )}
+        </TouchableOpacity>
           <View style={[styles.crownIcon, dynamicStyles.crownIcon]}>
             <Icon name="star" size={16} color="#FFD700" />
           </View>
@@ -364,48 +790,14 @@ const EditProfileScreen = () => {
             'person-outline',
             'Name',
             user.name,
-            () => {
-              Alert.prompt(
-                'Edit Name',
-                'Enter your name',
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  { 
-                    text: 'Save', 
-                    onPress: (text) => {
-                      if (text && text.trim()) {
-                        setUser({ ...user, name: text.trim() });
-                      }
-                    }
-                  }
-                ],
-                'plain-text',
-                user.name
-              );
-            }
+            () => openInputModal('name', 'Edit Name', 'Enter your name', user.name)
           )}
 
           {renderProfileField(
             'chatbubble-outline',
             'About me',
             user.bio || '',
-            () => {
-              Alert.prompt(
-                'About Me',
-                'Tell us about yourself',
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  { 
-                    text: 'Save', 
-                    onPress: (text) => {
-                      setUser({ ...user, bio: text || '' });
-                    }
-                  }
-                ],
-                'plain-text',
-                user.bio || ''
-              );
-            },
+            () => openInputModal('bio', 'About Me', 'Tell us about yourself', user.bio || '', undefined, true),
             true
           )}
 
@@ -427,28 +819,7 @@ const EditProfileScreen = () => {
             'calendar-outline',
             'Age',
             user.age ? `${user.age} years old` : '',
-            () => {
-              Alert.prompt(
-                'Age',
-                'Enter your age',
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  { 
-                    text: 'Save', 
-                    onPress: (text) => {
-                      const age = parseInt(text || '');
-                      if (!isNaN(age) && age >= 13 && age <= 120) {
-                        setUser({ ...user, age });
-                      } else if (text) {
-                        Alert.alert('Invalid Age', 'Please enter an age between 13 and 120');
-                      }
-                    }
-                  }
-                ],
-                'numeric',
-                user.age?.toString() || ''
-              );
-            }
+            () => openInputModal('age', 'Age', 'Enter your age', user.age?.toString() || '', 'numeric')
           )}
 
           {renderProfileField(
@@ -489,6 +860,8 @@ const EditProfileScreen = () => {
         </ScrollView>
 
       {renderModal()}
+      {renderImagePreviewModal()}
+      {renderInputModal()}
     </SafeAreaView>
   );
 };
@@ -564,6 +937,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  cameraButtonDisabled: {
+    opacity: 0.6,
   },
   crownIcon: {
     position: 'absolute',
@@ -656,6 +1032,83 @@ const styles = StyleSheet.create({
   },
   modalItemText: {
     fontSize: 16,
+  },
+  inputModalContent: {
+    padding: 16,
+  },
+  inputModalInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+  },
+  inputModalTextArea: {
+    minHeight: 160,
+  },
+  previewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  previewContainer: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 20,
+    padding: 20,
+  },
+  previewTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  previewImage: {
+    width: PREVIEW_IMAGE_SIZE,
+    height: PREVIEW_IMAGE_SIZE,
+    borderRadius: PREVIEW_IMAGE_SIZE / 2,
+    borderWidth: 2,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  previewPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewPlaceholderText: {
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  previewHint: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  previewActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  previewButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 4,
+  },
+  previewConfirmButton: {
+    elevation: 2,
+  },
+  previewButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  previewButtonDisabled: {
+    opacity: 0.6,
   },
 });
 
