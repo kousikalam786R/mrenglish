@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import axios from 'axios';
 import apiClient from './apiClient';
-import { API_ENDPOINTS, API_URL, DIRECT_IP, DEV } from './config';
+import { API_ENDPOINTS, API_URL, DIRECT_IP, DEV, USING_NGROK } from './config';
 import { getAuthToken } from './authUtils';
 import {
   uploadImageToImageKit,
@@ -39,6 +39,12 @@ const getApiUrl = (endpoint: string): string => {
       return finalUrl;
     }
     
+    if (USING_NGROK) {
+      const ngrokUrl = `${API_URL}${endpoint}`;
+      console.log(`Using NGROK API URL: ${ngrokUrl}`);
+      return ngrokUrl;
+    }
+
     // Fallback for Android emulators
     if (Platform.OS === 'android') {
       // Try the direct IP that has been working

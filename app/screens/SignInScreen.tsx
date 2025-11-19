@@ -20,7 +20,7 @@ import auth from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { saveAuthData } from '../utils/authUtils';
-import { API_URL, API_ENDPOINTS, BASE_URL, DIRECT_IP, DEV } from '../utils/config';
+import { API_URL, API_ENDPOINTS, BASE_URL, DIRECT_IP, DEV, USING_NGROK } from '../utils/config';
 import { getUserProfile } from '../utils/profileService';
 import { useAppDispatch } from '../redux/hooks';
 import { signInSuccess } from '../redux/slices/authSlice';
@@ -50,19 +50,28 @@ const SignInScreen = () => {
       console.log('API_URL:', API_URL);
       
       // Test only the endpoints that are known to work
-      const testUrls = [
-        { name: 'Production Server', url: DEV ? `http://${DIRECT_IP}:5000` : DIRECT_IP },
-        { name: 'Test Endpoint', url: DEV ? `http://${DIRECT_IP}:5000/test` : `${DIRECT_IP}/test` },
-        { name: 'API Root', url: DEV ? `http://${DIRECT_IP}:5000/api` : `${DIRECT_IP}/api` },
-        { name: 'Google Auth', url: DEV ? `http://${DIRECT_IP}:5000/api/auth/google` : `${DIRECT_IP}/api/auth/google` },
-      ];
+      const testUrls = USING_NGROK
+        ? [
+            { name: 'Ngrok Base', url: BASE_URL },
+            { name: 'API Root', url: API_URL },
+            { name: 'Login Endpoint', url: API_ENDPOINTS.LOGIN },
+            { name: 'Google Auth', url: API_ENDPOINTS.GOOGLE_AUTH },
+          ]
+        : [
+            { name: 'Local Base', url: DEV ? `http://${DIRECT_IP}:5000` : DIRECT_IP },
+            { name: 'Test Endpoint', url: DEV ? `http://${DIRECT_IP}:5000/test` : `${DIRECT_IP}/test` },
+            { name: 'API Root', url: DEV ? `http://${DIRECT_IP}:5000/api` : `${DIRECT_IP}/api` },
+            { name: 'Google Auth', url: DEV ? `http://${DIRECT_IP}:5000/api/auth/google` : `${DIRECT_IP}/api/auth/google` },
+          ];
       
       let results = '';
       
       // Add platform info to results
       results += `Device Platform: ${Platform.OS}\n`;
+      const activeTarget = USING_NGROK ? BASE_URL : (DEV ? `http://${DIRECT_IP}:5000` : DIRECT_IP);
+      const targetLabel = USING_NGROK ? 'Ngrok tunnel' : (DEV ? 'Local server' : 'Production server');
       results += `API URL configured as: ${API_URL}\n`;
-      results += `Using ${DEV ? 'Local' : 'Production'} Server: ${DIRECT_IP}\n\n`;
+      results += `Active target (${targetLabel}): ${activeTarget}\n\n`;
       
       for (const endpoint of testUrls) {
         try {
@@ -157,14 +166,15 @@ const SignInScreen = () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
       
-      // Use direct LAN IP since that's what our tests showed works
-      const directLanIpEndpoint = DEV ? `http://${DIRECT_IP}:5000/api/auth/google` : `${DIRECT_IP}/api/auth/google`;
+      const googleAuthEndpointForTest = USING_NGROK
+        ? API_ENDPOINTS.GOOGLE_AUTH
+        : (DEV ? `http://${DIRECT_IP}:5000/api/auth/google` : `${DIRECT_IP}/api/auth/google`);
       
       // Try POST to the Google Auth endpoint
-      console.log('Sending test POST to:', directLanIpEndpoint);
+      console.log('Sending test POST to:', googleAuthEndpointForTest);
       
       try {
-        const response = await fetch(directLanIpEndpoint, {
+        const response = await fetch(googleAuthEndpointForTest, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -205,9 +215,10 @@ const SignInScreen = () => {
     try {
       setIsSigninInProgress(true);
       
-      // Try login with direct IP first since it's most reliable from our tests
-      const loginEndpoint = DEV ? `http://${DIRECT_IP}:5000/api/auth/login` : `${DIRECT_IP}/api/auth/login`;
-      console.log('Attempting login with direct LAN IP:', loginEndpoint);
+      const loginEndpoint = USING_NGROK
+        ? API_ENDPOINTS.LOGIN
+        : (DEV ? `http://${DIRECT_IP}:5000/api/auth/login` : `${DIRECT_IP}/api/auth/login`);
+      console.log('Attempting login with endpoint:', loginEndpoint);
       
       // Use AbortController for more reliable timeout control
       const controller = new AbortController();
@@ -333,8 +344,9 @@ const SignInScreen = () => {
         
         // Send ID token to the server
         try {
-          // Use direct LAN IP since that's what works
-          const googleAuthEndpoint = DEV ? `http://${DIRECT_IP}:5000/api/auth/google` : `${DIRECT_IP}/api/auth/google`;
+          const googleAuthEndpoint = USING_NGROK
+            ? API_ENDPOINTS.GOOGLE_AUTH
+            : (DEV ? `http://${DIRECT_IP}:5000/api/auth/google` : `${DIRECT_IP}/api/auth/google`);
           console.log('Attempting server connection to:', googleAuthEndpoint);
           
           // Create a timeout promise to abort fetch if it takes too long

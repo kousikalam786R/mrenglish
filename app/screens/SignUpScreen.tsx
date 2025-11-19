@@ -17,7 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import CustomInput from '../components/CustomInput';
 import Logo from '../components/Logo';
 import { saveAuthData } from '../utils/authUtils';
-import { DIRECT_IP, DEV } from '../utils/config';
+import { API_URL, DIRECT_IP, DEV, USING_NGROK } from '../utils/config';
 import { useAppDispatch } from '../redux/hooks';
 import { setUserData } from '../redux/slices/userSlice';
 
@@ -54,8 +54,10 @@ const SignUpScreen = () => {
     try {
       setLoading(true);
       
-      // Use direct server API for manual signup
-      const signupEndpoint = DEV ? `http://${DIRECT_IP}:5000/api/auth/signup` : `${DIRECT_IP}/api/auth/signup`;
+      // Use configured server API for manual signup
+      const signupEndpoint = USING_NGROK
+        ? `${API_URL}/auth/signup`
+        : (DEV ? `http://${DIRECT_IP}:5000/api/auth/signup` : `${DIRECT_IP}/api/auth/signup`);
       console.log('Attempting manual signup with server:', signupEndpoint);
       
       // Create a timeout promise

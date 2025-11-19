@@ -25,6 +25,7 @@ import { useTheme, ThemeMode } from '../context/ThemeContext';
 import { useTranslation } from 'react-i18next';
 import { changeLanguage } from '../i18n/config';
 import apiClient from '../utils/apiClient';
+import { clearIceServerCache } from '../utils/turnService';
 
 
 type SettingsNavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -56,6 +57,16 @@ const SettingsScreen = () => {
   );
   const [isUpdatingNotifications, setIsUpdatingNotifications] = useState(false);
   const isMounted = useRef(true);
+  const hasAppliedDefaultLightMode = useRef(false);
+
+  useEffect(() => {
+    if (!hasAppliedDefaultLightMode.current) {
+      hasAppliedDefaultLightMode.current = true;
+      if (themeMode === 'system') {
+        setThemeMode('light');
+      }
+    }
+  }, [themeMode, setThemeMode]);
 
   // Sync language with user profile on mount
   useEffect(() => {
@@ -247,6 +258,26 @@ const SettingsScreen = () => {
     navigation.navigate('About');
   }, [navigation]);
 
+  const handleClearIceCache = useCallback(async () => {
+    try {
+      await clearIceServerCache();
+      Toast.show({
+        type: 'success',
+        text1: 'Cache Cleared',
+        text2: 'TURN server cache has been cleared. Next call will fetch fresh credentials.',
+        position: 'bottom',
+      });
+    } catch (error) {
+      console.error('Error clearing ICE cache:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Error',
+        text2: 'Failed to clear cache',
+        position: 'bottom',
+      });
+    }
+  }, []);
+
   const displayName = user?.name?.trim() || 'MrEnglish User';
   const displayEmail = user?.email || 'Add your email';
   const avatarUri = user?.profilePic;
@@ -400,7 +431,22 @@ const SettingsScreen = () => {
               label={t('settings.privacyPolicy')}
               onPress={handlePrivacyPolicy}
             />
-            <SettingRow theme={theme} icon="information-circle-outline" label={t('settings.about')} onPress={handleAbout} isLast />
+            <SettingRow 
+              theme={theme} 
+              icon="information-circle-outline" 
+              label={t('settings.about')} 
+              onPress={handleAbout}
+              isLast={!__DEV__}
+            />
+            {__DEV__ && (
+              <SettingRow
+                theme={theme}
+                icon="refresh-outline"
+                label="Clear TURN Cache (Debug)"
+                onPress={handleClearIceCache}
+                isLast
+              />
+            )}
           </View>
         </View>
       </ScrollView>

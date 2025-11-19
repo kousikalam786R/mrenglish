@@ -3,8 +3,25 @@ import { Platform } from 'react-native';
 // Use different URLs for different environments
 export const DEV = true; // Set to true for local development
 
+// Optional override: point the app to an ngrok tunnel for quick testing on real devices
+export const USE_NGROK = true; // Set to true for cross-network testing (WiFi + Mobile Data), false for local development
+const NGROK_URL = 'https://prosodical-noneternally-oleta.ngrok-free.dev'; // Update with your active tunnel URL
+
 // Production server URL (Render)
 const PRODUCTION_URL = 'https://mrenglishserverside.onrender.com';
+
+// Metered TURN configuration (set via environment or secure storage in production)
+const envTurnBaseUrl =
+  typeof process !== 'undefined' && process.env?.METERED_TURN_BASE_URL
+    ? process.env.METERED_TURN_BASE_URL
+    : undefined;
+const envTurnApiKey =
+  typeof process !== 'undefined' && process.env?.METERED_TURN_API_KEY
+    ? process.env.METERED_TURN_API_KEY
+    : undefined;
+
+export const METERED_TURN_BASE_URL = envTurnBaseUrl || 'https://mr_english.metered.live';
+export const  METERED_TURN_API_KEY = envTurnApiKey || '';
 
 // For actual device testing, use your computer's local network IP
 // For emulator, use 10.0.2.2 (Android) or localhost (iOS)
@@ -52,6 +69,15 @@ const isEmulator = (): boolean => {
   return false;
 };
 
+const hasProtocol = (url: string): boolean => url.startsWith('http://') || url.startsWith('https://');
+const stripTrailingSlash = (url: string): string => url.endsWith('/') ? url.replace(/\/+$/, '') : url;
+const ensureProtocol = (url: string, fallbackProtocol: 'http://' | 'https://' = 'http://'): string => {
+  if (!url) {
+    return url;
+  }
+  return hasProtocol(url) ? url : `${fallbackProtocol}${url}`;
+};
+
 // Get correct base URL based on platform and environment
 let BASE_HOST = '';
 
@@ -80,15 +106,22 @@ if (DEV) {
 } else {
   // Production mode - use deployed server
   console.log('Using production server:', PRODUCTION_URL);
-  BASE_HOST = PRODUCTION_URL;
+  BASE_HOST = stripTrailingSlash(PRODUCTION_URL);
 }
 
+const sanitizedNgrokUrl =
+  USE_NGROK && NGROK_URL
+    ? stripTrailingSlash(ensureProtocol(NGROK_URL, 'https://'))
+    : '';
+
+export const USING_NGROK = Boolean(sanitizedNgrokUrl);
+
 // Base API URL without the /api suffix
-export const BASE_URL = DEV ? `http://${BASE_HOST}:5000` : BASE_HOST;
+export const BASE_URL = sanitizedNgrokUrl || (DEV ? `http://${BASE_HOST}:5000` : BASE_HOST);
 console.log('BASE_URL configured as:', BASE_URL);
 
 // API URL with /api suffix
-export const API_URL = `${BASE_URL}/api`;
+export const API_URL = `${BASE_URL}${BASE_URL.endsWith('/api') ? '' : '/api'}`;
 console.log('API_URL configured as:', API_URL);
 
 // Export the direct IP for use in other files that need it
@@ -97,6 +130,14 @@ export const DIRECT_IP = DEV ? LOCAL_IP : PRODUCTION_URL;
 // Function to get alternate URLs in case of connection issues
 export const getAlternateUrls = (): string[] => {
   const urls = [];
+
+  if (sanitizedNgrokUrl) {
+    urls.push(sanitizedNgrokUrl);
+    if (!sanitizedNgrokUrl.endsWith('/api')) {
+      urls.push(`${sanitizedNgrokUrl}/api`);
+    }
+    return urls;
+  }
 
   if (DEV) {
     // Development mode - use local URLs

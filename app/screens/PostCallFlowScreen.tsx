@@ -146,6 +146,8 @@ const PostCallFlowScreen = () => {
       setSubmitting(true);
       console.log('Starting feedback submission...');
 
+      const trimmedReview = publicReview.trim();
+
       // Submit feedback
       if (liked !== null) {
         console.log('Submitting feedback:', { userId, feedbackType: liked ? 'positive' : 'negative' });
@@ -153,7 +155,8 @@ const PostCallFlowScreen = () => {
           userId,
           feedbackType: liked ? 'positive' : 'negative',
           interactionType: 'call',
-          interactionId
+          interactionId,
+          ...(trimmedReview ? { message: trimmedReview } : {})
         });
         console.log('Feedback submitted successfully:', feedbackResponse.data);
       }
@@ -189,12 +192,12 @@ const PostCallFlowScreen = () => {
       }
 
       // Submit public review if provided
-      if (publicReview.trim()) {
-        console.log('Submitting public review:', publicReview.trim());
+      if (trimmedReview) {
+        console.log('Submitting public review:', trimmedReview);
         const reviewResponse = await apiClient.post('/ratings/submit', {
           userId,
           rating: liked ? 5 : 2, // Convert like/dislike to rating
-          comment: publicReview.trim(),
+          comment: trimmedReview,
           interactionType: 'call',
           interactionId
         });

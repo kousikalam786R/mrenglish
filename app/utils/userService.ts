@@ -1,10 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { API_ENDPOINTS, API_URL, DIRECT_IP } from './config';
+import { API_ENDPOINTS, API_URL, DIRECT_IP, USING_NGROK } from './config';
 import { User } from '../types/Message';
 
 // Helper function to get the correct API endpoint based on platform
 const getApiUrl = (endpoint: string): string => {
+  if (USING_NGROK) {
+    return endpoint;
+  }
+
   if (Platform.OS === 'android') {
     // Replace the base URL with the direct LAN IP for Android
     return endpoint.replace(API_URL, `http://${DIRECT_IP}:5000/api`);

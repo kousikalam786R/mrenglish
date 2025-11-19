@@ -709,6 +709,11 @@ const ProfileScreen = () => {
                   day: 'numeric'
                 })}
               </Text>
+              {item.message?.trim() ? (
+                <Text style={[styles.feedbackMessage, { color: theme.textSecondary }]}>
+                  {item.message.trim()}
+                </Text>
+              ) : null}
             </View>
             <View style={[styles.feedbackIcon, { backgroundColor: theme.primary + '15' }]}>
               <Text style={styles.feedbackEmoji}>
@@ -1156,6 +1161,11 @@ const styles = StyleSheet.create({
   },
   feedbackDate: {
     fontSize: 14,
+  },
+  feedbackMessage: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 6,
   },
   feedbackIcon: {
     width: 32,

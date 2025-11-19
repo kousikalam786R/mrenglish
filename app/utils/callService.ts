@@ -8,6 +8,7 @@ import {
   MediaStream,
   mediaDevices
 } from 'react-native-webrtc';
+import { getMeteredIceServers } from './turnService';
 
 // Type definitions
 export interface CallOptions {
@@ -58,6 +59,7 @@ class CallService {
   private listeners: Map<string, Set<(data: any) => void>> = new Map();
   private callState: CallState = { ...initialCallState };
   private durationTimer: NodeJS.Timeout | null = null;
+  private connectionStateMonitor: NodeJS.Timeout | null = null;
 
   // Clear the duration timer
   private clearDurationTimer(): void {
@@ -67,28 +69,93 @@ class CallService {
     }
   }
 
-  // ICE server configuration for STUN/TURN
-  private configuration = {
-    iceServers: [
-      { 
-        urls: [
-          'stun:stun.l.google.com:19302',
-          'stun:stun1.l.google.com:19302',
-          'stun:stun2.l.google.com:19302',
-          'stun:stun3.l.google.com:19302',
-          'stun:stun4.l.google.com:19302'
-        ]
-      },
-      {
-        urls: 'turn:global.turn.twilio.com:3478?transport=udp',
-        username: 'your_twilio_username', // Replace with your Twilio credentials
-        credential: 'your_twilio_credential'
+  // Start monitoring connection state actively
+  private startConnectionStateMonitor(): void {
+    // Clear any existing monitor
+    if (this.connectionStateMonitor) {
+      clearInterval(this.connectionStateMonitor);
+    }
+
+    // Monitor connection state every 2 seconds
+    this.connectionStateMonitor = setInterval(() => {
+      if (!this.pc || this.callState.status === CallStatus.IDLE || this.callState.status === CallStatus.ENDED) {
+        this.stopConnectionStateMonitor();
+        return;
       }
-    ],
+
+      const connState = this.pc.connectionState;
+      const iceState = this.pc.iceConnectionState;
+
+      // Log current states for debugging
+      if (connState !== 'connected' || iceState !== 'connected') {
+        console.log(`🔍 Connection monitor: connState=${connState}, iceState=${iceState}, callStatus=${this.callState.status}`);
+      }
+      
+      // If we're actually connected but state says calling/reconnecting, update it
+      if (connState === 'connected' && (iceState === 'connected' || iceState === 'completed')) {
+        if (this.callState.status === CallStatus.CALLING || this.callState.status === CallStatus.RECONNECTING) {
+          console.log('✅ Connection state monitor detected connected state - updating from', this.callState.status);
+          
+          const startTime = this.callState.callStartTime || Date.now();
+          this.callState = {
+            ...this.callState,
+            status: CallStatus.CONNECTED,
+            callStartTime: startTime,
+            callDuration: 0
+          };
+          
+          this.startDurationTracking();
+          this.emitCallStateChange();
+          this.emitEvent('call-connected', {
+            remoteUserId: this.callState.remoteUserId,
+            timestamp: startTime
+          });
+          
+          this.stopConnectionStateMonitor();
+        }
+      } else if (connState === 'failed' || iceState === 'failed') {
+        console.log('❌ Connection failed according to monitor');
+        this.stopConnectionStateMonitor();
+      } else if (connState === 'connecting' || iceState === 'checking') {
+        // Still connecting, keep monitoring
+        if (this.callState.status === CallStatus.CALLING) {
+          // Update to reconnecting if we're still in calling state
+          this.callState = {
+            ...this.callState,
+            status: CallStatus.RECONNECTING
+          };
+          this.emitCallStateChange();
+        }
+      }
+    }, 2000);
+  }
+
+  // Stop monitoring connection state
+  private stopConnectionStateMonitor(): void {
+    if (this.connectionStateMonitor) {
+      clearInterval(this.connectionStateMonitor);
+      this.connectionStateMonitor = null;
+    }
+  }
+
+  // ICE server configuration fallbacks and base policies
+  private readonly fallbackIceServers = [
+    {
+      urls: [
+        'stun:stun.l.google.com:19302',
+        'stun:stun1.l.google.com:19302',
+        'stun:stun2.l.google.com:19302',
+        'stun:stun3.l.google.com:19302',
+        'stun:stun4.l.google.com:19302'
+      ]
+    }
+  ];
+
+  private readonly rtcBaseConfiguration = {
     iceCandidatePoolSize: 10,
-    iceTransportPolicy: 'all',
-    bundlePolicy: 'max-bundle',
-    rtcpMuxPolicy: 'require'
+    iceTransportPolicy: 'all' as const,
+    bundlePolicy: 'max-bundle' as const,
+    rtcpMuxPolicy: 'require' as const
   };
 
   // State sync interval in milliseconds
@@ -101,6 +168,113 @@ class CallService {
   private constructor() {
     // Load persisted call state on initialization
     this.loadPersistedCallState();
+  }
+
+  private async createPeerConnection(): Promise<RTCPeerConnection> {
+    const iceServers = await getMeteredIceServers(this.fallbackIceServers);
+    console.log(
+      'Using ICE servers:',
+      iceServers.map((server) => ({
+        urls: server.urls,
+        hasCredential: Boolean(server.credential),
+        hasUsername: Boolean(server.username)
+      }))
+    );
+
+    return new RTCPeerConnection({
+      ...this.rtcBaseConfiguration,
+      iceServers
+    });
+  }
+
+  // Track ICE candidates as they're generated
+  private iceCandidateCount = 0;
+  private relayCandidateCount = 0;
+
+  // Wait for ICE candidates to be gathered, especially TURN relay candidates
+  private waitForIceCandidates(maxWaitMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.pc) {
+        resolve();
+        return;
+      }
+
+      const startTime = Date.now();
+      let checkInterval: NodeJS.Timeout;
+      let gatheringStarted = false;
+      
+      // Reset counters (but don't reset if we're already gathering)
+      if (this.pc.iceGatheringState === 'new') {
+        this.iceCandidateCount = 0;
+        this.relayCandidateCount = 0;
+      }
+
+      const checkCandidates = () => {
+        if (!this.pc) {
+          clearInterval(checkInterval);
+          resolve();
+          return;
+        }
+
+        const elapsed = Date.now() - startTime;
+        const gatheringState = this.pc.iceGatheringState;
+
+        // Wait for gathering to actually start
+        if (gatheringState === 'gathering' && !gatheringStarted) {
+          gatheringStarted = true;
+          console.log('✅ ICE gathering started, waiting for candidates...');
+        }
+
+        // Only log if gathering has started or we've waited a while
+        if (gatheringStarted || elapsed > 1000) {
+          console.log(`🔍 ICE gathering check: state=${gatheringState}, candidates=${this.iceCandidateCount}, relay=${this.relayCandidateCount}, elapsed=${elapsed}ms`);
+        }
+
+        // If gathering is complete, we're done
+        if (gatheringState === 'complete') {
+          console.log(`✅ ICE gathering completed: ${this.iceCandidateCount} total candidates, ${this.relayCandidateCount} relay candidates`);
+          if (this.relayCandidateCount > 0) {
+            console.log('✅ TURN relay candidates will be included in SDP');
+          } else {
+            console.log('⚠️ No TURN relay candidates found - connection may fail on mobile data');
+          }
+          clearInterval(checkInterval);
+          resolve();
+          return;
+        }
+
+        // If we've waited long enough, proceed (even if gathering isn't complete)
+        if (elapsed >= maxWaitMs) {
+          console.log(`⏱️ ICE gathering timeout (${maxWaitMs}ms) - proceeding with ${this.iceCandidateCount} candidates (${this.relayCandidateCount} relay)`);
+          if (this.relayCandidateCount > 0) {
+            console.log('✅ TURN relay candidates were gathered, proceeding with offer');
+          } else if (elapsed >= 3000) {
+            // If we've waited at least 3 seconds and still no relay, proceed anyway
+            // (might work with host/srflx candidates if on same network)
+            console.log('⚠️ Proceeding without TURN relay candidates - may work if both users on same network');
+          }
+          clearInterval(checkInterval);
+          resolve();
+          return;
+        }
+
+        // If we have relay candidates and have waited at least 2 seconds, wait a bit more for completion
+        if (this.relayCandidateCount > 0 && gatheringState === 'gathering' && elapsed >= 2000) {
+          // Give it a bit more time to complete gathering
+          if (elapsed >= maxWaitMs - 1000) {
+            console.log('✅ TURN relay candidates found, proceeding with offer');
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }
+      };
+
+      // Check immediately
+      checkCandidates();
+
+      // Check every 500ms
+      checkInterval = setInterval(checkCandidates, 500);
+    });
   }
 
   public static getInstance(): CallService {
@@ -168,6 +342,10 @@ class CallService {
 
       console.log(`Starting call to ${userName} (${userId}) with options:`, options);
       
+      // Reset ICE candidate counters
+      this.iceCandidateCount = 0;
+      this.relayCandidateCount = 0;
+      
       // Mark if this is a partner matching call
       if (options.isPartnerMatching) {
         console.log('🤝 This is a partner matching call - will auto-accept on receiver end');
@@ -203,16 +381,53 @@ class CallService {
       const offer = await this.pc.createOffer(offerOptions);
       console.log('Offer created successfully');
 
-      // Set local description
+      // Set local description - THIS STARTS ICE GATHERING
       await this.pc.setLocalDescription(offer);
-      console.log('Local description (offer) set successfully');
+      console.log('Local description (offer) set successfully - ICE gathering started');
+      
+      // Give ICE gathering a moment to actually start
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // CRITICAL: Wait for ICE candidates to be gathered (especially TURN relay candidates)
+      // This is critical for mobile data users who need TURN servers
+      // We wait AFTER setting local description because that's when ICE gathering actually starts
+      console.log('Waiting for ICE candidates to be gathered (especially TURN relay candidates)...');
+      await this.waitForIceCandidates(8000); // Wait up to 8 seconds for candidates
+      
+      // Get the updated SDP with all gathered candidates
+      const finalOffer = this.pc.localDescription;
+      if (!finalOffer) {
+        throw new Error('Local description not available after ICE gathering');
+      }
+      
+      // Verify SDP was updated with candidates
+      const originalSdpLength = offer.sdp.length;
+      const finalSdpLength = finalOffer.sdp.length;
+      const sdpUpdated = finalSdpLength > originalSdpLength;
+      
+      console.log(`✅ Using updated SDP with ${this.iceCandidateCount} total candidates (${this.relayCandidateCount} relay)`);
+      console.log(`   SDP size: ${originalSdpLength} → ${finalSdpLength} bytes (${sdpUpdated ? 'updated ✓' : 'not updated ✗'})`);
+      
+      if (this.relayCandidateCount > 0) {
+        console.log('✅ TURN relay candidates included in SDP - cross-network connection should work!');
+        
+        // Verify relay candidates are in the SDP
+        const hasRelayInSdp = finalOffer.sdp.includes('typ relay');
+        if (hasRelayInSdp) {
+          console.log('✅ Verified: TURN relay candidates found in SDP string');
+        } else {
+          console.warn('⚠️ Warning: TURN relay candidates not found in SDP string (may be in candidate events only)');
+        }
+      } else {
+        console.warn('⚠️ No TURN relay candidates in SDP - connection may fail on mobile data');
+      }
 
-      // Send offer to remote user
+      // Send offer to remote user with updated SDP that includes all ICE candidates
       console.log(`Sending call offer to ${userId}`);
       socketService.getSocket()?.emit('call-offer', {
         targetUserId: userId,
-        sdp: offer.sdp,
-        type: offer.type,
+        sdp: finalOffer.sdp, // Use updated SDP with all candidates
+        type: finalOffer.type,
         isVideo: options.video || false,
         isPartnerMatching: options.isPartnerMatching || false
       });
@@ -583,8 +798,42 @@ class CallService {
         });
         
         console.log("Setting remote description (answer)...");
-        await this.pc.setRemoteDescription(remoteDesc);
-        console.log("Successfully set remote description (answer). New signaling state:", this.pc.signalingState);
+        console.log("SDP length:", sdp.length, "bytes");
+        
+        // Set remote description with timeout
+        const setRemoteDescPromise = this.pc.setRemoteDescription(remoteDesc);
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('setRemoteDescription timeout after 15 seconds')), 15000);
+        });
+        
+        await Promise.race([setRemoteDescPromise, timeoutPromise]);
+        console.log("✅ Successfully set remote description (answer)");
+        console.log("   New signaling state:", this.pc.signalingState);
+        console.log("   ICE connection state:", this.pc.iceConnectionState);
+        console.log("   Connection state:", this.pc.connectionState);
+        
+        // Process any queued ICE candidates now that remote description is set
+        console.log("📋 Remote description set - queued ICE candidates should be processed automatically");
+        
+        // Check connection state after a brief delay
+        setTimeout(() => {
+          if (this.pc) {
+            console.log("🔍 Post-remote-description check:");
+            console.log("   Signaling state:", this.pc.signalingState);
+            console.log("   ICE connection state:", this.pc.iceConnectionState);
+            console.log("   Connection state:", this.pc.connectionState);
+            console.log("   ICE gathering state:", this.pc.iceGatheringState);
+            
+            // If we're connected, update state immediately
+            if (this.pc.connectionState === 'connected' && this.callState.status !== CallStatus.CONNECTED) {
+              console.log("✅ Connection detected - updating state");
+              (this.pc as any).onconnectionstatechange?.();
+            }
+          }
+        }, 1000);
+        
+        // Start connection state monitor to detect when connection is established
+        this.startConnectionStateMonitor();
       } catch (err) {
         console.error("Error setting remote description:", err);
         
@@ -676,22 +925,36 @@ class CallService {
 
         // If remote description isn't set yet, queue the candidate
         if (!this.pc.remoteDescription) {
-          console.log('Remote description not set, queueing ICE candidate');
-          setTimeout(async () => {
-            if (this.pc && this.pc.remoteDescription) {
+          console.log('Remote description not set, queueing ICE candidate (will retry when remote description is set)');
+          
+          // Store candidate for later processing
+          const queuedCandidate = { candidate, sdpMid, sdpMLineIndex };
+          
+          // Retry with exponential backoff
+          let retryCount = 0;
+          const maxRetries = 10;
+          const retryInterval = 500; // Start with 500ms
+          
+          const tryAddQueuedCandidate = async () => {
+            if (!this.pc) return;
+            
+            if (this.pc.remoteDescription) {
               try {
-                const iceCandidate = new RTCIceCandidate({
-                  candidate,
-                  sdpMid,
-                  sdpMLineIndex
-                });
+                const iceCandidate = new RTCIceCandidate(queuedCandidate);
                 await this.pc.addIceCandidate(iceCandidate);
-                console.log('Added queued ICE candidate successfully');
+                console.log('✅ Added queued ICE candidate successfully');
               } catch (error) {
-                console.error('Error adding queued ICE candidate:', error);
+                console.error('❌ Error adding queued ICE candidate:', error);
               }
+            } else if (retryCount < maxRetries) {
+              retryCount++;
+              setTimeout(tryAddQueuedCandidate, retryInterval * retryCount);
+            } else {
+              console.warn('⚠️ Failed to add queued ICE candidate after max retries');
             }
-          }, 1000);
+          };
+          
+          setTimeout(tryAddQueuedCandidate, retryInterval);
           return;
         }
 
@@ -847,6 +1110,9 @@ class CallService {
   public endCall(): void {
     console.log("Ending call with state:", this.callState.status);
     
+    // Stop connection state monitor
+    this.stopConnectionStateMonitor();
+    
     // Stop duration tracking
     if (this.durationTimer) {
       clearInterval(this.durationTimer);
@@ -970,8 +1236,8 @@ class CallService {
       console.log('Initializing WebRTC with options:', options);
       
       // Create peer connection
-      this.pc = new RTCPeerConnection(this.configuration);
-      console.log('RTCPeerConnection created with config:', this.configuration);
+      this.pc = await this.createPeerConnection();
+      console.log('RTCPeerConnection created with dynamic configuration');
 
       // Set up event handlers using proper properties
       // For TypeScript, we need to use the 'any' type to bypass type checking for these properties
@@ -979,7 +1245,38 @@ class CallService {
       (this.pc as any).oniceconnectionstatechange = this.handleIceConnectionStateChange;
       
       (this.pc as any).onicegatheringstatechange = () => {
-        console.log('ICE gathering state:', this.pc?.iceGatheringState);
+        const gatheringState = this.pc?.iceGatheringState;
+        console.log('🔍 ICE gathering state:', gatheringState);
+        
+        if (gatheringState === 'complete') {
+          // Check if we have relay candidates
+          this.pc?.getStats().then((stats: any) => {
+            let hasRelay = false;
+            stats.forEach((report: any) => {
+              if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                if (report.remoteCandidateId) {
+                  const remoteCandidate = stats.get(report.remoteCandidateId);
+                  if (remoteCandidate && remoteCandidate.candidateType === 'relay') {
+                    hasRelay = true;
+                  }
+                }
+                if (report.localCandidateId) {
+                  const localCandidate = stats.get(report.localCandidateId);
+                  if (localCandidate && localCandidate.candidateType === 'relay') {
+                    hasRelay = true;
+                  }
+                }
+              }
+            });
+            if (hasRelay) {
+              console.log('✅ TURN relay candidate pair detected in stats');
+            } else {
+              console.log('⚠️ No TURN relay candidate pairs found - may have connection issues');
+            }
+          }).catch((err: any) => {
+            console.warn('Could not get WebRTC stats:', err);
+          });
+        }
       };
       
       (this.pc as any).onsignalingstatechange = () => {
@@ -1052,16 +1349,24 @@ class CallService {
             console.log('Ensuring remote audio track is enabled:', event.track.id);
             // Try to set audio output to speaker
             try {
-              const audioEl = new Audio();
-              if (typeof audioEl.setSinkId === 'function') {
-                audioEl.setSinkId('default').then(() => {
-                  console.log('Set audio output to system default');
-                }).catch(err => {
-                  console.warn('Could not set audio output:', err);
-                });
+              const globalAudioConstructor =
+                typeof globalThis !== 'undefined' ? (globalThis as any).Audio : undefined;
+
+              if (typeof globalAudioConstructor === 'function') {
+                const audioEl = new globalAudioConstructor();
+                if (typeof audioEl.setSinkId === 'function') {
+                  audioEl
+                    .setSinkId('default')
+                    .then(() => {
+                      console.log('Set audio output to system default');
+                    })
+                    .catch((audioSinkError: unknown) => {
+                      console.warn('Could not set audio output:', audioSinkError);
+                    });
+                }
               }
-            } catch (err) {
-              console.warn('Audio output device selection not supported');
+            } catch (audioOutputError: unknown) {
+              console.warn('Audio output device selection not supported', audioOutputError);
             }
           }
           
@@ -1102,12 +1407,31 @@ class CallService {
         // Enhanced ICE candidate handling with retry logic
         (this.pc as any).onicecandidate = (event: any) => {
           if (event.candidate) {
-            console.log('Generated ICE candidate:', {
+            // Parse candidate string to determine type
+            const candidateStr = event.candidate.candidate || '';
+            const isRelay = candidateStr.includes('typ relay');
+            const isSrflx = candidateStr.includes('typ srflx');
+            const isHost = candidateStr.includes('typ host');
+            
+            const candidateType = isRelay ? 'RELAY (TURN)' : isSrflx ? 'SRFLX (STUN)' : isHost ? 'HOST' : 'UNKNOWN';
+            
+            // Track candidate counts
+            this.iceCandidateCount++;
+            if (isRelay) {
+              this.relayCandidateCount++;
+            }
+            
+            console.log(`🔵 ICE Candidate Generated [${candidateType}] (${this.iceCandidateCount} total, ${this.relayCandidateCount} relay):`, {
               type: event.candidate.type,
               protocol: event.candidate.protocol,
               address: event.candidate.address,
-              port: event.candidate.port
+              port: event.candidate.port,
+              candidate: candidateStr.substring(0, 100) + '...'
             });
+            
+            if (isRelay) {
+              console.log('✅ TURN RELAY candidate detected - cross-network connection should work!');
+            }
 
             const sendCandidate = (retryCount = 0) => {
               if (!this.pc || this.callState.status === CallStatus.ENDED) {
@@ -1148,7 +1472,39 @@ class CallService {
             // Start sending with retry logic
             sendCandidate();
           } else {
-            console.log('Finished gathering ICE candidates');
+            console.log('✅ Finished gathering ICE candidates');
+            
+            // After ICE gathering completes, check connection state
+            // Sometimes connectionState doesn't fire immediately
+            setTimeout(() => {
+              if (this.pc && this.callState.status === CallStatus.RECONNECTING) {
+                const connState = this.pc.connectionState;
+                const iceState = this.pc.iceConnectionState;
+                
+                console.log(`🔍 Post-ICE-gathering check: connectionState=${connState}, iceConnectionState=${iceState}`);
+                
+                if (connState === 'connected' && iceState === 'connected') {
+                  console.log('✅ Connection established but state not updated - forcing update');
+                  // Force connection state update
+                  (this.pc as any).onconnectionstatechange?.();
+                } else if (connState === 'connecting' || iceState === 'checking') {
+                  console.log('⏳ Still connecting, will check again in 3s...');
+                  // Check again after a delay
+                  setTimeout(() => {
+                    if (this.pc) {
+                      const finalState = this.pc.connectionState;
+                      const finalIceState = this.pc.iceConnectionState;
+                      console.log(`🔍 Final check: connectionState=${finalState}, iceConnectionState=${finalIceState}`);
+                      
+                      if (finalState === 'connected' && this.callState.status === CallStatus.RECONNECTING) {
+                        console.log('✅ Connection established - updating state');
+                        (this.pc as any).onconnectionstatechange?.();
+                      }
+                    }
+                  }, 3000);
+                }
+              }
+            }, 2000);
           }
         };
 
@@ -1190,6 +1546,9 @@ class CallService {
                   remoteUserId: this.callState.remoteUserId,
                   timestamp: startTime
                 });
+                
+                // Stop connection state monitor since we're connected
+                this.stopConnectionStateMonitor();
               }
               break;
 
@@ -1236,12 +1595,46 @@ class CallService {
               break;
             
             case 'connecting':
-              console.log('WebRTC connection in progress...');
+              console.log('🔄 WebRTC connection in progress...');
+              console.log(`   ICE Connection State: ${this.pc.iceConnectionState}`);
+              console.log(`   ICE Gathering State: ${this.pc.iceGatheringState}`);
+              
               this.callState = {
                 ...this.callState,
                 status: CallStatus.RECONNECTING
               };
               this.emitCallStateChange();
+              
+              // Start connection state monitor
+              this.startConnectionStateMonitor();
+              
+              // Set timeout for connection attempt (30 seconds)
+              setTimeout(() => {
+                if (this.pc && this.pc.connectionState === 'connecting') {
+                  console.warn('⚠️ Connection stuck in connecting state for 30s - checking ICE candidates');
+                  this.pc.getStats().then((stats: any) => {
+                    let relayCount = 0;
+                    let hostCount = 0;
+                    let srflxCount = 0;
+                    
+                    stats.forEach((report: any) => {
+                      if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
+                        if (report.candidateType === 'relay') relayCount++;
+                        else if (report.candidateType === 'host') hostCount++;
+                        else if (report.candidateType === 'srflx') srflxCount++;
+                      }
+                    });
+                    
+                    console.log(`📊 ICE Candidate Summary: ${relayCount} relay, ${srflxCount} srflx, ${hostCount} host`);
+                    
+                    if (relayCount === 0) {
+                      console.error('❌ No TURN relay candidates found! This may cause cross-network connection failures.');
+                    }
+                  }).catch((err: any) => {
+                    console.warn('Could not get stats for diagnostics:', err);
+                  });
+                }
+              }, 30000);
               break;
               
             default:
@@ -1539,13 +1932,18 @@ class CallService {
   private handleIceConnectionStateChange = (): void => {
     if (!this.pc) return;
     
-    console.log('ICE connection state changed to:', this.pc.iceConnectionState);
+    const iceState = this.pc.iceConnectionState;
+    const connectionState = this.pc.connectionState;
     
-    switch (this.pc.iceConnectionState) {
+    console.log(`🔷 ICE Connection State: ${iceState} | WebRTC Connection State: ${connectionState}`);
+    
+    switch (iceState) {
       case 'connected':
       case 'completed':
         // Connection established successfully
-        console.log('WebRTC ICE connection established successfully!');
+        console.log('✅ WebRTC ICE connection established successfully!');
+        console.log(`   Connection State: ${connectionState}`);
+        console.log(`   Signaling State: ${this.pc.signalingState}`);
         break;
         
       case 'disconnected':
