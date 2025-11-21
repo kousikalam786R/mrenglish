@@ -217,6 +217,13 @@ const ContactsStackNavigator = () => {
 // Main tab navigator
 const MainNavigator = () => {
   const { theme } = useTheme();
+  // Get recent chats from Redux to calculate unread count
+  const recentChats = useAppSelector((state: RootState) => state.message.recentChats);
+  
+  // Calculate total unread count from all chats
+  const totalUnreadCount = useMemo(() => {
+    return recentChats.reduce((total, chat) => total + (chat.unreadCount || 0), 0);
+  }, [recentChats]);
   
   return (
     <Tab.Navigator
@@ -276,6 +283,7 @@ const MainNavigator = () => {
         component={ChatStackNavigator} 
         options={{
           unmountOnBlur: Platform.OS === 'android', // Unmount component on tab switch on Android
+          tabBarBadge: totalUnreadCount > 0 ? totalUnreadCount : undefined,
         }}
       />
       <Tab.Screen name="Ranking" component={RankingScreen} />

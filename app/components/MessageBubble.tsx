@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, Image } from 'react-native';
+import { useTheme } from '../context/ThemeContext';
 
 interface MessageBubbleProps {
   content: string;
@@ -20,6 +21,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   username,
   showAvatar = true,
 }) => {
+  const { theme } = useTheme();
   // Generate a color based on the username (for consistent message colors)
   const getAvatarLetter = () => {
     if (!username || username.length === 0) return '?';
@@ -59,11 +61,14 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
       
       <View style={[
         styles.bubble,
-        isSender ? styles.senderBubble : styles.receiverBubble,
+        isSender ? styles.senderBubble : {
+          backgroundColor: theme.card,
+          borderBottomLeftRadius: 4,
+        },
       ]}>
         <Text style={[
           styles.messageText,
-          isSender ? styles.senderText : styles.receiverText
+          isSender ? styles.senderText : { color: theme.text }
         ]}>
           {content}
         </Text>
@@ -71,7 +76,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
         <View style={styles.timeContainer}>
           <Text style={[
             styles.time,
-            isSender ? styles.senderTime : styles.receiverTime
+            isSender ? styles.senderTime : { color: theme.textSecondary }
           ]}>
             {time}
           </Text>
@@ -114,19 +119,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#6A3DE8',
     borderBottomRightRadius: 4,
   },
-  receiverBubble: {
-    backgroundColor: '#F2F2F2',
-    borderBottomLeftRadius: 4,
-  },
   messageText: {
     fontSize: 16,
     lineHeight: 22,
   },
   senderText: {
     color: '#FFFFFF',
-  },
-  receiverText: {
-    color: '#333333',
   },
   timeContainer: {
     flexDirection: 'row',
@@ -140,9 +138,6 @@ const styles = StyleSheet.create({
   },
   senderTime: {
     color: 'rgba(255, 255, 255, 0.7)',
-  },
-  receiverTime: {
-    color: '#888888',
   },
   readStatus: {
     fontSize: 11,

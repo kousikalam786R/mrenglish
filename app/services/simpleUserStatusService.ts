@@ -160,9 +160,36 @@ class SimpleUserStatusService {
       }, 2000);
     });
 
+    // Listen for socket reconnection (important for mobile data networks)
+    socketService.socketOn('reconnect', () => {
+      console.log('🔄 SimpleUserStatusService: Socket reconnected - refreshing all user statuses');
+      this.requestAllUserStatuses();
+      
+      // Force refresh all tracked users after reconnection
+      setTimeout(() => {
+        this.refreshAllUserStatuses();
+      }, 1000);
+    });
+
+    // Listen for custom reconnection event
+    socketService.socketOn('socket-reconnected', () => {
+      console.log('🔄 SimpleUserStatusService: Socket reconnected event received - refreshing statuses');
+      this.requestAllUserStatuses();
+      setTimeout(() => {
+        this.refreshAllUserStatuses();
+      }, 1000);
+    });
+
     socketService.socketOn('disconnect', () => {
       console.log('🔌 SimpleUserStatusService: Socket disconnected');
-      this.setAllUsersOffline();
+      // Don't immediately set all users offline - wait a bit in case of quick reconnect
+      setTimeout(() => {
+        const socket = socketService.getSocket();
+        if (!socket || !socket.connected) {
+          console.log('🔌 SimpleUserStatusService: Socket still disconnected, setting users offline');
+          this.setAllUsersOffline();
+        }
+      }, 3000); // Wait 3 seconds before marking offline
     });
   }
 

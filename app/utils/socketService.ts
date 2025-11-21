@@ -63,25 +63,66 @@ export const initialize = async (): Promise<void> => {
     }
     
     // Initialize new socket connection
+    // For mobile data networks, prioritize polling over websocket for better reliability
     socket = io(BASE_URL, {
       auth: { token },
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'], // Polling first for mobile data reliability
       reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000
+      reconnectionAttempts: 10, // More attempts for mobile networks
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000, // Longer timeout for mobile networks
+      forceNew: false,
+      upgrade: true, // Allow upgrade from polling to websocket if available
     });
     
     // Set up event listeners
     socket.on('connect', () => {
-      console.log('Socket connected successfully', socket?.id);
+      console.log('✅ Socket connected successfully', socket?.id);
+      console.log('   Transport:', socket.io.engine?.transport?.name || 'unknown');
+      
+      // Emit connection event for services that need to re-register listeners
+      socket.emit('socket-reconnected');
     });
     
     socket.on('connect_error', (error) => {
-      console.error('Socket connection error:', error.message);
+      console.error('❌ Socket connection error:', error.message);
+      console.error('   Error type:', error.type);
     });
     
     socket.on('disconnect', (reason) => {
-      console.log('Socket disconnected:', reason);
+      console.log('🔌 Socket disconnected:', reason);
+      
+      // If it's a transport error, try to reconnect
+      if (reason === 'transport close' || reason === 'transport error') {
+        console.log('🔄 Transport error detected, will attempt reconnection...');
+      }
+    });
+    
+    socket.on('reconnect', (attemptNumber) => {
+      console.log(`✅ Socket reconnected after ${attemptNumber} attempts`);
+      console.log('   Socket ID:', socket?.id);
+      console.log('   Transport:', socket.io.engine?.transport?.name || 'unknown');
+      
+      // Emit reconnection event for services that need to refresh
+      socket.emit('socket-reconnected');
+    });
+    
+    socket.on('reconnect_attempt', (attemptNumber) => {
+      console.log(`🔄 Socket reconnection attempt ${attemptNumber}...`);
+    });
+    
+    socket.on('reconnect_error', (error) => {
+      console.error('❌ Socket reconnection error:', error.message);
+    });
+    
+    socket.on('reconnect_failed', () => {
+      console.error('❌ Socket reconnection failed after all attempts');
+      // Try to reinitialize
+      setTimeout(() => {
+        console.log('🔄 Attempting to reinitialize socket...');
+        initialize();
+      }, 5000);
     });
     
   } catch (error) {

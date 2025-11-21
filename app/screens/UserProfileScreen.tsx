@@ -526,6 +526,20 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
       return;
     }
     
+    // Check if user is offline
+    const isUserOnline = userStatus?.isOnline ?? user?.isOnline ?? false;
+    if (!isUserOnline) {
+      Alert.alert('User Offline', 'This user is currently offline. You cannot make a call.');
+      return;
+    }
+    
+    // Check if user is on call
+    const isUserOnCall = userStatus?.isOnCall ?? false;
+    if (isUserOnCall) {
+      Alert.alert('User Busy', 'This user is currently on a call. Please try again later.');
+      return;
+    }
+    
     navigation.navigate('CallScreen', { 
       id: userId, 
       name: userName, 
@@ -538,6 +552,20 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
     // Don't allow calling blocked users
     if (isBlocked) {
       Alert.alert('Blocked', 'You cannot call a blocked user');
+      return;
+    }
+    
+    // Check if user is offline
+    const isUserOnline = userStatus?.isOnline ?? user?.isOnline ?? false;
+    if (!isUserOnline) {
+      Alert.alert('User Offline', 'This user is currently offline. You cannot make a video call.');
+      return;
+    }
+    
+    // Check if user is on call
+    const isUserOnCall = userStatus?.isOnCall ?? false;
+    if (isUserOnCall) {
+      Alert.alert('User Busy', 'This user is currently on a call. Please try again later.');
       return;
     }
     
@@ -657,16 +685,36 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
           </Text>
           
           <View style={styles.onlineStatus}>
-            <View style={[
-              styles.onlineDot, 
-              { backgroundColor: (userStatus?.isOnline ?? user.isOnline) ? '#4CAF50' : '#F44336' }
-            ]} />
-            <Text style={[
-              styles.onlineText,
-              { color: (userStatus?.isOnline ?? user.isOnline) ? '#4CAF50' : '#F44336' }
-            ]}>
-              {(userStatus?.isOnline ?? user.isOnline) ? 'User online' : 'User offline'}
-            </Text>
+            {(() => {
+              const isUserOnline = userStatus?.isOnline ?? user.isOnline ?? false;
+              const isUserOnCall = userStatus?.isOnCall ?? false;
+              
+              let statusColor = '#F44336'; // Offline (red)
+              let statusText = 'User offline';
+              
+              if (isUserOnCall) {
+                statusColor = '#FF9800'; // On Call (orange)
+                statusText = 'User on call';
+              } else if (isUserOnline) {
+                statusColor = '#4CAF50'; // Online (green)
+                statusText = 'User online';
+              }
+              
+              return (
+                <>
+                  <View style={[
+                    styles.onlineDot, 
+                    { backgroundColor: statusColor }
+                  ]} />
+                  <Text style={[
+                    styles.onlineText,
+                    { color: statusColor }
+                  ]}>
+                    {statusText}
+                  </Text>
+                </>
+              );
+            })()}
           </View>
         </View>
         
@@ -680,18 +728,28 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
             <Text style={styles.buttonText}>Message</Text>
           </TouchableOpacity>
           
-          <TouchableOpacity 
-            style={[
-              styles.callButton, 
-              styles.callButtonFullWidth,
-              isBlocked && styles.buttonDisabled
-            ]} 
-            onPress={handleCallUser}
-            disabled={isBlocked}
-          >
-            <Icon name="call-outline" size={24} color={isBlocked ? "#999" : "#fff"} />
-            <Text style={[styles.buttonText, isBlocked && styles.buttonTextDisabled]}>Call</Text>
-          </TouchableOpacity>
+          {(() => {
+            const isUserOnline = userStatus?.isOnline ?? user?.isOnline ?? false;
+            const isUserOnCall = userStatus?.isOnCall ?? false;
+            const isCallDisabled = isBlocked || !isUserOnline || isUserOnCall;
+            
+            return (
+              <TouchableOpacity 
+                style={[
+                  styles.callButton, 
+                  styles.callButtonFullWidth,
+                  isCallDisabled && styles.buttonDisabled
+                ]} 
+                onPress={handleCallUser}
+                disabled={isCallDisabled}
+              >
+                <Icon name="call-outline" size={24} color={isCallDisabled ? "#999" : "#fff"} />
+                <Text style={[styles.buttonText, isCallDisabled && styles.buttonTextDisabled]}>
+                  {isUserOnCall ? 'On Call' : 'Call'}
+                </Text>
+              </TouchableOpacity>
+            );
+          })()}
         </View>
         
         {/* Stats section */}

@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 
 // Use different URLs for different environments
-export const DEV = true; // Set to true for local development
+export const DEV = false; // Set to true for local development
 
 // Optional override: point the app to an ngrok tunnel for quick testing on real devices
 export const USE_NGROK = true; // Set to true for cross-network testing (WiFi + Mobile Data), false for local development

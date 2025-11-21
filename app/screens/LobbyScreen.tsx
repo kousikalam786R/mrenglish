@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/types';
 import { getAllUsers } from '../utils/userService';
 import socketService from '../utils/socketService';
@@ -1007,9 +1008,11 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       findingPartner
     });
     
-    // Close connecting screen
+    // Close connecting screen and partner search screen
     setShowConnecting(false);
     setConnectingPartner(null);
+    setShowPartnerSearch(false);
+    setFindingPartner(false);
     
     // Navigate to CallScreen
     console.log('🤝 NAVIGATING TO CALLSCREEN with params:', {
@@ -1179,16 +1182,26 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   const handleCallStateChange = (callState: any) => {
     console.log('📞 Call state changed:', callState.status);
     if (callState.status === 'connected' || callState.status === 'ringing') {
-      // Close connecting screen when call starts
-      console.log('📞 Call started - closing connecting screen');
+      // Close connecting screen and partner search screen when call starts
+      console.log('📞 Call started - closing connecting screen and partner search screen');
       setShowConnecting(false);
       setConnectingPartner(null);
+      setShowPartnerSearch(false);
+      setFindingPartner(false);
     }
   };
 
   // Handle call started event
   const handleCallStarted = async (data: any) => {
     console.log('📞 Call started event:', data);
+    
+    // Ensure partner search screen is closed when call starts
+    console.log('📞 Call started - ensuring partner search screen is closed');
+    setShowPartnerSearch(false);
+    setFindingPartner(false);
+    setShowConnecting(false);
+    setConnectingPartner(null);
+    
     if (data.userId) {
       // Update call status for BOTH users (caller and receiver)
       simpleUserStatusService.setUserCallStatus(data.userId, true, data.callStartTime);
@@ -1363,9 +1376,11 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       // Initialize call service
       callService.initialize();
       
-      // Navigate to call screen first
+      // Navigate to call screen first - ensure all search screens are closed
       setShowConnecting(false);
       setConnectingPartner(null);
+      setShowPartnerSearch(false);
+      setFindingPartner(false);
       
       navigation.navigate('CallScreen', { 
         id: partner._id, 
@@ -1406,6 +1421,18 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       userName: user.name
     });
   };
+
+  // Ensure PartnerSearchScreen is closed when screen comes into focus (e.g., returning from CallScreen)
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('🔄 LobbyScreen focused - ensuring PartnerSearchScreen is closed');
+      // Close partner search screen when returning to lobby (e.g., after call ends)
+      setShowPartnerSearch(false);
+      setFindingPartner(false);
+      setShowConnecting(false);
+      setConnectingPartner(null);
+    }, [])
+  );
 
   // Set up global event listeners immediately when component mounts
   useEffect(() => {
@@ -1499,7 +1526,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       
       {/* Ready to talk now horizontal section */}
       {readyUsers.length > 0 && (
-        <View style={styles.readySection}>
+        <View style={[styles.readySection, { backgroundColor: theme.surface }]}>
           <Text style={[styles.readyTitle, { color: theme.text }]}>{t('lobby.readyToTalk')}</Text>
           <FlatList
             data={readyUsers}
@@ -1507,7 +1534,13 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
             keyExtractor={(item) => item._id}
             renderItem={({ item }) => (
               <TouchableOpacity 
-                style={[styles.readyCard, { backgroundColor: theme.card }]}
+                style={[
+                  styles.readyCard, 
+                  { 
+                    backgroundColor: theme.card,
+                    shadowColor: theme.shadow,
+                  }
+                ]}
                 onPress={() => handleCallPress(item)}
               >
                 <Image 
@@ -1897,12 +1930,10 @@ const styles = StyleSheet.create({
   },
   readySection: {
     paddingVertical: 15,
-    backgroundColor: '#FFFFFF',
   },
   readyTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
     paddingHorizontal: 20,
     marginBottom: 12,
   },
@@ -1910,13 +1941,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
   },
   readyCard: {
-    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     padding: 12,
     marginRight: 12,
     width: 120,
     alignItems: 'center',
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -1931,7 +1960,6 @@ const styles = StyleSheet.create({
   readyName: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
     marginBottom: 8,
     textAlign: 'center',
   },

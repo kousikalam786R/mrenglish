@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 import socketService from './socketService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -588,6 +588,10 @@ class CallService {
       // Start state sync for reliability
       this.startStateSync();
 
+      // Reset ICE candidate counters for receiver side
+      this.iceCandidateCount = 0;
+      this.relayCandidateCount = 0;
+
       // Initialize WebRTC
       await this.initializeWebRTC(options);
 
@@ -604,26 +608,60 @@ class CallService {
       });
       
       await this.pc.setRemoteDescription(remoteDesc);
-      console.log('Successfully set remote description (offer)');
+      console.log('Successfully set remote description (offer) - ICE gathering will start after local description');
 
       // Create answer
       console.log('Creating answer with signaling state:', this.pc.signalingState);
       const answer = await this.pc.createAnswer();
       console.log('Answer created successfully');
       
-      // Set local description
+      // Set local description - THIS STARTS ICE GATHERING on receiver side
       await this.pc.setLocalDescription(answer);
-      console.log('Successfully set local description (answer)');
+      console.log('Successfully set local description (answer) - ICE gathering started');
+      
+      // CRITICAL: Wait for ICE candidates to be gathered (especially TURN relay candidates)
+      // This is essential when BOTH users are on mobile data - receiver also needs TURN
+      console.log('Waiting for ICE candidates to be gathered (especially TURN relay candidates)...');
+      await new Promise(resolve => setTimeout(resolve, 500)); // Give ICE gathering a moment to start
+      await this.waitForIceCandidates(8000); // Wait up to 8 seconds for candidates
+      
+      // Get the updated SDP with all gathered candidates
+      const finalAnswer = this.pc.localDescription;
+      if (!finalAnswer) {
+        throw new Error('Local description not available after ICE gathering');
+      }
+      
+      // Verify SDP was updated with candidates
+      const originalSdpLength = answer.sdp.length;
+      const finalSdpLength = finalAnswer.sdp.length;
+      const sdpUpdated = finalSdpLength > originalSdpLength;
+      
+      console.log(`✅ Using updated answer SDP with ${this.iceCandidateCount} total candidates (${this.relayCandidateCount} relay)`);
+      console.log(`   SDP size: ${originalSdpLength} → ${finalSdpLength} bytes (${sdpUpdated ? 'updated ✓' : 'not updated ✗'})`);
+      
+      if (this.relayCandidateCount > 0) {
+        console.log('✅ TURN relay candidates included in answer SDP - mobile-to-mobile connection should work!');
+        
+        // Verify relay candidates are in the SDP
+        const hasRelayInSdp = finalAnswer.sdp.includes('typ relay');
+        if (hasRelayInSdp) {
+          console.log('✅ Verified: TURN relay candidates found in answer SDP string');
+        } else {
+          console.warn('⚠️ Warning: TURN relay candidates not found in SDP string (may be in candidate events only)');
+        }
+      } else {
+        console.warn('⚠️ No TURN relay candidates in answer SDP - mobile-to-mobile connection may fail');
+      }
 
       // Set call start time and update state
       const callStartTime = Date.now();
       console.log('Setting and sending call start time:', callStartTime);
 
-      // Create the answer payload with all necessary data
+      // Create the answer payload with updated SDP that includes all ICE candidates
       const answerPayload = {
         targetUserId: this.callState.remoteUserId,
-        sdp: answer.sdp,
-        type: answer.type,
+        sdp: finalAnswer.sdp, // Use updated SDP with all candidates
+        type: finalAnswer.type,
         accepted: true,
         callHistoryId: this.callState.callHistoryId,
         callStartTime: callStartTime
@@ -1747,10 +1785,67 @@ class CallService {
   }
 
   // Toggle speaker
-  public toggleSpeaker(): void {
-    // This is platform-specific and requires native modules
-    // Implement based on the audio routing capabilities available
-    // This is a placeholder that would need to be implemented with a native module
+  public async toggleSpeaker(enable: boolean): Promise<void> {
+    try {
+      console.log(`🔊 Toggling speaker to: ${enable} (Platform: ${Platform.OS})`);
+      
+      if (Platform.OS === 'ios') {
+        // iOS: Use RTCAudioSession
+        const { RTCAudioSession } = require('react-native-webrtc');
+        RTCAudioSession.setCategory('AVAudioSessionCategoryPlayAndRecord', {
+          mode: 'AVAudioSessionModeVoiceChat',
+          options: {
+            'defaultToSpeaker': enable,
+            'allowBluetooth': true,
+            'allowBluetoothA2DP': true,
+          }
+        });
+        console.log('✅ Speaker toggled to:', enable, '(iOS)');
+      } else if (Platform.OS === 'android') {
+        // Android: Use WebRTCModule's setSpeakerphoneOn
+        // Try multiple possible module names
+        const possibleModules = [
+          NativeModules.WebRTCModule,
+          NativeModules.RTCModule,
+          NativeModules.RTCAudioManager,
+        ];
+        
+        let speakerSet = false;
+        for (const module of possibleModules) {
+          if (module && typeof module.setSpeakerphoneOn === 'function') {
+            try {
+              await module.setSpeakerphoneOn(enable);
+              console.log(`✅ Speaker toggled to: ${enable} using ${module.constructor.name} (Android)`);
+              speakerSet = true;
+              break;
+            } catch (moduleError) {
+              console.warn(`Failed to use ${module.constructor.name}:`, moduleError);
+            }
+          }
+        }
+        
+        if (!speakerSet) {
+          // Try alternative method: directly access the native module from react-native-webrtc
+          try {
+            const webrtc = require('react-native-webrtc');
+            if (webrtc && webrtc.default && typeof webrtc.default.setSpeakerphoneOn === 'function') {
+              await webrtc.default.setSpeakerphoneOn(enable);
+              console.log('✅ Speaker toggled using react-native-webrtc default export');
+              speakerSet = true;
+            }
+          } catch (webrtcError) {
+            console.warn('Failed to use react-native-webrtc default export:', webrtcError);
+          }
+        }
+        
+        if (!speakerSet) {
+          throw new Error('Speaker control not available on Android - no compatible module found');
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error in toggleSpeaker:', error);
+      throw error;
+    }
   }
 
   // Get current call state

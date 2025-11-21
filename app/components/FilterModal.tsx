@@ -10,6 +10,7 @@ import {
   Dimensions,
   PanResponder
 } from 'react-native';
+import { useTheme } from '../context/ThemeContext';
 
 interface FilterModalProps {
   visible: boolean;
@@ -28,6 +29,7 @@ export interface FilterSettings {
 }
 
 const FilterModal = ({ visible, onClose, onApply, initialFilters }: FilterModalProps) => {
+  const { theme } = useTheme();
   const [gender, setGender] = useState<'all' | 'male' | 'female'>(
     initialFilters?.gender || 'all'
   );
@@ -57,9 +59,9 @@ const FilterModal = ({ visible, onClose, onApply, initialFilters }: FilterModalP
   const getLevelColor = (index: number) => {
     // Check if this level is within the selected range
     if (index >= levelMin && index <= levelMax) {
-      return '#673AB7'; // Purple
+      return theme.primary; // Primary color
     }
-    return '#E0E0E0'; // Light gray for unselected
+    return theme.divider; // Divider color for unselected
   };
 
   const handleRatingMinChange = (value: number) => {
@@ -98,6 +100,39 @@ const FilterModal = ({ visible, onClose, onApply, initialFilters }: FilterModalP
     onClose();
   };
 
+  const dynamicStyles = {
+    overlay: { backgroundColor: theme.overlay },
+    modal: { backgroundColor: theme.card },
+    header: { borderBottomColor: theme.border },
+    title: { color: theme.text },
+    closeButtonText: { color: theme.textSecondary },
+    sectionTitle: { color: theme.text },
+    ratingRange: { color: theme.textSecondary },
+    levelLabel: { color: theme.textSecondary },
+    sliderLabel: { color: theme.text },
+    pill: {
+      backgroundColor: theme.card,
+      borderColor: theme.border,
+    },
+    pillActive: {
+      backgroundColor: theme.primary,
+      borderColor: theme.primary,
+    },
+    pillText: { color: theme.textSecondary },
+    pillTextActive: { color: '#FFFFFF' },
+    sliderTrack: { backgroundColor: theme.divider },
+    sliderActiveTrack: { backgroundColor: theme.primary },
+    sliderThumb: {
+      backgroundColor: theme.primary,
+      borderColor: theme.card,
+    },
+    sliderButton: {
+      backgroundColor: theme.primary,
+      shadowColor: theme.shadow,
+    },
+    applyButton: { backgroundColor: theme.primary },
+  };
+
   return (
     <Modal
       visible={visible}
@@ -106,42 +141,66 @@ const FilterModal = ({ visible, onClose, onApply, initialFilters }: FilterModalP
       onRequestClose={onClose}
     >
       <TouchableWithoutFeedback onPress={onClose}>
-        <View style={styles.overlay}>
+        <View style={[styles.overlay, dynamicStyles.overlay]}>
           <TouchableWithoutFeedback onPress={(e) => e.stopPropagation()}>
-            <View style={styles.modal}>
-              <View style={styles.header}>
-                <Text style={styles.title}>Find a partner</Text>
+            <View style={[styles.modal, dynamicStyles.modal]}>
+              <View style={[styles.header, dynamicStyles.header]}>
+                <Text style={[styles.title, dynamicStyles.title]}>Find a partner</Text>
                 <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                  <Text style={styles.closeButtonText}>✕</Text>
+                  <Text style={[styles.closeButtonText, dynamicStyles.closeButtonText]}>✕</Text>
                 </TouchableOpacity>
               </View>
 
               <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
                 {/* Gender Filter */}
                 <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Gender</Text>
+                  <Text style={[styles.sectionTitle, dynamicStyles.sectionTitle]}>Gender</Text>
                   <View style={styles.pillContainer}>
                     <TouchableOpacity
-                      style={[styles.pill, gender === 'all' && styles.pillActive]}
+                      style={[
+                        styles.pill, 
+                        dynamicStyles.pill,
+                        gender === 'all' && [styles.pillActive, dynamicStyles.pillActive]
+                      ]}
                       onPress={() => setGender('all')}
                     >
-                      <Text style={[styles.pillText, gender === 'all' && styles.pillTextActive]}>
+                      <Text style={[
+                        styles.pillText, 
+                        dynamicStyles.pillText,
+                        gender === 'all' && [styles.pillTextActive, dynamicStyles.pillTextActive]
+                      ]}>
                         All
                       </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.pill, gender === 'male' && styles.pillActive]}
+                      style={[
+                        styles.pill, 
+                        dynamicStyles.pill,
+                        gender === 'male' && [styles.pillActive, dynamicStyles.pillActive]
+                      ]}
                       onPress={() => setGender('male')}
                     >
-                      <Text style={[styles.pillText, gender === 'male' && styles.pillTextActive]}>
+                      <Text style={[
+                        styles.pillText, 
+                        dynamicStyles.pillText,
+                        gender === 'male' && [styles.pillTextActive, dynamicStyles.pillTextActive]
+                      ]}>
                         Male
                       </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.pill, gender === 'female' && styles.pillActive]}
+                      style={[
+                        styles.pill, 
+                        dynamicStyles.pill,
+                        gender === 'female' && [styles.pillActive, dynamicStyles.pillActive]
+                      ]}
                       onPress={() => setGender('female')}
                     >
-                      <Text style={[styles.pillText, gender === 'female' && styles.pillTextActive]}>
+                      <Text style={[
+                        styles.pillText, 
+                        dynamicStyles.pillText,
+                        gender === 'female' && [styles.pillTextActive, dynamicStyles.pillTextActive]
+                      ]}>
                         Female
                       </Text>
                     </TouchableOpacity>
@@ -151,21 +210,29 @@ const FilterModal = ({ visible, onClose, onApply, initialFilters }: FilterModalP
                 {/* Rating Filter */}
                 <View style={styles.section}>
                   <View style={styles.ratingHeader}>
-                    <Text style={styles.sectionTitle}>Rating</Text>
-                    <Text style={styles.ratingRange}>
+                    <Text style={[styles.sectionTitle, dynamicStyles.sectionTitle]}>Rating</Text>
+                    <Text style={[styles.ratingRange, dynamicStyles.ratingRange]}>
                       {ratingMin}-{ratingMax}% 👍
                     </Text>
                   </View>
                   
                   {/* Rating Slider with Buttons */}
                   <View style={styles.sliderContainer}>
-                    <View style={styles.sliderTrack}>
-                      <View style={[styles.sliderActiveTrack, { 
-                        left: `${ratingMin}%`, 
-                        width: `${ratingMax - ratingMin}%` 
-                      }]} />
+                    <View style={[styles.sliderTrack, dynamicStyles.sliderTrack]}>
+                      <View style={[
+                        styles.sliderActiveTrack, 
+                        dynamicStyles.sliderActiveTrack,
+                        { 
+                          left: `${ratingMin}%`, 
+                          width: `${ratingMax - ratingMin}%` 
+                        }
+                      ]} />
                       <TouchableOpacity
-                        style={[styles.sliderThumb, { left: `${ratingMin}%` }]}
+                        style={[
+                          styles.sliderThumb, 
+                          dynamicStyles.sliderThumb,
+                          { left: `${ratingMin}%` }
+                        ]}
                         onPress={() => {
                           const newValue = ratingMin > 0 ? ratingMin - 10 : 0;
                           console.log('Min thumb pressed, new value:', newValue);
@@ -173,7 +240,11 @@ const FilterModal = ({ visible, onClose, onApply, initialFilters }: FilterModalP
                         }}
                       />
                       <TouchableOpacity
-                        style={[styles.sliderThumb, { left: `${ratingMax}%` }]}
+                        style={[
+                          styles.sliderThumb, 
+                          dynamicStyles.sliderThumb,
+                          { left: `${ratingMax}%` }
+                        ]}
                         onPress={() => {
                           const newValue = ratingMax < 100 ? ratingMax + 10 : 100;
                           console.log('Max thumb pressed, new value:', newValue);
@@ -183,7 +254,7 @@ const FilterModal = ({ visible, onClose, onApply, initialFilters }: FilterModalP
                     </View>
                     <View style={styles.sliderButtonsRow}>
                       <TouchableOpacity 
-                        style={styles.sliderButton}
+                        style={[styles.sliderButton, dynamicStyles.sliderButton]}
                         onPress={() => {
                           console.log('Min button pressed, current:', ratingMin);
                           handleRatingMinChange(Math.max(0, ratingMin - 10));
@@ -191,9 +262,9 @@ const FilterModal = ({ visible, onClose, onApply, initialFilters }: FilterModalP
                       >
                         <Text style={styles.sliderButtonText}>-</Text>
                       </TouchableOpacity>
-                      <Text style={styles.sliderLabel}>Range: {ratingMin}-{ratingMax}%</Text>
+                      <Text style={[styles.sliderLabel, dynamicStyles.sliderLabel]}>Range: {ratingMin}-{ratingMax}%</Text>
                       <TouchableOpacity 
-                        style={styles.sliderButton}
+                        style={[styles.sliderButton, dynamicStyles.sliderButton]}
                         onPress={() => {
                           console.log('Max button pressed, current:', ratingMax);
                           handleRatingMaxChange(Math.min(100, ratingMax + 10));
@@ -207,7 +278,7 @@ const FilterModal = ({ visible, onClose, onApply, initialFilters }: FilterModalP
 
                 {/* English Level Filter */}
                 <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>English level</Text>
+                  <Text style={[styles.sectionTitle, dynamicStyles.sectionTitle]}>English level</Text>
                   
                   {/* English Level Bars - Clickable */}
                   <View style={styles.levelContainer}>
@@ -242,22 +313,26 @@ const FilterModal = ({ visible, onClose, onApply, initialFilters }: FilterModalP
                             }
                           ]}
                         />
-                        <Text style={styles.levelLabel}>{level}</Text>
+                        <Text style={[styles.levelLabel, dynamicStyles.levelLabel]}>{level}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
                   
                   {/* Level Range Slider with Buttons */}
                   <View style={styles.sliderContainer}>
-                    <View style={styles.sliderTrack}>
-                      <View style={[styles.sliderActiveTrack, { 
-                        left: `${(levelMin / 5) * 100}%`, 
-                        width: `${((levelMax - levelMin) / 5) * 100}%` 
-                      }]} />
+                    <View style={[styles.sliderTrack, dynamicStyles.sliderTrack]}>
+                      <View style={[
+                        styles.sliderActiveTrack, 
+                        dynamicStyles.sliderActiveTrack,
+                        { 
+                          left: `${(levelMin / 5) * 100}%`, 
+                          width: `${((levelMax - levelMin) / 5) * 100}%` 
+                        }
+                      ]} />
                     </View>
                     <View style={styles.sliderButtonsRow}>
                       <TouchableOpacity 
-                        style={styles.sliderButton}
+                        style={[styles.sliderButton, dynamicStyles.sliderButton]}
                         onPress={() => {
                           const newMin = Math.max(0, levelMin - 1);
                           handleLevelMinChange(newMin);
@@ -265,11 +340,11 @@ const FilterModal = ({ visible, onClose, onApply, initialFilters }: FilterModalP
                       >
                         <Text style={styles.sliderButtonText}>-</Text>
                       </TouchableOpacity>
-                      <Text style={styles.sliderLabel}>
+                      <Text style={[styles.sliderLabel, dynamicStyles.sliderLabel]}>
                         {englishLevels[levelMin]} to {englishLevels[levelMax]}
                       </Text>
                       <TouchableOpacity 
-                        style={styles.sliderButton}
+                        style={[styles.sliderButton, dynamicStyles.sliderButton]}
                         onPress={() => {
                           const newMax = Math.min(englishLevels.length - 1, levelMax + 1);
                           handleLevelMaxChange(newMax);
@@ -283,7 +358,7 @@ const FilterModal = ({ visible, onClose, onApply, initialFilters }: FilterModalP
               </ScrollView>
 
               {/* Apply Button */}
-              <TouchableOpacity style={styles.applyButton} onPress={handleApply}>
+              <TouchableOpacity style={[styles.applyButton, dynamicStyles.applyButton]} onPress={handleApply}>
                 <Text style={styles.applyButtonText}>Apply</Text>
               </TouchableOpacity>
             </View>
@@ -299,11 +374,9 @@ const { width } = Dimensions.get('window');
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
   },
   modal: {
-    backgroundColor: 'white',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: '80%',
@@ -315,12 +388,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
   },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
   },
   closeButton: {
     width: 30,
@@ -330,7 +401,6 @@ const styles = StyleSheet.create({
   },
   closeButtonText: {
     fontSize: 24,
-    color: '#999',
   },
   content: {
     paddingHorizontal: 20,
@@ -341,7 +411,6 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
     marginBottom: 12,
   },
   pillContainer: {
@@ -352,21 +421,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 20,
-    backgroundColor: 'white',
     borderWidth: 1,
-    borderColor: '#E0E0E0',
   },
   pillActive: {
-    backgroundColor: '#673AB7',
-    borderColor: '#673AB7',
+    // Colors applied via dynamicStyles
   },
   pillText: {
     fontSize: 14,
-    color: '#666',
     fontWeight: '500',
   },
   pillTextActive: {
-    color: 'white',
     fontWeight: '600',
   },
   ratingHeader: {
@@ -377,17 +441,14 @@ const styles = StyleSheet.create({
   },
   ratingRange: {
     fontSize: 14,
-    color: '#666',
     fontWeight: '500',
   },
   ratingInfo: {
     padding: 12,
-    backgroundColor: '#F5F5F5',
     borderRadius: 8,
   },
   ratingInfoText: {
     fontSize: 14,
-    color: '#666',
   },
   levelContainer: {
     flexDirection: 'row',
@@ -406,7 +467,6 @@ const styles = StyleSheet.create({
   },
   levelLabel: {
     fontSize: 12,
-    color: '#666',
     fontWeight: '500',
   },
   sliderContainer: {
@@ -414,14 +474,12 @@ const styles = StyleSheet.create({
   },
   sliderTrack: {
     height: 8,
-    backgroundColor: '#E0E0E0',
     borderRadius: 4,
     position: 'relative',
   },
   sliderActiveTrack: {
     position: 'absolute',
     height: '100%',
-    backgroundColor: '#673AB7',
     borderRadius: 4,
   },
   sliderThumb: {
@@ -429,9 +487,7 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: '#673AB7',
     borderWidth: 3,
-    borderColor: 'white',
     top: -6,
     marginLeft: -10,
   },
@@ -445,11 +501,9 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#673AB7',
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 2,
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 2,
@@ -461,13 +515,11 @@ const styles = StyleSheet.create({
   },
   sliderLabel: {
     fontSize: 14,
-    color: '#333',
     fontWeight: '600',
   },
   applyButton: {
     margin: 20,
     marginTop: 10,
-    backgroundColor: '#673AB7',
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',

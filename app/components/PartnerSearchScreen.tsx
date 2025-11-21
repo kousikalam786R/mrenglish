@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import IconMaterial from 'react-native-vector-icons/MaterialIcons';
+import { useTheme } from '../context/ThemeContext';
 
 interface PartnerSearchScreenProps {
   visible: boolean;
@@ -27,6 +28,7 @@ const PartnerSearchScreen: React.FC<PartnerSearchScreenProps> = ({
   onSettings,
   emoji = '👨‍🍳',
 }) => {
+  const { theme, isDark } = useTheme();
   const [seconds, setSeconds] = useState(0);
   const [minutes, setMinutes] = useState(0);
   const rotationAnim = useRef(new Animated.Value(0)).current;
@@ -112,6 +114,25 @@ const PartnerSearchScreen: React.FC<PartnerSearchScreenProps> = ({
   
   if (!visible) return null;
   
+  const dynamicStyles = {
+    container: { backgroundColor: theme.background },
+    header: { borderBottomColor: theme.border },
+    title: { color: theme.text },
+    lookingText: { color: theme.text },
+    perfectPartnerText: { color: theme.text },
+    timerText: { color: theme.text },
+    waitingText: { color: theme.textSecondary },
+    instructionText: { color: theme.textSecondary },
+    progressCircle: { 
+      borderColor: isDark ? 'rgba(103, 58, 183, 0.2)' : 'rgba(103, 58, 183, 0.1)',
+      borderTopColor: theme.primary,
+      borderRightColor: theme.primary,
+    },
+    settingsText: { color: theme.primary },
+    cancelButton: { backgroundColor: theme.inputBackground },
+    cancelText: { color: theme.text },
+  };
+  
   return (
     <Modal
       visible={visible}
@@ -119,41 +140,42 @@ const PartnerSearchScreen: React.FC<PartnerSearchScreenProps> = ({
       transparent={false}
       onRequestClose={onCancel}
     >
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
+      <SafeAreaView style={[styles.container, dynamicStyles.container]}>
+        <View style={[styles.header, dynamicStyles.header]}>
           <TouchableOpacity 
             style={styles.backButton} 
             onPress={onCancel}
             hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
           >
-            <Icon name="chevron-back" size={28} color="#000" />
+            <Icon name="chevron-back" size={28} color={theme.text} />
           </TouchableOpacity>
-          <Text style={styles.title}>Find a partner</Text>
+          <Text style={[styles.title, dynamicStyles.title]}>Find a partner</Text>
         </View>
         
         <View style={styles.content}>
           <View style={styles.searchInfoContainer}>
-            <Text style={styles.lookingText}>Looking for</Text>
-            <Text style={styles.perfectPartnerText}>the perfect partner</Text>
+            <Text style={[styles.lookingText, dynamicStyles.lookingText]}>Looking for</Text>
+            <Text style={[styles.perfectPartnerText, dynamicStyles.perfectPartnerText]}>the perfect partner</Text>
           </View>
           
           <View style={styles.loaderContainer}>
             <Animated.View
               style={[
                 styles.progressCircle,
+                dynamicStyles.progressCircle,
                 { transform: [{ rotate: spin }] },
               ]}
             />
             <View style={styles.emojiContainer}>
               <Text style={styles.emojiText}>{emoji}</Text>
-              <Text style={styles.timerText}>{formatTime()}</Text>
-              <Text style={styles.waitingText}>
+              <Text style={[styles.timerText, dynamicStyles.timerText]}>{formatTime()}</Text>
+              <Text style={[styles.waitingText, dynamicStyles.waitingText]}>
                 Waiting time{'\n'}0-2 minutes
               </Text>
             </View>
           </View>
           
-          <Text style={styles.instructionText}>
+          <Text style={[styles.instructionText, dynamicStyles.instructionText]}>
             Don't lock the screen or exit the app
             {'\n'}during the search
           </Text>
@@ -162,16 +184,16 @@ const PartnerSearchScreen: React.FC<PartnerSearchScreenProps> = ({
             style={styles.settingsButton}
             onPress={onSettings}
           >
-            <IconMaterial name="tune" size={24} color="#673AB7" />
-            <Text style={styles.settingsText}>Search settings</Text>
+            <IconMaterial name="tune" size={24} color={theme.primary} />
+            <Text style={[styles.settingsText, dynamicStyles.settingsText]}>Search settings</Text>
           </TouchableOpacity>
         </View>
         
         <TouchableOpacity 
-          style={styles.cancelButton}
+          style={[styles.cancelButton, dynamicStyles.cancelButton]}
           onPress={onCancel}
         >
-          <Text style={styles.cancelText}>Cancel the search</Text>
+          <Text style={[styles.cancelText, dynamicStyles.cancelText]}>Cancel the search</Text>
         </TouchableOpacity>
       </SafeAreaView>
     </Modal>
@@ -181,7 +203,6 @@ const PartnerSearchScreen: React.FC<PartnerSearchScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: 'white',
   },
   header: {
     flexDirection: 'row',
@@ -190,6 +211,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 15,
     position: 'relative',
+    borderBottomWidth: 1,
   },
   backButton: {
     position: 'absolute',
@@ -198,7 +220,6 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#000',
   },
   content: {
     flex: 1,
@@ -213,12 +234,10 @@ const styles = StyleSheet.create({
   lookingText: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#000',
   },
   perfectPartnerText: {
     fontSize: 30,
     fontWeight: 'bold',
-    color: '#000',
   },
   loaderContainer: {
     width: 220,
@@ -233,9 +252,6 @@ const styles = StyleSheet.create({
     height: 220,
     borderRadius: 110,
     borderWidth: 8,
-    borderColor: 'rgba(103, 58, 183, 0.1)',
-    borderTopColor: '#673AB7',
-    borderRightColor: '#673AB7',
   },
   emojiContainer: {
     alignItems: 'center',
@@ -248,17 +264,14 @@ const styles = StyleSheet.create({
   timerText: {
     fontSize: 42,
     fontWeight: 'bold',
-    color: '#000',
   },
   waitingText: {
     fontSize: 14,
-    color: '#666',
     textAlign: 'center',
     marginTop: 5,
   },
   instructionText: {
     fontSize: 16,
-    color: '#333',
     textAlign: 'center',
     marginVertical: 30,
   },
@@ -269,11 +282,9 @@ const styles = StyleSheet.create({
   },
   settingsText: {
     fontSize: 16,
-    color: '#673AB7',
     marginLeft: 8,
   },
   cancelButton: {
-    backgroundColor: '#f0f0f0',
     borderRadius: 30,
     paddingVertical: 15,
     paddingHorizontal: 30,
@@ -282,7 +293,6 @@ const styles = StyleSheet.create({
   },
   cancelText: {
     fontSize: 16,
-    color: '#333',
     fontWeight: '500',
   },
 });

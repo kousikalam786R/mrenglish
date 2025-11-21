@@ -10,6 +10,8 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Modal,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -35,6 +37,10 @@ import MessageDebugger from '../components/MessageDebugger';
 import simpleUserStatusService from '../services/simpleUserStatusService';
 import { useUserStatus } from '../hooks/useUserStatus';
 import { useTheme } from '../context/ThemeContext';
+import { API_URL } from '../utils/config';
+import { getAuthToken } from '../utils/authUtils';
+import { setRecentChats } from '../redux/slices/messageSlice';
+import { fetchRecentChats } from '../redux/thunks/messageThunks';
 
 // Define the Extended user interface
 interface ExtendedUser extends User {
@@ -71,14 +77,16 @@ const ChatDetailScreen = () => {
     lastSeenAt: undefined
   });
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [showMenuModal, setShowMenuModal] = useState(false);
   
   // References
   const flatListRef = useRef<FlatList>(null);
   const currentUserId = useRef<string>('');
+  const receiverTypingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Get dispatch and Redux state
   const dispatch = useAppDispatch();
-  const { messages, loading, error, typingUsers } = useAppSelector(state => state.message);
+  const { messages, loading, error, typingUsers, recentChats } = useAppSelector(state => state.message);
   const { theme } = useTheme();
   
   // Get navigation and route
@@ -396,13 +404,35 @@ const ChatDetailScreen = () => {
     socketService.socketOn('user-typing', (data) => {
       console.log('⌨️  TYPING EVENT in ChatDetailScreen:', data);
       if (data && data.userId === id) {
+        // Clear any existing timeout
+        if (receiverTypingTimeoutRef.current) {
+          clearTimeout(receiverTypingTimeoutRef.current);
+          receiverTypingTimeoutRef.current = null;
+        }
+        
+        // Set typing status to true
         dispatch(setTypingStatus({ userId: id, isTyping: true }));
+        
+        // Auto-clear typing status after 5 seconds as a safety measure
+        // This ensures typing indicator doesn't get stuck if typing-stopped event is missed
+        receiverTypingTimeoutRef.current = setTimeout(() => {
+          console.log('⌨️  Auto-clearing typing status (safety timeout)');
+          dispatch(setTypingStatus({ userId: id, isTyping: false }));
+          receiverTypingTimeoutRef.current = null;
+        }, 5000);
       }
     });
     
     socketService.socketOn('typing-stopped', (data) => {
       console.log('⌨️  TYPING STOPPED EVENT in ChatDetailScreen:', data);
       if (data && data.userId === id) {
+        // Clear safety timeout
+        if (receiverTypingTimeoutRef.current) {
+          clearTimeout(receiverTypingTimeoutRef.current);
+          receiverTypingTimeoutRef.current = null;
+        }
+        
+        // Set typing status to false
         dispatch(setTypingStatus({ userId: id, isTyping: false }));
       }
     });
@@ -431,6 +461,14 @@ const ChatDetailScreen = () => {
           
           if (!existingMessage) {
             console.log('✅ Adding new message to chat');
+            
+            // Clear typing status when a message is received (user has finished typing)
+            if (receiverTypingTimeoutRef.current) {
+              clearTimeout(receiverTypingTimeoutRef.current);
+              receiverTypingTimeoutRef.current = null;
+            }
+            dispatch(setTypingStatus({ userId: id, isTyping: false }));
+            
             dispatch(handleSocketMessage(message));
             
             // Mark message as read since user is viewing the chat
@@ -464,6 +502,18 @@ const ChatDetailScreen = () => {
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
       }
+      // Clear typing timeout on unmount (sender side)
+      if (typingTimeout) {
+        clearTimeout(typingTimeout);
+        socketService.socketEmit('typing-stopped', { receiverId: id });
+      }
+      // Clear typing status timeout (receiver side)
+      if (receiverTypingTimeoutRef.current) {
+        clearTimeout(receiverTypingTimeoutRef.current);
+        receiverTypingTimeoutRef.current = null;
+      }
+      // Clear typing status when leaving the chat
+      dispatch(setTypingStatus({ userId: id, isTyping: false }));
       console.log(`🧹 ChatDetailScreen: Cleaning up socket listeners for chat ${id}`);
       socketService.socketOff('user-status');
       socketService.socketOff('user-typing');
@@ -479,6 +529,13 @@ const ChatDetailScreen = () => {
     if (message.trim().length === 0) return;
     
     const messageContent = message.trim();
+    
+    // Clear any typing timeout and send typing-stopped event
+    if (typingTimeout) {
+      clearTimeout(typingTimeout);
+      setTypingTimeout(null);
+    }
+    socketService.socketEmit('typing-stopped', { receiverId: id });
     
     // Clear input immediately for better UX
     setMessage('');
@@ -507,24 +564,32 @@ const ChatDetailScreen = () => {
   const handleInputChange = (text: string) => {
     setMessage(text);
     
+    // Clear any existing timeout to reset the typing indicator timer
+    if (typingTimeout) {
+      clearTimeout(typingTimeout);
+      setTypingTimeout(null);
+    }
+    
     // Handle typing indicator
-    if (text.length > 0 && !typingTimeout) {
+    if (text.length > 0) {
+      // Send typing event if not already sent (or if it was cleared)
       console.log(`⌨️  Starting typing to ${id}`);
       socketService.socketEmit('typing', { receiverId: id });
       
-      // Set a timeout to stop the typing indicator after 2 seconds of inactivity
+      // Set a timeout to stop the typing indicator after 3 seconds of inactivity
+      // This will fire if user stops typing for 3 seconds
       const timeout = setTimeout(() => {
-        console.log(`⌨️  Stopping typing to ${id}`);
+        console.log(`⌨️  Stopping typing to ${id} (inactivity timeout)`);
         socketService.socketEmit('typing-stopped', { receiverId: id });
         setTypingTimeout(null);
-      }, 2000);
+      }, 3000); // Increased to 3 seconds for better UX
       
       setTypingTimeout(timeout as unknown as NodeJS.Timeout);
-    } else if (text.length === 0 && typingTimeout) {
-      clearTimeout(typingTimeout);
-      setTypingTimeout(null);
+    } else if (text.length === 0) {
+      // Text was cleared, stop typing immediately
       console.log(`⌨️  Stopping typing to ${id} (text cleared)`);
       socketService.socketEmit('typing-stopped', { receiverId: id });
+      setTypingTimeout(null);
     }
   };
   
@@ -562,18 +627,168 @@ const ChatDetailScreen = () => {
     }
   };
 
-  // Handle call button press
-  const handleCall = () => {
-    navigation.navigate('CallScreen', {
-      id: id,
-      name: partnerDetails.name,
-      isVideoCall: false
-    });
-  };
-  
   // Handle back button press
   const handleBackPress = () => {
     navigation.goBack();
+  };
+  
+  // Menu option handlers
+  const handleViewProfile = () => {
+    setShowMenuModal(false);
+    navigation.navigate('UserProfile', {
+      userId: id,
+      userName: partnerDetails.name
+    });
+  };
+  
+  const handleInviteToTalk = () => {
+    setShowMenuModal(false);
+    // Navigate to lobby with a filter for this user (or navigate to a call screen)
+    Alert.alert(
+      'Invite to Talk',
+      'This feature will invite the user to start a conversation.',
+      [{ text: 'OK' }]
+    );
+    // You can implement actual invite functionality here
+  };
+  
+  const handleAddToFriends = async () => {
+    setShowMenuModal(false);
+    try {
+      const token = await getAuthToken();
+      if (!token) {
+        Alert.alert('Error', 'You must be logged in to add friends');
+        return;
+      }
+      
+      const response = await fetch(`${API_URL}/auth/users/${id}/favorite`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ favorite: true })
+      });
+      
+      if (response.ok) {
+        Alert.alert('Success', `${partnerDetails.name} has been added to your friends`);
+      } else {
+        const errorData = await response.json();
+        Alert.alert('Error', errorData.message || 'Failed to add friend');
+      }
+    } catch (error: any) {
+      console.error('Error adding friend:', error);
+      Alert.alert('Error', 'Failed to add friend. Please try again.');
+    }
+  };
+  
+  const handleBlock = async () => {
+    setShowMenuModal(false);
+    Alert.alert(
+      'Block User',
+      `Are you sure you want to block ${partnerDetails.name}? You won't be able to see their messages.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const token = await getAuthToken();
+              if (!token) {
+                Alert.alert('Error', 'You must be logged in to block users');
+                return;
+              }
+              
+              const response = await fetch(`${API_URL}/auth/users/${id}/block`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ block: true })
+              });
+              
+              if (response.ok) {
+                Alert.alert('Blocked', `${partnerDetails.name} has been blocked`, [
+                  { text: 'OK', onPress: () => navigation.goBack() }
+                ]);
+              } else {
+                const errorData = await response.json();
+                Alert.alert('Error', errorData.message || 'Failed to block user');
+              }
+            } catch (error: any) {
+              console.error('Error blocking user:', error);
+              Alert.alert('Error', 'Failed to block user. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+  
+  const handleReport = () => {
+    setShowMenuModal(false);
+    Alert.alert(
+      'Report User',
+      `Are you sure you want to report ${partnerDetails.name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Report',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const token = await getAuthToken();
+              if (!token) {
+                Alert.alert('Error', 'You must be logged in to report users');
+                return;
+              }
+              
+              // You can implement actual report functionality here
+              // For now, just show a success message
+              Alert.alert('Reported', `Thank you for reporting. We will review your report.`);
+            } catch (error: any) {
+              console.error('Error reporting user:', error);
+              Alert.alert('Error', 'Failed to report user. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+  
+  const handleDeleteChat = () => {
+    setShowMenuModal(false);
+    Alert.alert(
+      'Delete Chat',
+      `Are you sure you want to delete this chat with ${partnerDetails.name}? This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Remove chat from recent chats in Redux - use the recentChats from selector
+              const updatedChats = recentChats.filter((chat: ChatUser) => chat._id !== id);
+              dispatch(setRecentChats(updatedChats));
+              
+              // Optionally delete messages from local storage/state
+              // You might want to clear messages for this chat ID
+              
+              // Navigate back
+              navigation.goBack();
+              
+              Alert.alert('Deleted', 'Chat has been deleted');
+            } catch (error: any) {
+              console.error('Error deleting chat:', error);
+              Alert.alert('Error', 'Failed to delete chat. Please try again.');
+            }
+          }
+        }
+      ]
+    );
   };
   
   // Handle scroll to bottom button
@@ -621,20 +836,89 @@ const ChatDetailScreen = () => {
           )}
         </View>
         
-        <TouchableOpacity style={styles.headerAction} onPress={handleCall}>
-          <Icon name="call" size={24} color={theme.primary} />
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.headerAction} onPress={() => {
-          navigation.navigate('CallScreen', {
-            id: id,
-            name: partnerDetails.name,
-            isVideoCall: true
-          });
-        }}>
-          <Icon name="videocam" size={24} color={theme.primary} />
+        <TouchableOpacity style={styles.headerAction} onPress={() => setShowMenuModal(true)}>
+          <Icon name="more-vert" size={24} color={theme.text} />
         </TouchableOpacity>
       </View>
+    );
+  };
+  
+  // Render menu modal
+  const renderMenuModal = () => {
+    const dynamicStyles = {
+      menuOverlay: { backgroundColor: theme.overlay || 'rgba(0, 0, 0, 0.5)' },
+      menuContainer: { backgroundColor: theme.card || theme.background },
+      menuItem: { borderBottomColor: theme.divider || theme.border },
+      menuItemText: { color: theme.text },
+      menuItemTextDanger: { color: theme.error },
+    };
+    
+    return (
+      <Modal
+        visible={showMenuModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMenuModal(false)}
+      >
+        <TouchableOpacity
+          style={[styles.menuOverlay, dynamicStyles.menuOverlay]}
+          activeOpacity={1}
+          onPress={() => setShowMenuModal(false)}
+        >
+          <View 
+            style={[styles.menuContainer, dynamicStyles.menuContainer]}
+            onStartShouldSetResponder={() => true}
+          >
+            <TouchableOpacity
+              style={[styles.menuItem, dynamicStyles.menuItem]}
+              onPress={handleViewProfile}
+            >
+              <Icon name="person" size={20} color={theme.text} style={styles.menuIcon} />
+              <Text style={[styles.menuItemText, dynamicStyles.menuItemText]}>View User Profile</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.menuItem, dynamicStyles.menuItem]}
+              onPress={handleInviteToTalk}
+            >
+              <Icon name="phone" size={20} color={theme.text} style={styles.menuIcon} />
+              <Text style={[styles.menuItemText, dynamicStyles.menuItemText]}>Invite to Talk</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.menuItem, dynamicStyles.menuItem]}
+              onPress={handleAddToFriends}
+            >
+              <Icon name="person-add" size={20} color={theme.text} style={styles.menuIcon} />
+              <Text style={[styles.menuItemText, dynamicStyles.menuItemText]}>Add to Friends</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.menuItem, dynamicStyles.menuItem]}
+              onPress={handleBlock}
+            >
+              <Icon name="block" size={20} color={theme.error} style={styles.menuIcon} />
+              <Text style={[styles.menuItemText, dynamicStyles.menuItemTextDanger]}>Block</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.menuItem, dynamicStyles.menuItem]}
+              onPress={handleReport}
+            >
+              <Icon name="flag" size={20} color={theme.error} style={styles.menuIcon} />
+              <Text style={[styles.menuItemText, dynamicStyles.menuItemTextDanger]}>Report</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.menuItem, dynamicStyles.menuItem]}
+              onPress={handleDeleteChat}
+            >
+              <Icon name="delete" size={20} color={theme.error} style={styles.menuIcon} />
+              <Text style={[styles.menuItemText, dynamicStyles.menuItemTextDanger]}>Delete Chat</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     );
   };
   
@@ -731,14 +1015,16 @@ const ChatDetailScreen = () => {
   return (
     <SafeAreaView style={[styles.safeArea, dynamicStyles.safeArea]} edges={['top', 'left', 'right']}>
       {renderHeader()}
+      {renderMenuModal()}
       
       {/* Debug Panels - Remove in production */}
      
       
       <KeyboardAvoidingView
         style={styles.keyboardAvoidingContainer}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        enabled={true}
       >
         {loading ? (
           <View style={[styles.loadingContainer, dynamicStyles.loadingContainer]}>
@@ -952,6 +1238,37 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
+  },
+  menuOverlay: {
+    flex: 1,
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+    paddingTop: 60,
+    paddingRight: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  menuContainer: {
+    borderRadius: 12,
+    minWidth: 200,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+  },
+  menuIcon: {
+    marginRight: 12,
+  },
+  menuItemText: {
+    fontSize: 16,
+    flex: 1,
   },
 });
 

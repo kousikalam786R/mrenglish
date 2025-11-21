@@ -42,6 +42,10 @@ const callSlice = createSlice({
       state.activeCall.isAudioEnabled = !state.activeCall.isAudioEnabled;
     },
     
+    setAudioEnabled: (state, action: PayloadAction<boolean>) => {
+      state.activeCall.isAudioEnabled = action.payload;
+    },
+    
     toggleVideo: (state) => {
       state.activeCall.isVideoEnabled = !state.activeCall.isVideoEnabled;
     },
@@ -79,6 +83,17 @@ const callSlice = createSlice({
     setCallHistory: (state, action: PayloadAction<CallSliceState['callHistory']>) => {
       state.callHistory = action.payload;
     }
+  },
+  extraReducers: (builder) => {
+    // Handle toggleAudioMute fulfilled action to sync Redux state
+    builder.addMatcher(
+      (action) => action.type === 'call/toggleAudioMute/fulfilled',
+      (state, action: any) => {
+        if (action.payload?.isEnabled !== undefined) {
+          state.activeCall.isAudioEnabled = action.payload.isEnabled;
+        }
+      }
+    );
   }
 });
 
@@ -87,6 +102,7 @@ export const {
   setCallStatus,
   setRemoteUser,
   toggleAudio,
+  setAudioEnabled,
   toggleVideo,
   resetCallState,
   setPermissionsGranted,

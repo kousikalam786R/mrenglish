@@ -344,9 +344,9 @@ const ChatsScreen = () => {
   }, [navigation]);
   
   // Navigate to new chat screen
-  const handleNewChat = useCallback(() => {
-    navigation.navigate('Contacts');
-  }, [navigation]);
+  // const handleNewChat = useCallback(() => {
+  //   navigation.navigate('Contacts');
+  // }, [navigation]);
   
   // Debug: Force refresh user statuses
   const handleRefreshStatuses = useCallback(() => {
@@ -397,9 +397,9 @@ const ChatsScreen = () => {
               <Icon name="refresh" size={20} color={theme.primary} />
             </TouchableOpacity>
           )}
-          <TouchableOpacity style={[styles.newChatButton, dynamicStyles.newChatButton]} onPress={handleNewChat}>
+          {/* <TouchableOpacity style={[styles.newChatButton, dynamicStyles.newChatButton]} onPress={handleNewChat}>
             <Icon name="edit" size={24} color={theme.primary} />
-          </TouchableOpacity>
+          </TouchableOpacity> */}
         </View>
       </View>
       

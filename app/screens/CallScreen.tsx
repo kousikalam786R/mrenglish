@@ -10,8 +10,8 @@ import {
   Alert,
   InteractionManager,
   BackHandler,
-  ActivityIndicator,
-  Modal,
+  NativeModules,
+  Platform,
 } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { CallRouteProp } from '../navigation/types';
@@ -20,13 +20,12 @@ import { RootStackParamList } from '../navigation/types';
 import { safeParam } from '../utils/safeProps';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '../redux/store';
-import { RTCView, MediaStream, MediaStreamTrack } from 'react-native-webrtc';
 import callService, { CallStatus } from '../utils/callService';
 import { 
   endActiveCall, 
-  toggleAudioMute,
-  toggleVideoStream
+  toggleAudioMute
 } from '../redux/thunks/callThunks';
+import { setCallState } from '../redux/slices/callSlice';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Toast from 'react-native-toast-message';
 import apiClient from '../utils/apiClient';
@@ -39,7 +38,6 @@ const CallScreen = () => {
   // Safely extract parameters with defaults
   const id = safeParam(route, 'id', '0');
   const name = safeParam(route, 'name', 'User');
-  const isVideoCall = safeParam(route, 'isVideoCall', false);
   
   // Get avatar from route params or use default
   const avatar = safeParam(route, 'avatar', "https://randomuser.me/api/portraits/men/32.jpg"); 
@@ -52,20 +50,16 @@ const CallScreen = () => {
   const [serverStartTime, setServerStartTime] = useState<Date | null>(null);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [isReady, setIsReady] = useState(false);
-  const [localStream, setLocalStream] = useState<any>(null);
-  const [remoteStream, setRemoteStream] = useState<any>(null);
-  const [isVideoLoading, setIsVideoLoading] = useState(false);
-  const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
-  const [upgradeRequestFrom, setUpgradeRequestFrom] = useState<string | null>(null);
   
   // Refs for tracking timers
   const durationTimerRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Handle back button
+  // Handle back button - prevent navigation but don't end call
   useFocusEffect(
     React.useCallback(() => {
       const onBackPress = () => {
-        handleEndCall();
+        // Just prevent navigation, don't end the call
+        // User must use the "End Call" button to end the call
         return true;
       };
       
@@ -161,16 +155,6 @@ const CallScreen = () => {
   // Set up event listeners when the component mounts
   useEffect(() => {
     // Define event handlers
-    const handleLocalStreamUpdate = (stream: MediaStream) => {
-      console.log('Local stream updated', stream);
-      setLocalStream(stream);
-    };
-    
-    const handleRemoteStreamUpdate = (stream: MediaStream) => {
-      console.log('Remote stream updated', stream);
-      setRemoteStream(stream);
-    };
-    
     const handleCallEnded = (data: any) => {
       console.log('Call ended event data:', data);
       console.log('Current callDuration state:', callDuration);
@@ -257,6 +241,9 @@ const CallScreen = () => {
     const handleCallStateChanged = async (state: any) => {
       console.log('Call state changed:', state);
       
+      // Update Redux state when call state changes (including audio enabled state)
+      dispatch(setCallState(state));
+      
       // If connected, use local time for duration tracking
       // Server sync is optional and will fallback to local time on error
       if (state.status === CallStatus.CONNECTED) {
@@ -297,8 +284,6 @@ const CallScreen = () => {
     };
     
     // Add event listeners
-    callService.addEventListener('local-stream-updated', handleLocalStreamUpdate);
-    callService.addEventListener('remote-stream-updated', handleRemoteStreamUpdate);
     callService.addEventListener('call-ended', handleCallEnded);
     callService.addEventListener('call-state-changed', handleCallStateChanged);
     
@@ -332,8 +317,6 @@ const CallScreen = () => {
     // Clean up listeners and timers
     return () => {
       // Remove the event listeners using the same function references
-      callService.removeEventListener('local-stream-updated', handleLocalStreamUpdate);
-      callService.removeEventListener('remote-stream-updated', handleRemoteStreamUpdate);
       callService.removeEventListener('call-ended', handleCallEnded);
       callService.removeEventListener('call-state-changed', handleCallStateChanged);
       
@@ -360,94 +343,6 @@ const CallScreen = () => {
     }
   }, [callState.status, callState.callStartTime]);
   
-  // Add a listener for video upgrade requests
-  useEffect(() => {
-    const handleVideoUpgradeRequest = async (data: any) => {
-      console.log('Received video upgrade request', data);
-      setUpgradeRequestFrom(data.userId);
-      
-      // Preload camera immediately when request comes in, don't wait for user to accept
-      try {
-        console.log('Preloading camera for incoming video request');
-        const { requestCameraPermission } = require('../utils/permissionUtils');
-        const hasPermission = await requestCameraPermission();
-        
-        if (hasPermission) {
-          // Start camera initialization in background without showing loading state yet
-          const { mediaDevices } = require('react-native-webrtc');
-          
-          // Create a timeout promise to limit how long we'll wait
-          const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Camera preload timeout')), 5000);
-          });
-          
-          // Try to preload camera with timeout
-          Promise.race([
-            mediaDevices.getUserMedia({ audio: false, video: true }),
-            timeoutPromise
-          ]).then((stream: any) => {
-            console.log('Camera preloaded successfully for video request');
-            // Stop tracks immediately, we just wanted to initialize the camera
-            stream.getTracks().forEach((track: MediaStreamTrack) => track.stop());
-          }).catch(err => {
-            // Just log error but continue showing dialog, we'll try again when user accepts
-            console.log('Camera preload in background failed:', err);
-          });
-        }
-      } catch (error) {
-        console.log('Error in background camera preload:', error);
-        // Error is non-fatal, dialog will still show
-      }
-      
-      // Show the dialog to the user
-      setShowUpgradeDialog(true);
-    };
-    
-    callService.addEventListener('video-upgrade-request', handleVideoUpgradeRequest);
-    
-    return () => {
-      callService.removeEventListener('video-upgrade-request', handleVideoUpgradeRequest);
-    };
-  }, []);
-  
-  // Add effect for preloading camera when entering call screen for video calls
-  useEffect(() => {
-    // For video calls, preload camera when component mounts
-    const preloadCamera = async () => {
-      if (isVideoCall) {
-        try {
-          console.log('Preloading camera for video call');
-          const { requestCameraPermission } = require('../utils/permissionUtils');
-          const hasPermission = await requestCameraPermission();
-          
-          if (hasPermission) {
-            // Import only what we need to avoid circular dependencies
-            const { mediaDevices } = require('react-native-webrtc');
-            
-            // Just check camera access but don't keep the stream
-            const cameraCheckStream = await mediaDevices.getUserMedia({
-              audio: false,
-              video: true
-            });
-            
-            // Stop tracks to release camera after checking
-            cameraCheckStream.getTracks().forEach((track: MediaStreamTrack) => track.stop());
-            console.log('Camera preloaded successfully');
-          }
-        } catch (error) {
-          console.log('Camera preload failed:', error);
-          // Failure is ok, we'll retry when user explicitly enables video
-        }
-      }
-    };
-    
-    // Run after a short delay to let the component mount fully first
-    const preloadTimer = setTimeout(preloadCamera, 1000);
-    
-    return () => {
-      clearTimeout(preloadTimer);
-    };
-  }, [isVideoCall]);
   
   // Format time for display
   const formatTime = (seconds: number) => {
@@ -469,152 +364,70 @@ const CallScreen = () => {
   };
   
   // Toggle mute
-  const handleToggleMute = () => {
-    void dispatch(toggleAudioMute());
-  };
-  
-  // Toggle speaker
-  const handleToggleSpeaker = () => {
-    setIsSpeakerOn(!isSpeakerOn);
-    callService.toggleSpeaker();
-  };
-  
-  // Handle accepting a video upgrade request
-  const handleAcceptVideoUpgrade = () => {
-    if (upgradeRequestFrom) {
-      // Show loading state immediately to give user feedback
-      setIsVideoLoading(true);
-      
-      // Set a timeout to clear the loading state if it takes too long
-      const loadingTimeout = setTimeout(() => {
-        console.log('Camera initialization timeout after accepting - clearing loading state');
-        setIsVideoLoading(false);
-        Toast.show({
-          type: 'info',
-          text1: 'Camera initialization taking longer than expected',
-          text2: 'Video should appear shortly'
-        });
-      }, 8000); // 8 seconds timeout
-      
-      // Set up a one-time listener for stream updates to clear loading state
-      const clearLoading = () => {
-        clearTimeout(loadingTimeout);
-        setIsVideoLoading(false);
-      };
-      
-      callService.addEventListener('local-stream-updated', clearLoading);
-      
-      // Clean up the listener after a timeout
-      setTimeout(() => {
-        callService.removeEventListener('local-stream-updated', clearLoading);
-        setIsVideoLoading(false);
-      }, 10000);
-      
-      // Accept the upgrade request
-      callService.acceptVideoUpgrade();
-      setShowUpgradeDialog(false);
-      setUpgradeRequestFrom(null);
-    }
-  };
-  
-  // Handle rejecting a video upgrade request
-  const handleRejectVideoUpgrade = () => {
-    if (upgradeRequestFrom) {
-      callService.rejectVideoUpgrade();
-      setShowUpgradeDialog(false);
-      setUpgradeRequestFrom(null);
-    }
-  };
-  
-  // Modified handleToggleVideo to use the video upgrade flow when in a call
-  const handleToggleVideo = async () => {
+  const handleToggleMute = async () => {
     try {
-      // If video is already enabled, just toggle it off
-      if (callState.isVideoEnabled) {
-        await dispatch(toggleVideoStream());
-        return;
-      }
-      
-      // If video is not enabled, request camera permission first
-      const { requestCameraPermission } = require('../utils/permissionUtils');
-      const hasPermission = await requestCameraPermission();
-      
-      if (!hasPermission) {
-        console.error('Camera permission denied');
-        Toast.show({
-          type: 'error',
-          text1: 'Camera permission denied',
-          text2: 'Please enable camera access in settings to use video'
-        });
-        return;
-      }
-      
-      // Set loading state
-      setIsVideoLoading(true);
-      
-      // Set a timeout to clear the loading state if it takes too long
-      const loadingTimeout = setTimeout(() => {
-        console.log('Camera initialization timeout - clearing loading state');
-        setIsVideoLoading(false);
-        Toast.show({
-          type: 'info',
-          text1: 'Camera initialization taking longer than expected',
-          text2: 'Please try again if video doesn\'t appear soon'
-        });
-      }, 8000); // 8 seconds timeout
-      
-      // Check if callService supports video upgrade
-      if (callState.status === CallStatus.CONNECTED && 
-          typeof callService.requestVideoUpgrade === 'function') {
-        try {
-          // Use the video upgrade flow
-          console.log('Using video upgrade flow');
-          callService.requestVideoUpgrade();
-          // Loading state will be cleared when stream updates or on error
-          
-          // Add event listener to clear loading state when stream is updated
-          const clearLoading = () => {
-            clearTimeout(loadingTimeout);
-            setIsVideoLoading(false);
-          };
-          
-          callService.addEventListener('local-stream-updated', clearLoading);
-          
-          // Clean up after 10 seconds regardless of result
-          setTimeout(() => {
-            callService.removeEventListener('local-stream-updated', clearLoading);
-            setIsVideoLoading(false);
-          }, 10000);
-        } catch (error) {
-          clearTimeout(loadingTimeout);
-          console.error('Failed to request video upgrade:', error);
-          // Fallback to regular toggle
-          await dispatch(toggleVideoStream());
-          setIsVideoLoading(false);
-        }
-      } else {
-        console.log('Using regular video toggle flow');
-        // Regular toggle for initial call setup or if upgrade not supported
-        try {
-          const result = await dispatch(toggleVideoStream());
-          clearTimeout(loadingTimeout);
-          setIsVideoLoading(false);
-        } catch (error) {
-          clearTimeout(loadingTimeout);
-          setIsVideoLoading(false);
-          console.error('Error in video toggle:', error);
+      const result = await dispatch(toggleAudioMute());
+      // The Redux state should be updated via call-state-changed event
+      // But we can also manually update if needed
+      if (result.type === 'call/toggleAudioMute/fulfilled') {
+        const isEnabled = (result.payload as any)?.isEnabled;
+        if (isEnabled !== undefined) {
+          // State will be updated via call-state-changed event from callService
+          console.log('Mute toggled, audio enabled:', isEnabled);
         }
       }
     } catch (error) {
-      console.error('Error toggling video:', error);
-      setIsVideoLoading(false);
+      console.error('Error toggling mute:', error);
       Toast.show({
         type: 'error',
-        text1: 'Error enabling video',
-        text2: 'Please try again'
+        text1: 'Error',
+        text2: 'Failed to toggle mute. Please try again.',
       });
     }
   };
+  
+  // Toggle speaker
+  const handleToggleSpeaker = async () => {
+    try {
+      const newSpeakerState = !isSpeakerOn;
+      
+      // Get the peer connection from callService to toggle speaker
+      const callState = callService.getCallState();
+      if (callState.status === CallStatus.CONNECTED) {
+        try {
+          // Use callService's toggleSpeaker method
+          await callService.toggleSpeaker(newSpeakerState);
+          
+          // Only update UI state if native call succeeded
+          setIsSpeakerOn(newSpeakerState);
+          console.log('Speaker successfully toggled to:', newSpeakerState);
+        } catch (error) {
+          console.error('Error toggling speaker:', error);
+          // Don't update UI state if native call failed
+          Toast.show({
+            type: 'error',
+            text1: 'Error',
+            text2: 'Failed to toggle speaker. Please try again.',
+          });
+        }
+      } else {
+        Toast.show({
+          type: 'info',
+          text1: 'Not Connected',
+          text2: 'Please wait for the call to connect.',
+        });
+        // Don't change state if call not connected
+      }
+    } catch (error) {
+      console.error('Error in handleToggleSpeaker:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Error',
+        text2: 'Failed to toggle speaker. Please try again.',
+      });
+    }
+  };
+  
   
   // Get call status text based on call state
   const getStatusText = () => {
@@ -634,46 +447,12 @@ const CallScreen = () => {
     }
   };
   
-  // Modified renderVideoContent to handle loading state
-  const renderVideoContent = () => {
-    // Show loading indicator if video is being initialized
-    if (isVideoLoading) {
-      return (
-        <View style={styles.videoContainer}>
-          <ActivityIndicator size="large" color="#ffffff" />
-          <Text style={styles.loadingText}>Initializing camera...</Text>
-        </View>
-      );
-    }
-    
-    // Show video streams if video is enabled
-    if (callState.isVideoEnabled) {
-      return (
-        <View style={styles.videoContainer}>
-          {/* Remote Video - Large (background) */}
-          {remoteStream && (
-            <RTCView
-              streamURL={remoteStream.toURL()}
-              style={styles.remoteVideo}
-              objectFit="cover"
-            />
-          )}
-          
-          {/* Local Video - Small (picture-in-picture) */}
-          {localStream && (
-            <RTCView
-              streamURL={localStream.toURL()}
-              style={styles.localVideo}
-              objectFit="cover"
-              zOrder={1}
-            />
-          )}
-        </View>
-      );
-    }
-    
-    // Default audio-only call UI
-    return (
+  
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#333333" />
+      
+      {/* Call content area - avatar */}
       <View style={styles.audioCallContainer}>
         <Image 
           source={{uri: avatar}} 
@@ -684,15 +463,6 @@ const CallScreen = () => {
           {getStatusText()}
         </Text>
       </View>
-    );
-  };
-  
-  return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#333333" />
-      
-      {/* Call content area - avatar or video */}
-      {renderVideoContent()}
       
       {/* Call actions */}
       <View style={styles.actionsContainer}>
@@ -720,17 +490,6 @@ const CallScreen = () => {
           <Text style={styles.actionButtonText}>Speaker</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity 
-          style={[styles.actionButton, callState.isVideoEnabled && styles.actionButtonActive]} 
-          onPress={handleToggleVideo}
-        >
-          <Icon 
-            name={callState.isVideoEnabled ? 'videocam-outline' : 'videocam-off-outline'} 
-            size={28} 
-            color="white" 
-          />
-          <Text style={styles.actionButtonText}>Video</Text>
-        </TouchableOpacity>
       </View>
       
       {/* End call button */}
@@ -749,35 +508,6 @@ const CallScreen = () => {
         </View>
       )}
       
-      {/* Video Upgrade Dialog */}
-      <Modal
-        visible={showUpgradeDialog}
-        transparent
-        animationType="fade"
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.upgradeDialog}>
-            <Text style={styles.upgradeTitle}>Video Upgrade Request</Text>
-            <Text style={styles.upgradeMessage}>
-              {`${name} wants to enable video for this call.`}
-            </Text>
-            <View style={styles.upgradeButtons}>
-              <TouchableOpacity 
-                style={[styles.upgradeButton, styles.rejectButton]} 
-                onPress={handleRejectVideoUpgrade}
-              >
-                <Text style={styles.buttonText}>Decline</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.upgradeButton, styles.acceptButton]} 
-                onPress={handleAcceptVideoUpgrade}
-              >
-                <Text style={styles.buttonText}>Accept</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 };
@@ -795,30 +525,6 @@ const styles = StyleSheet.create({
     marginTop: 40,
     flex: 1,
     justifyContent: 'center',
-  },
-  videoContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#000',
-  },
-  remoteStream: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#444',
-  },
-  localStream: {
-    position: 'absolute',
-    top: 20,
-    right: 20,
-    width: 100,
-    height: 150,
-    backgroundColor: '#666',
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: 'white',
-    zIndex: 2,
   },
   avatar: {
     width: 120,
@@ -903,23 +609,6 @@ const styles = StyleSheet.create({
     color: '#DDDDDD',
     lineHeight: 20,
   },
-  remoteVideo: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  localVideo: {
-    position: 'absolute',
-    top: 20,
-    right: 20,
-    width: 100,
-    height: 150,
-    backgroundColor: '#666',
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: 'white',
-    zIndex: 2,
-  },
   audioCallContainer: {
     alignItems: 'center',
     marginTop: 40,
@@ -943,54 +632,6 @@ const styles = StyleSheet.create({
   callStatus: {
     fontSize: 18,
     color: '#BBBBBB',
-  },
-  loadingText: {
-    color: '#ffffff',
-    marginTop: 10,
-    fontSize: 16,
-  },
-  modalContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  upgradeDialog: {
-    width: '80%',
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 20,
-  },
-  upgradeTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 10,
-  },
-  upgradeMessage: {
-    fontSize: 16,
-    marginBottom: 20,
-  },
-  upgradeButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  upgradeButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 5,
-    flex: 1,
-    marginHorizontal: 5,
-    alignItems: 'center',
-  },
-  acceptButton: {
-    backgroundColor: '#4CAF50',
-  },
-  rejectButton: {
-    backgroundColor: '#F44336',
-  },
-  buttonText: {
-    color: '#fff',
-    fontWeight: 'bold',
   },
 });
 

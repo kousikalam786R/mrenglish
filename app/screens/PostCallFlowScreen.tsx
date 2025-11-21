@@ -387,9 +387,9 @@ const PostCallFlowScreen = () => {
           }} 
           style={styles.userAvatar} 
         />
-        <View style={styles.levelBadge}>
+        {/* <View style={styles.levelBadge}>
           <Text style={styles.levelText}>B1</Text>
-        </View>
+        </View> */}
         <Text style={styles.userName}>{userName}</Text>
         {callDuration && (
           <Text style={styles.callDuration}>
