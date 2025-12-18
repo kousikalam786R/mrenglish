@@ -17,6 +17,9 @@ const CACHE_STORAGE_KEY = 'metered_turn_ice_servers_v1';
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const DEFAULT_BASE_URL = 'https://mr_english.metered.live';
 const BACKEND_ENDPOINT = '/webrtc/ice-config';
+const FETCH_TIMEOUT_MS = 2000; // 2 seconds timeout for TURN fetch
+const BACKEND_FETCH_TIMEOUT_MS = 1500; // 1.5 seconds for backend fetch
+const MAX_BLOCK_TIME_MS = 2000; // Maximum time to block waiting for TURN servers
 
 const FALLBACK_ICE_SERVERS: IceServer[] = [
   {
@@ -47,7 +50,17 @@ const sanitizeIceServers = (servers: any): IceServer[] => {
 
 const fetchIceServersFromBackend = async (): Promise<IceServer[] | null> => {
   try {
-    const { data } = await apiClient.get(BACKEND_ENDPOINT);
+    // Create a timeout promise
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Backend fetch timeout')), BACKEND_FETCH_TIMEOUT_MS);
+    });
+
+    // Race between the API call and timeout
+    const { data } = await Promise.race([
+      apiClient.get(BACKEND_ENDPOINT),
+      timeoutPromise
+    ]) as { data: any };
+
     const payload = data && typeof data === 'object' ? data : { iceServers: data };
     const backendServers = sanitizeIceServers(payload.iceServers || payload);
 
@@ -56,8 +69,10 @@ const fetchIceServersFromBackend = async (): Promise<IceServer[] | null> => {
     }
 
     console.warn('⚠️ Backend TURN endpoint responded without valid ICE servers');
-  } catch (error) {
-    console.warn('⚠️ Failed to fetch TURN credentials from backend:', error);
+  } catch (error: any) {
+    if (error.message !== 'Backend fetch timeout') {
+      console.warn('⚠️ Failed to fetch TURN credentials from backend:', error.message || error);
+    }
   }
 
   return null;
@@ -98,9 +113,12 @@ const storeCachedServers = async (servers: IceServer[]): Promise<void> => {
 };
 
 const mergeIceServers = (fallback: IceServer[], primary: IceServer[]): IceServer[] => {
-  const merged: IceServer[] = [...fallback];
+  // Prioritize TURN servers (primary) over STUN fallback servers
+  // TURN servers should come first so they're tried first
+  const merged: IceServer[] = [...primary]; // TURN servers first
 
-  primary.forEach((server) => {
+  // Add fallback STUN servers only if they don't already exist
+  fallback.forEach((server) => {
     const exists = merged.some(
       (candidate) =>
         JSON.stringify(candidate.urls) === JSON.stringify(server.urls) &&
@@ -109,60 +127,180 @@ const mergeIceServers = (fallback: IceServer[], primary: IceServer[]): IceServer
     );
 
     if (!exists) {
-      merged.push(server);
+      merged.push(server); // STUN fallback servers last
     }
   });
 
   return merged;
 };
 
+// Background fetch to update cache without blocking
+let backgroundFetchPromise: Promise<IceServer[] | null> | null = null;
+
+const fetchTURNInBackground = async (): Promise<IceServer[] | null> => {
+  if (backgroundFetchPromise) {
+    return backgroundFetchPromise;
+  }
+
+  backgroundFetchPromise = (async () => {
+    try {
+      // Try backend first (faster, uses our server)
+      const backendServers = await fetchIceServersFromBackend();
+      if (backendServers && backendServers.length > 0) {
+        await storeCachedServers(backendServers);
+        return backendServers;
+      }
+
+      // Fallback to direct Metered API if backend fails
+      const apiKey = METERED_TURN_API_KEY?.trim();
+      if (!apiKey) {
+        return null;
+      }
+
+      const baseUrl = (METERED_TURN_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, '');
+      const requestUrl = `${baseUrl}/api/v1/turn/credentials?apiKey=${encodeURIComponent(apiKey)}`;
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Metered API timeout')), FETCH_TIMEOUT_MS);
+      });
+
+      const response = await Promise.race([
+        fetch(requestUrl),
+        timeoutPromise
+      ]);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const remoteServers = sanitizeIceServers(await response.json());
+      if (remoteServers.length > 0) {
+        await storeCachedServers(remoteServers);
+        return remoteServers;
+      }
+    } catch (error: any) {
+      if (error.message !== 'Metered API timeout' && error.message !== 'Backend fetch timeout') {
+        console.warn('⚠️ Background TURN fetch failed:', error.message || error);
+      }
+    } finally {
+      backgroundFetchPromise = null;
+    }
+
+    return null;
+  })();
+
+  return backgroundFetchPromise;
+};
+
 export const getMeteredIceServers = async (
   fallbackServers: IceServer[] = FALLBACK_ICE_SERVERS
 ): Promise<IceServer[]> => {
-  const apiKey = METERED_TURN_API_KEY?.trim();
-  const baseUrl = (METERED_TURN_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, '');
+  const startTime = Date.now();
+  const blockUntil = startTime + MAX_BLOCK_TIME_MS;
 
-  // Attempt to use cached values first
-  const cached = await readCachedServers();
+  // Step 1: Check cache first (fastest)
+  let cached = await readCachedServers();
   if (cached && cached.length > 0) {
+    console.log(`✅ Using cached TURN servers (${Date.now() - startTime}ms)`);
+    
+    // Fetch fresh servers in background for next time
+    fetchTURNInBackground().catch(() => {});
+    
+    // Merge TURN servers with fallback STUN servers (TURN first, then STUN)
     return mergeIceServers(fallbackServers, cached);
   }
 
-  // Backend route already includes auth and hides the master API key
-  const backendServers = await fetchIceServersFromBackend();
-  if (backendServers && backendServers.length > 0) {
-    await storeCachedServers(backendServers);
-    return mergeIceServers(fallbackServers, backendServers);
-  }
-
-  if (!apiKey) {
-    console.warn(
-      '⚠️ No Metered TURN API key configured locally. Using fallback ICE servers only.'
-    );
-    return fallbackServers;
-  }
-
-  const requestUrl = `${baseUrl}/api/v1/turn/credentials?apiKey=${encodeURIComponent(apiKey)}`;
-
+  // Step 2: Try backend endpoint (blocking, with timeout)
+  console.log('🔄 Fetching TURN servers from backend...');
+  let backendServers: IceServer[] | null = null;
   try {
-    const response = await fetch(requestUrl);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+    backendServers = await fetchIceServersFromBackend();
+    if (backendServers && backendServers.length > 0) {
+      console.log(`✅ Got TURN servers from backend (${Date.now() - startTime}ms)`);
+      await storeCachedServers(backendServers);
+      
+      // Merge TURN servers with fallback STUN servers (TURN first, then STUN)
+      return mergeIceServers(fallbackServers, backendServers);
     }
-
-    const remoteServers = sanitizeIceServers(await response.json());
-
-    if (remoteServers.length === 0) {
-      console.warn('⚠️ Metered TURN response did not contain ICE servers. Using fallback.');
-      return fallbackServers;
-    }
-
-    await storeCachedServers(remoteServers);
-    return mergeIceServers(fallbackServers, remoteServers);
-  } catch (error) {
-    console.error('❌ Failed to fetch Metered TURN credentials directly from Metered:', error);
-    return fallbackServers;
+  } catch (error: any) {
+    console.warn('⚠️ Backend fetch failed:', error.message || error);
   }
+
+  // Step 3: Try direct Metered API (if we still have time)
+  const timeRemaining = blockUntil - Date.now();
+  if (timeRemaining > 500) {
+    const apiKey = METERED_TURN_API_KEY?.trim();
+    if (apiKey) {
+      console.log('🔄 Fetching TURN servers from Metered API...');
+      try {
+        const baseUrl = (METERED_TURN_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, '');
+        const requestUrl = `${baseUrl}/api/v1/turn/credentials?apiKey=${encodeURIComponent(apiKey)}`;
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('Metered API timeout')), Math.min(timeRemaining, FETCH_TIMEOUT_MS));
+        });
+
+        const response = await Promise.race([
+          fetch(requestUrl),
+          timeoutPromise
+        ]) as Response;
+
+        if (response.ok) {
+          const remoteServers = sanitizeIceServers(await response.json());
+          if (remoteServers.length > 0) {
+            console.log(`✅ Got TURN servers from Metered API (${Date.now() - startTime}ms)`);
+            await storeCachedServers(remoteServers);
+            
+            // Merge TURN servers with fallback STUN servers (TURN first, then STUN)
+            return mergeIceServers(fallbackServers, remoteServers);
+          }
+        }
+      } catch (error: any) {
+        if (error.message !== 'Metered API timeout') {
+          console.warn('⚠️ Metered API fetch failed:', error.message || error);
+        }
+      }
+    }
+  }
+
+  // Step 4: Only return fallback STUN servers if all TURN attempts failed
+  const elapsed = Date.now() - startTime;
+  console.log(`⚠️ No TURN servers available after ${elapsed}ms`);
+  
+  // If fallback servers were provided, use them; otherwise use default STUN servers
+  if (fallbackServers.length > 0) {
+    console.log('⚠️ Using provided STUN fallback servers - connection may fail on WiFi→Mobile or Mobile→Mobile');
+    return fallbackServers;
+  } else {
+    console.log('⚠️ Using default STUN fallback servers - connection may fail on WiFi→Mobile or Mobile→Mobile');
+    return FALLBACK_ICE_SERVERS;
+  }
+};
+
+/**
+ * Pre-fetch TURN servers in the background
+ * Call this when app starts or before entering call screen for faster connections
+ */
+export const prefetchIceServers = async (): Promise<void> => {
+  // Check if we have valid cache first
+  const cached = await readCachedServers();
+  if (cached && cached.length > 0) {
+    console.log('✅ TURN servers already cached, skipping prefetch');
+    return;
+  }
+
+  console.log('🔄 Pre-fetching TURN servers in background...');
+  fetchTURNInBackground()
+    .then((servers) => {
+      if (servers && servers.length > 0) {
+        console.log('✅ TURN servers pre-fetched successfully');
+      } else {
+        console.log('⚠️ TURN servers pre-fetch completed but no servers received');
+      }
+    })
+    .catch((error) => {
+      console.warn('⚠️ TURN servers pre-fetch failed:', error.message || error);
+    });
 };
 
 /**
@@ -172,6 +310,7 @@ export const getMeteredIceServers = async (
 export const clearIceServerCache = async (): Promise<void> => {
   try {
     await AsyncStorage.removeItem(CACHE_STORAGE_KEY);
+    backgroundFetchPromise = null; // Reset background fetch
     console.log('✅ Cleared cached TURN ICE servers');
   } catch (error) {
     console.error('❌ Failed to clear ICE server cache:', error);
@@ -180,6 +319,7 @@ export const clearIceServerCache = async (): Promise<void> => {
 
 export default {
   getMeteredIceServers,
+  prefetchIceServers,
   clearIceServerCache
 };
 

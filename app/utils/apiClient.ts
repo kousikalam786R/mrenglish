@@ -1,8 +1,9 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { API_URL, BASE_URL, getAlternateUrls } from './config';
+import { forceLogoutOnError } from './authUtils';
 
 // Debug function to log connection info
 const logConnectionInfo = async () => {
@@ -139,12 +140,69 @@ apiClient.interceptors.response.use(
       return Promise.reject(new Error('Network error. Please try again later.'));
     }
     
-    // Handle 401 Unauthorized errors (token expired)
-    if (error.response && error.response.status === 401) {
-      // You could trigger a logout action here if token is invalid
-      console.warn('Authentication token expired or invalid');
+    // Handle critical errors that require logout
+    const status = error.response?.status;
+    const isCriticalError = 
+      status === 401 || // Unauthorized - token expired/invalid
+      status === 403 || // Forbidden - account suspended/revoked
+      status >= 500;    // Server errors - server is down or having issues
+    
+    // Handle 401 Unauthorized errors (token expired/invalid)
+    if (status === 401) {
+      console.warn('🚨 Authentication token expired or invalid - logging out');
+      // Don't show alert for 401 as it's handled by force logout
+      await forceLogoutOnError('Authentication failed. Please sign in again.');
+      return Promise.reject(new Error('Authentication failed. Please sign in again.'));
+    }
+    
+    // Handle 403 Forbidden (account suspended/revoked)
+    if (status === 403) {
+      console.warn('🚨 Access forbidden - account may be suspended');
+      Alert.alert(
+        'Access Denied',
+        'Your account access has been restricted. Please contact support.',
+        [{ text: 'OK' }]
+      );
+      await forceLogoutOnError('Account access restricted');
+      return Promise.reject(new Error('Account access restricted'));
+    }
+    
+    // Handle server errors (500+)
+    if (status >= 500) {
+      console.error(`🚨 Server error ${status} - logging out for security`);
+      Alert.alert(
+        'Server Error',
+        'The server encountered an error. You have been logged out for security. Please try again later.',
+        [{ text: 'OK' }]
+      );
+      await forceLogoutOnError(`Server error (${status})`);
+      return Promise.reject(new Error('Server error occurred'));
+    }
+    
+    // Handle network errors that persist (not just temporary connectivity issues)
+    if (!error.response) {
+      // Check if this is a persistent network error (not just no internet)
+      const isConnected = await checkNetworkConnectivity();
+      if (!isConnected) {
+        // Just no internet - don't logout, user can retry
+        return Promise.reject(new Error('No internet connection. Please check your network settings and try again.'));
+      }
       
-      // Optional: Refresh token logic could go here
+      // Network error but device is connected - could be server down
+      // Only logout if it's a critical endpoint (auth-related)
+      const url = error.config?.url || '';
+      const isAuthEndpoint = url.includes('/auth/') && !url.includes('/signin') && !url.includes('/signup');
+      
+      if (isAuthEndpoint) {
+        console.warn('🚨 Network error on auth endpoint - logging out');
+        Alert.alert(
+          'Connection Error',
+          'Unable to connect to server. You have been logged out. Please check your connection and sign in again.',
+          [{ text: 'OK' }]
+        );
+        await forceLogoutOnError('Network error on authentication endpoint');
+        return Promise.reject(new Error('Connection error'));
+      }
     }
     
     // Log the error response for debugging

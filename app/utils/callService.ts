@@ -171,15 +171,26 @@ class CallService {
   }
 
   private async createPeerConnection(): Promise<RTCPeerConnection> {
-    const iceServers = await getMeteredIceServers(this.fallbackIceServers);
+    // Pass empty array to ensure TURN servers are fetched and used
+    // Fallback STUN servers will be added by getMeteredIceServers if TURN fails
+    const iceServers = await getMeteredIceServers([]);
     console.log(
       'Using ICE servers:',
       iceServers.map((server) => ({
         urls: server.urls,
         hasCredential: Boolean(server.credential),
-        hasUsername: Boolean(server.username)
+        hasUsername: Boolean(server.username),
+        isTURN: Boolean(server.credential && server.username) // TURN servers have credentials
       }))
     );
+
+    // Log TURN server availability
+    const hasTURN = iceServers.some(server => server.credential && server.username);
+    if (hasTURN) {
+      console.log('✅ TURN relay servers available - connection will work across all networks');
+    } else {
+      console.warn('⚠️ No TURN servers available - connection may fail on WiFi→Mobile or Mobile→Mobile');
+    }
 
     return new RTCPeerConnection({
       ...this.rtcBaseConfiguration,
@@ -190,6 +201,13 @@ class CallService {
   // Track ICE candidates as they're generated
   private iceCandidateCount = 0;
   private relayCandidateCount = 0;
+  private hostCandidateCount = 0;
+  private srflxCandidateCount = 0;
+  private candidateTypes: { host: number; srflx: number; relay: number } = {
+    host: 0,
+    srflx: 0,
+    relay: 0
+  };
 
   // Wait for ICE candidates to be gathered, especially TURN relay candidates
   private waitForIceCandidates(maxWaitMs: number): Promise<void> {
@@ -207,6 +225,9 @@ class CallService {
       if (this.pc.iceGatheringState === 'new') {
         this.iceCandidateCount = 0;
         this.relayCandidateCount = 0;
+        this.hostCandidateCount = 0;
+        this.srflxCandidateCount = 0;
+        this.candidateTypes = { host: 0, srflx: 0, relay: 0 };
       }
 
       const checkCandidates = () => {
@@ -269,12 +290,101 @@ class CallService {
         }
       };
 
-      // Check immediately
-      checkCandidates();
-
-      // Check every 500ms
-      checkInterval = setInterval(checkCandidates, 500);
+      // Start checking candidates
+      checkInterval = setInterval(checkCandidates, 100);
     });
+  }
+
+  /**
+   * Determine and log the connection type (P2P vs TURN relay)
+   * Uses WebRTC stats API to check which candidate pair is actually being used
+   */
+  private async logConnectionType(): Promise<void> {
+    if (!this.pc) return;
+
+    try {
+      const stats = await this.pc.getStats();
+      let connectionType: 'P2P (Direct)' | 'P2P (STUN)' | 'TURN Relay' | 'Unknown' = 'Unknown';
+      let localCandidateType = '';
+      let remoteCandidateType = '';
+      let candidatePair: any = null;
+
+      // Find the active candidate pair
+      stats.forEach((report: any) => {
+        if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
+          candidatePair = report;
+        }
+      });
+
+      if (candidatePair) {
+        // Get local and remote candidate types
+        stats.forEach((report: any) => {
+          if (report.type === 'local-candidate' && report.id === candidatePair.localCandidateId) {
+            localCandidateType = report.candidateType || '';
+          }
+          if (report.type === 'remote-candidate' && report.id === candidatePair.remoteCandidateId) {
+            remoteCandidateType = report.candidateType || '';
+          }
+        });
+
+        // Determine connection type based on candidate types
+        const isRelay = localCandidateType === 'relay' || remoteCandidateType === 'relay';
+        const isSrflx = localCandidateType === 'srflx' || remoteCandidateType === 'srflx';
+        const isHost = localCandidateType === 'host' && remoteCandidateType === 'host';
+
+        if (isRelay) {
+          connectionType = 'TURN Relay';
+        } else if (isHost) {
+          connectionType = 'P2P (Direct)';
+        } else if (isSrflx) {
+          connectionType = 'P2P (STUN)';
+        }
+
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('📊 CONNECTION TYPE ANALYSIS');
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log(`🔗 Connection Type: ${connectionType === 'TURN Relay' ? '🔄 TURN RELAY' : connectionType === 'P2P (STUN)' ? '🌐 P2P (STUN)' : '🏠 P2P (Direct)'}`);
+        console.log(`   Local Candidate: ${localCandidateType || 'unknown'}`);
+        console.log(`   Remote Candidate: ${remoteCandidateType || 'unknown'}`);
+        console.log(`   RTT: ${candidatePair.currentRoundTripTime ? (candidatePair.currentRoundTripTime * 1000).toFixed(2) + 'ms' : 'N/A'}`);
+        console.log(`   Bytes Sent: ${candidatePair.bytesSent || 0}`);
+        console.log(`   Bytes Received: ${candidatePair.bytesReceived || 0}`);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+        if (connectionType === 'TURN Relay') {
+          console.log('✅ Using TURN RELAY - Connection works across all networks (WiFi, Mobile Data, NAT)');
+        } else if (connectionType === 'P2P (STUN)') {
+          console.log('✅ Using P2P with STUN - Direct connection through NAT (faster, lower latency)');
+        } else if (connectionType === 'P2P (Direct)') {
+          console.log('✅ Using DIRECT P2P - Same network connection (fastest, lowest latency)');
+        }
+      } else {
+        // Fallback: use candidate counts to estimate
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('📊 CONNECTION TYPE (Estimated from candidates)');
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        if (this.relayCandidateCount > 0) {
+          console.log('🔄 Likely using TURN RELAY (relay candidates available)');
+        } else if (this.srflxCandidateCount > 0) {
+          console.log('🌐 Likely using P2P with STUN (srflx candidates available)');
+        } else if (this.hostCandidateCount > 0) {
+          console.log('🏠 Likely using DIRECT P2P (host candidates only)');
+        }
+        console.log(`   Candidate Summary: Host=${this.hostCandidateCount}, STUN=${this.srflxCandidateCount}, TURN=${this.relayCandidateCount}`);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      }
+    } catch (error) {
+      console.warn('⚠️ Could not determine connection type from stats:', error);
+      // Fallback to candidate counts
+      console.log('📊 Connection Type (Estimated):');
+      if (this.relayCandidateCount > 0) {
+        console.log('   🔄 TURN RELAY candidates were generated');
+      } else if (this.srflxCandidateCount > 0) {
+        console.log('   🌐 STUN (srflx) candidates were generated');
+      } else {
+        console.log('   🏠 Only HOST candidates (direct P2P)');
+      }
+    }
   }
 
   public static getInstance(): CallService {
@@ -453,6 +563,20 @@ class CallService {
       console.log('🔍 CALL OFFER RECEIVED:', JSON.stringify(data, null, 2));
       const { callerId, callerName, sdp, type, isVideo, callHistoryId, renegotiation, isPartnerMatching } = data;
       
+      // Prevent processing new call offers if we're already in a call (unless it's a renegotiation)
+      if (!renegotiation && this.callState.status !== CallStatus.IDLE && this.callState.status !== CallStatus.ENDED) {
+        console.warn('⚠️ Ignoring call offer: Already in a call. Current status:', this.callState.status);
+        // If this is a partner matching call and we're already in a call, end the current call first
+        if (isPartnerMatching) {
+          console.log('🤝 Ending current call to accept partner matching call');
+          this.endCall();
+          // Wait a bit for cleanup
+          await new Promise(resolve => setTimeout(resolve, 300));
+        } else {
+          return; // Ignore regular call offers when already in a call
+        }
+      }
+      
       console.log('🔍 EXTRACTED VALUES:', {
         callerId,
         callerName,
@@ -538,6 +662,18 @@ class CallService {
         (this as any).wasPartnerMatchingCall = true; // Mark as partner matching call
         setTimeout(async () => {
           try {
+            // Double-check that we're still in RINGING state before accepting
+            if (this.callState.status !== CallStatus.RINGING) {
+              console.warn('⚠️ Call state changed before auto-accept. Current status:', this.callState.status);
+              return;
+            }
+            
+            // Verify we still have the SDP offer
+            if (!this.callState.sdp) {
+              console.error('❌ No SDP offer available for auto-accept');
+              return;
+            }
+            
             await this.acceptCall({ audio: true, video: isVideo || false });
             console.log('✅ Partner matching call auto-accepted');
             
@@ -559,6 +695,8 @@ class CallService {
             console.log('📤 partner-call-auto-accepted event EMITTED');
           } catch (error) {
             console.error('❌ Error auto-accepting partner matching call:', error);
+            // Clean up on error
+            this.endCall();
           }
         }, 500); // Small delay to ensure state is set
       } else {
@@ -599,7 +737,23 @@ class CallService {
         throw new Error('Failed to initialize peer connection');
       }
 
+      // Verify peer connection is in a valid state
+      if (!this.pc.signalingState) {
+        throw new Error('Peer connection signaling state is not available');
+      }
+
       console.log('Setting remote description (offer) with signaling state:', this.pc.signalingState);
+      
+      // Check if peer connection is already in use (should be 'stable' for a new connection)
+      if (this.pc.signalingState !== 'stable' && this.pc.signalingState !== 'have-local-offer') {
+        console.warn('⚠️ Peer connection is not in expected state:', this.pc.signalingState);
+        // If it's in an invalid state, we need to reset it
+        if (this.pc.signalingState === 'have-remote-offer' || this.pc.signalingState === 'have-local-pranswer') {
+          console.log('Peer connection already has an offer, attempting to continue...');
+        } else {
+          throw new Error(`Peer connection is in invalid state for accepting call: ${this.pc.signalingState}`);
+        }
+      }
 
       // Set remote description (the offer)
       const remoteDesc = new RTCSessionDescription({
@@ -609,9 +763,22 @@ class CallService {
       
       await this.pc.setRemoteDescription(remoteDesc);
       console.log('Successfully set remote description (offer) - ICE gathering will start after local description');
+      
+      // Verify peer connection state after setting remote description
+      if (!this.pc || !this.pc.signalingState) {
+        throw new Error('Peer connection became invalid after setting remote description');
+      }
+      
+      const currentState = this.pc.signalingState;
+      console.log('Peer connection state after setRemoteDescription:', currentState);
+      
+      // Verify we're in the correct state to create an answer
+      if (currentState !== 'have-remote-offer' && currentState !== 'have-local-pranswer') {
+        throw new Error(`Cannot create answer: peer connection is in state '${currentState}', expected 'have-remote-offer' or 'have-local-pranswer'`);
+      }
 
       // Create answer
-      console.log('Creating answer with signaling state:', this.pc.signalingState);
+      console.log('Creating answer with signaling state:', currentState);
       const answer = await this.pc.createAnswer();
       console.log('Answer created successfully');
       
@@ -1016,12 +1183,21 @@ class CallService {
   };
 
   // Handle call end from remote peer
-   handleCallEnd = () => {
+   handleCallEnd = (data?: any) => {
     if (this.callState.status === CallStatus.IDLE) {
       return;
     }
 
-    this.emitEvent('call-ended', { remoteEnded: true });
+    // Capture remote user ID before ending call
+    const remoteUserId = this.callState.remoteUserId;
+    
+    // Emit call-ended event with userId for immediate status update
+    this.emitEvent('call-ended', { 
+      remoteEnded: true,
+      userId: remoteUserId,
+      remoteUserId: remoteUserId,
+      endedBy: data?.endedBy
+    });
     this.endCall();
   }
 
@@ -1233,10 +1409,17 @@ class CallService {
       callDuration: finalDuration
     };
     
-    // Emit the ended state
+    // Capture userId before state is reset
+    const remoteUserId = this.callState.remoteUserId;
+    
+    // Emit the ended state with userId for immediate status update
     this.callState = endedState;
     this.emitCallStateChange();
-    this.emitEvent('call-ended', { duration: finalDuration });
+    this.emitEvent('call-ended', { 
+      duration: finalDuration,
+      userId: remoteUserId,
+      remoteUserId: remoteUserId
+    });
     
     // Reset call state after a short delay
     setTimeout(() => {
@@ -1272,6 +1455,31 @@ class CallService {
   private async initializeWebRTC(options: CallOptions): Promise<void> {
     try {
       console.log('Initializing WebRTC with options:', options);
+      
+      // Clean up any existing peer connection first
+      if (this.pc) {
+        console.log('Cleaning up existing peer connection before creating new one');
+        try {
+          // Remove all event listeners first
+          try {
+            (this.pc as any).oniceconnectionstatechange = null;
+            (this.pc as any).onicegatheringstatechange = null;
+            (this.pc as any).onsignalingstatechange = null;
+            (this.pc as any).ontrack = null;
+            (this.pc as any).onicecandidate = null;
+            (this.pc as any).onconnectionstatechange = null;
+          } catch (eventError) {
+            console.error("Error removing event listeners:", eventError);
+          }
+          
+          // Then close the connection
+          this.pc.close();
+          console.log("Closed existing peer connection");
+        } catch (pcError) {
+          console.error("Error closing existing peer connection:", pcError);
+        }
+        this.pc = null;
+      }
       
       // Create peer connection
       this.pc = await this.createPeerConnection();
@@ -1451,24 +1659,43 @@ class CallService {
             const isSrflx = candidateStr.includes('typ srflx');
             const isHost = candidateStr.includes('typ host');
             
-            const candidateType = isRelay ? 'RELAY (TURN)' : isSrflx ? 'SRFLX (STUN)' : isHost ? 'HOST' : 'UNKNOWN';
+            // Determine candidate type
+            let candidateType: 'host' | 'srflx' | 'relay' | 'unknown' = 'unknown';
+            if (isHost) {
+              candidateType = 'host';
+              this.hostCandidateCount++;
+              this.candidateTypes.host++;
+            } else if (isSrflx) {
+              candidateType = 'srflx';
+              this.srflxCandidateCount++;
+              this.candidateTypes.srflx++;
+            } else if (isRelay) {
+              candidateType = 'relay';
+              this.relayCandidateCount++;
+              this.candidateTypes.relay++;
+            }
             
             // Track candidate counts
             this.iceCandidateCount++;
-            if (isRelay) {
-              this.relayCandidateCount++;
-            }
             
-            console.log(`🔵 ICE Candidate Generated [${candidateType}] (${this.iceCandidateCount} total, ${this.relayCandidateCount} relay):`, {
-              type: event.candidate.type,
+            const typeLabel = candidateType === 'relay' ? 'RELAY (TURN)' : 
+                             candidateType === 'srflx' ? 'SRFLX (STUN)' : 
+                             candidateType === 'host' ? 'HOST (P2P)' : 'UNKNOWN';
+            
+            console.log(`🔵 ICE Candidate [${typeLabel}] #${this.iceCandidateCount}`, {
+              type: candidateType,
               protocol: event.candidate.protocol,
               address: event.candidate.address,
               port: event.candidate.port,
-              candidate: candidateStr.substring(0, 100) + '...'
+              summary: `Total: ${this.iceCandidateCount} | Host: ${this.hostCandidateCount} | STUN: ${this.srflxCandidateCount} | TURN: ${this.relayCandidateCount}`
             });
             
             if (isRelay) {
               console.log('✅ TURN RELAY candidate detected - cross-network connection should work!');
+            } else if (isHost) {
+              console.log('🏠 HOST candidate (direct P2P) - fastest connection if on same network');
+            } else if (isSrflx) {
+              console.log('🌐 SRFLX candidate (STUN-reflexive) - works for most NAT scenarios');
             }
 
             const sendCandidate = (retryCount = 0) => {
@@ -1511,6 +1738,13 @@ class CallService {
             sendCandidate();
           } else {
             console.log('✅ Finished gathering ICE candidates');
+            console.log(`📊 ICE Candidate Summary:`, {
+              total: this.iceCandidateCount,
+              host: this.hostCandidateCount,
+              srflx: this.srflxCandidateCount,
+              relay: this.relayCandidateCount,
+              breakdown: this.candidateTypes
+            });
             
             // After ICE gathering completes, check connection state
             // Sometimes connectionState doesn't fire immediately
@@ -1556,6 +1790,9 @@ class CallService {
           switch (connectionState) {
             case 'connected':
               console.log('WebRTC connection established successfully!');
+              
+              // Determine connection type (P2P vs TURN relay)
+              this.logConnectionType();
               
               // Update call state to CONNECTED when connection is actually established
               if (this.callState.status === CallStatus.CALLING || 
@@ -1719,23 +1956,72 @@ class CallService {
 
   // Toggle audio mute
   public toggleAudio(): boolean {
-    if (!this.localStream) return false;
+    if (!this.localStream) {
+      throw new Error('No local stream available. Call may not be connected.');
+    }
     
     const audioTracks = this.localStream.getAudioTracks();
-    if (audioTracks.length === 0) return false;
+    if (audioTracks.length === 0) {
+      throw new Error('No audio tracks found in local stream.');
+    }
     
-    const isEnabled = !audioTracks[0].enabled;
-    audioTracks.forEach(track => {
-      track.enabled = isEnabled;
-    });
-    
-    this.callState = {
-      ...this.callState,
-      isAudioEnabled: isEnabled
-    };
-    
-    this.emitCallStateChange();
-    return isEnabled;
+    try {
+      // Get current state from the first track
+      const currentEnabled = audioTracks[0].enabled;
+      const isEnabled = !currentEnabled;
+      
+      console.log(`🎤 Toggling audio: ${currentEnabled ? 'enabled' : 'muted'} -> ${isEnabled ? 'enabled' : 'muted'} (Platform: ${Platform.OS})`);
+      
+      // Toggle all audio tracks
+      audioTracks.forEach((track, index) => {
+        const previousState = track.enabled;
+        track.enabled = isEnabled;
+        
+        // Log detailed info for Android debugging
+        if (Platform.OS === 'android') {
+          console.log(`Android Audio Track ${index}:`, {
+            id: track.id,
+            kind: track.kind,
+            enabled: track.enabled,
+            muted: track.muted,
+            readyState: track.readyState,
+            previousState: previousState
+          });
+        }
+        
+        // Verify the change was applied
+        if (track.enabled !== isEnabled) {
+          console.warn(`⚠️ Warning: Track ${track.id} enabled state may not have changed. Expected: ${isEnabled}, Actual: ${track.enabled}`);
+        }
+      });
+      
+      // Update call state
+      this.callState = {
+        ...this.callState,
+        isAudioEnabled: isEnabled
+      };
+      
+      this.emitCallStateChange();
+      
+      // Verify the state was updated correctly
+      const verifyTracks = this.localStream.getAudioTracks();
+      const allTracksEnabled = verifyTracks.every(track => track.enabled === isEnabled);
+      
+      if (!allTracksEnabled && Platform.OS === 'android') {
+        console.warn('⚠️ Android: Some audio tracks may not have been toggled correctly');
+        verifyTracks.forEach((track, index) => {
+          if (track.enabled !== isEnabled) {
+            console.warn(`  Track ${index} (${track.id}): expected ${isEnabled}, got ${track.enabled}`);
+          }
+        });
+      }
+      
+      console.log(`✅ Audio ${isEnabled ? 'enabled' : 'muted'} successfully (${verifyTracks.length} track(s))`);
+      return isEnabled;
+    } catch (error) {
+      console.error('❌ Error toggling audio track:', error);
+      throw new Error(`Failed to toggle audio: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   // Toggle video

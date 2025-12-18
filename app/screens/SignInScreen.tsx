@@ -218,7 +218,12 @@ const SignInScreen = () => {
       const loginEndpoint = USING_NGROK
         ? API_ENDPOINTS.LOGIN
         : (DEV ? `http://${DIRECT_IP}:5000/api/auth/login` : `${DIRECT_IP}/api/auth/login`);
-      console.log('Attempting login with endpoint:', loginEndpoint);
+      console.log('=== LOGIN REQUEST DEBUG ===');
+      console.log('BASE_URL:', BASE_URL);
+      console.log('API_URL:', API_URL);
+      console.log('USING_NGROK:', USING_NGROK);
+      console.log('Login endpoint:', loginEndpoint);
+      console.log('Request payload:', { email, password: '***' });
       
       // Use AbortController for more reliable timeout control
       const controller = new AbortController();
@@ -244,9 +249,23 @@ const SignInScreen = () => {
         clearTimeout(timeoutId);
         
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ message: 'Unknown server error' }));
-          console.error('Login failed:', errorData);
-          Alert.alert('Login Failed', errorData.message || 'Invalid credentials');
+          const errorText = await response.text().catch(() => 'Unknown server error');
+          let errorData;
+          try {
+            errorData = JSON.parse(errorText);
+          } catch {
+            errorData = { message: errorText || `Server error: ${response.status} ${response.statusText}` };
+          }
+          console.error('Login failed:', {
+            status: response.status,
+            statusText: response.statusText,
+            url: loginEndpoint,
+            error: errorData
+          });
+          Alert.alert(
+            'Login Failed', 
+            errorData.message || `Server error (${response.status}): ${response.statusText}`
+          );
           setIsSigninInProgress(false);
           return;
         }

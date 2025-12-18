@@ -126,13 +126,29 @@ export const endActiveCall = createAsyncThunk(
 // Thunk to toggle audio mute
 export const toggleAudioMute = createAsyncThunk(
   'call/toggleAudioMute',
-  async (_, { dispatch, getState }) => {
+  async (_, { dispatch, getState, rejectWithValue }) => {
     try {
+      // Check if call is connected before toggling
+      const state = getState() as RootState;
+      const callState = state.call.activeCall;
+      
+      if (callState.status !== CallStatus.CONNECTED) {
+        return rejectWithValue('Call is not connected. Please wait for the call to connect.');
+      }
+      
+      // Get call state from service to verify stream exists
+      const serviceCallState = callService.getCallState();
+      if (!serviceCallState || serviceCallState.status !== CallStatus.CONNECTED) {
+        return rejectWithValue('Call is not properly connected. Please try again.');
+      }
+      
       const isEnabled = callService.toggleAudio();
-      return { isEnabled };
-    } catch (error) {
-      console.error('Error toggling audio:', error);
-      return { success: false };
+      console.log(`✅ Audio mute toggled successfully: ${isEnabled ? 'unmuted' : 'muted'}`);
+      return { isEnabled, success: true };
+    } catch (error: any) {
+      console.error('❌ Error toggling audio:', error);
+      const errorMessage = error?.message || 'Failed to toggle audio mute. Please try again.';
+      return rejectWithValue(errorMessage);
     }
   }
 );

@@ -110,7 +110,40 @@ export const clearAuthData = async (): Promise<void> => {
     await AsyncStorage.removeItem('token');
     await AsyncStorage.removeItem('auth_token');
     await AsyncStorage.removeItem('userId');
+    await AsyncStorage.removeItem('user');
   } catch (error) {
     console.error('Error clearing auth data:', error);
+  }
+};
+
+/**
+ * Force logout user due to network or server error
+ * This should be called when critical errors occur that require re-authentication
+ */
+export const forceLogoutOnError = async (reason: string = 'Network or server error'): Promise<void> => {
+  try {
+    console.warn(`🚨 Force logout triggered: ${reason}`);
+    
+    // Clear all auth data
+    await clearAuthData();
+    
+    // Import store dynamically to avoid circular dependencies
+    const { store } = await import('../redux/store');
+    const { signOutSuccess } = await import('../redux/slices/authSlice');
+    const { clearUserData } = await import('../redux/slices/userSlice');
+    
+    // Dispatch logout actions
+    store.dispatch(clearUserData());
+    store.dispatch(signOutSuccess());
+    
+    console.log('✅ User logged out due to error');
+  } catch (error) {
+    console.error('Error during force logout:', error);
+    // Even if there's an error, try to clear storage
+    try {
+      await clearAuthData();
+    } catch (clearError) {
+      console.error('Error clearing auth data during force logout:', clearError);
+    }
   }
 }; 

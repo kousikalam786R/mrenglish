@@ -1,14 +1,14 @@
 import { Platform } from 'react-native';
 
-// Use different URLs for different environments
-export const DEV = false; // Set to true for local development
+// Use different URLs for different environments  
+export const DEV = true; // Set to true for local development, false for test/production server
 
-// Optional override: point the app to an ngrok tunnel for quick testing on real devices
-export const USE_NGROK = true; // Set to true for cross-network testing (WiFi + Mobile Data), false for local development
-const NGROK_URL = 'https://prosodical-noneternally-oleta.ngrok-free.dev'; // Update with your active tunnel URL
+// Optional override: point the app to an AWS server for quick testing on real devices
+export const USE_NGROK = false; // Set to true for cross-network testing (WiFi + Mobile Data), false for local development
+const NGROK_URL = 'http://3.110.94.208:5000'; // AWS server URL
 
-// Production server URL (Render)
-const PRODUCTION_URL = 'https://mrenglishserverside.onrender.com';
+// Production server URL (AWS)
+const PRODUCTION_URL = 'http://3.110.94.208:5000';
 
 // Metered TURN configuration (set via environment or secure storage in production)
 const envTurnBaseUrl =
@@ -111,7 +111,7 @@ if (DEV) {
 
 const sanitizedNgrokUrl =
   USE_NGROK && NGROK_URL
-    ? stripTrailingSlash(ensureProtocol(NGROK_URL, 'https://'))
+    ? stripTrailingSlash(ensureProtocol(NGROK_URL.trim(), 'http://'))
     : '';
 
 export const USING_NGROK = Boolean(sanitizedNgrokUrl);
@@ -120,8 +120,9 @@ export const USING_NGROK = Boolean(sanitizedNgrokUrl);
 export const BASE_URL = sanitizedNgrokUrl || (DEV ? `http://${BASE_HOST}:5000` : BASE_HOST);
 console.log('BASE_URL configured as:', BASE_URL);
 
-// API URL with /api suffix
-export const API_URL = `${BASE_URL}${BASE_URL.endsWith('/api') ? '' : '/api'}`;
+// API URL with /api suffix - ensure no double slashes
+const baseUrlClean = stripTrailingSlash(BASE_URL);
+export const API_URL = stripTrailingSlash(`${baseUrlClean}/api`);
 console.log('API_URL configured as:', API_URL);
 
 // Export the direct IP for use in other files that need it
@@ -172,13 +173,20 @@ export const getAlternateUrls = (): string[] => {
 };
 
 
+// Helper function to build endpoint URLs without double slashes
+const buildEndpoint = (endpoint: string): string => {
+  const cleanApiUrl = stripTrailingSlash(API_URL);
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  return `${cleanApiUrl}${cleanEndpoint}`;
+};
+
 export const API_ENDPOINTS = {
-  LOGIN: `${API_URL}/auth/login`,
-  REGISTER: `${API_URL}/auth/register`,
-  MESSAGES: `${API_URL}/messages`,
-  USER: `${API_URL}/auth/me`,
-  UPDATE_USER: `${API_URL}/auth/profile`,
-  GOOGLE_AUTH: `${API_URL}/auth/google`,
+  LOGIN: buildEndpoint('auth/login'),
+  REGISTER: buildEndpoint('auth/register'),
+  MESSAGES: buildEndpoint('messages'),
+  USER: buildEndpoint('auth/me'),
+  UPDATE_USER: buildEndpoint('auth/profile'),
+  GOOGLE_AUTH: buildEndpoint('auth/google'),
 };
 
 // Socket events

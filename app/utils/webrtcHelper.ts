@@ -21,19 +21,19 @@ interface RTCIceCandidateEvent {
 }
 
 // WebRTC connection configuration
+// Note: This config is a fallback. CallService uses getMeteredIceServers() which provides
+// proper TURN servers. This config should only be used if getMeteredIceServers() is not available.
 const RTCConfig = {
   iceServers: [
+    // STUN servers for NAT traversal
+    { urls: 'stun:stun.metered.ca:3478' },
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    // Add TURN servers for more reliable connections
-    {
-      urls: 'turn:numb.viagenie.ca',
-      username: 'webrtc@live.com',
-      credential: 'muazkh'
-    }
+    // TURN servers will be added dynamically via getMeteredIceServers()
+    // The dead Viagenie TURN server has been removed
   ],
   iceCandidatePoolSize: 10,
+  iceTransportPolicy: 'all' as const, // Allow both UDP and TCP, ensure TURN is used
 };
 
 // WebRTC connection states

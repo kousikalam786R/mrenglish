@@ -281,7 +281,8 @@ class SimpleUserStatusService {
       isOnline,
       lastSeenAt,
       isTyping: currentStatus?.isTyping || false,
-      typingInChat: currentStatus?.typingInChat
+      typingInChat: currentStatus?.typingInChat,
+      isOnCall: currentStatus?.isOnCall || false // Preserve call status
     };
 
     // Only update if status actually changed
@@ -297,13 +298,17 @@ class SimpleUserStatusService {
         isOnline,
         lastSeenAt,
         hasCallbacks: this.statusUpdateCallbacks.size > 0,
-        previousStatus: currentStatus?.isOnline
+        previousStatus: currentStatus?.isOnline,
+        newStatus: isOnline
       });
 
       // Notify all callbacks
       this.notifyStatusUpdate();
     } else {
-      console.log('📊 SimpleUserStatusService: Status unchanged for user:', userId);
+      console.log('📊 SimpleUserStatusService: Status unchanged for user:', userId, {
+        current: currentStatus?.isOnline,
+        received: isOnline
+      });
     }
   }
 
@@ -449,6 +454,27 @@ class SimpleUserStatusService {
   addUserToTracking(userId: string, initialStatus?: Partial<UserStatus>): void {
     if (this.userStatuses.has(userId)) {
       console.log('👤 SimpleUserStatusService: User already being tracked:', userId);
+      
+      // Update existing status if initialStatus is provided
+      if (initialStatus) {
+        const currentStatus = this.userStatuses.get(userId);
+        const updatedStatus: UserStatus = {
+          ...currentStatus!,
+          ...initialStatus
+        };
+        
+        // Only update if status actually changed
+        const statusChanged = !currentStatus || 
+          currentStatus.isOnline !== updatedStatus.isOnline ||
+          currentStatus.lastSeenAt !== updatedStatus.lastSeenAt;
+        
+        if (statusChanged) {
+          this.userStatuses.set(userId, updatedStatus);
+          console.log('👤 SimpleUserStatusService: Updated existing user status:', userId, updatedStatus);
+          this.notifyStatusUpdate();
+        }
+      }
+      
       // Still request status to ensure it's up to date
       this.requestUserStatus(userId);
       return;
@@ -456,16 +482,17 @@ class SimpleUserStatusService {
 
     const status: UserStatus = {
       userId,
-      isOnline: false,
-      lastSeenAt: undefined,
+      isOnline: initialStatus?.isOnline ?? false, // Use initial status if provided, otherwise false
+      lastSeenAt: initialStatus?.lastSeenAt,
       isTyping: false,
       ...initialStatus
     };
 
     this.userStatuses.set(userId, status);
-    console.log('👤 SimpleUserStatusService: Added user to tracking:', userId);
+    console.log('👤 SimpleUserStatusService: Added user to tracking:', userId, status);
 
-    // Request initial status with retry logic
+    // Request initial status with retry logic to get fresh status from server
+    // But preserve initial status until we get a confirmed response
     this.requestUserStatusWithRetry(userId);
   }
 

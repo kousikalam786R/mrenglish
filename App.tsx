@@ -24,6 +24,7 @@ import Toast from 'react-native-toast-message';
 import notificationService from './app/utils/notificationService';
 import callService from './app/utils/callService';
 import simpleUserStatusService from './app/services/simpleUserStatusService';
+import { prefetchIceServers } from './app/utils/turnService';
 
 function App(): React.JSX.Element {
   useEffect(() => {
@@ -118,6 +119,9 @@ function App(): React.JSX.Element {
           console.log('CallService has been initialized without reset');
         }
       }
+      
+      // Pre-fetch TURN servers in background for faster call connections
+      prefetchIceServers();
     } catch (e) {
       console.error('Error handling CallService initialization:', e);
       // Fallback to direct initialization
@@ -129,6 +133,9 @@ function App(): React.JSX.Element {
       if (simpleUserStatusService && typeof simpleUserStatusService.initialize === 'function') {
         simpleUserStatusService.initialize();
       }
+      
+      // Pre-fetch TURN servers even if there was an error
+      prefetchIceServers();
     }
   }, []);
 

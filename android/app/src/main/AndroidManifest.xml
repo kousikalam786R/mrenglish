@@ -21,6 +21,8 @@
       android:allowBackup="false"
       android:theme="@style/AppTheme"
       android:supportsRtl="true"
+      android:usesCleartextTraffic="true"
+      android:networkSecurityConfig="@xml/network_security_config"
       tools:replace="android:appComponentFactory"
       android:appComponentFactory="androidx.core.app.CoreComponentFactory">
       <activity

@@ -244,6 +244,14 @@ const CallScreen = () => {
       // Update Redux state when call state changes (including audio enabled state)
       dispatch(setCallState(state));
       
+      // If call state becomes IDLE (which happens when call is rejected/reset), navigate back
+      if (state.status === CallStatus.IDLE) {
+        console.log('Call state changed to IDLE - call was likely rejected or reset');
+        // Don't navigate immediately here as call-rejected event handler will handle it
+        // But we can check if we're on CallScreen and should navigate
+        return;
+      }
+      
       // If connected, use local time for duration tracking
       // Server sync is optional and will fallback to local time on error
       if (state.status === CallStatus.CONNECTED) {
@@ -283,9 +291,45 @@ const CallScreen = () => {
       }
     };
     
+    // Define handler for when call is rejected by receiver
+    const handleCallRejected = (data: any) => {
+      console.log('Call was rejected by receiver:', data);
+      
+      // Get the receiver's name if available
+      const receiverName = callState.remoteUserName || name || 'User';
+      
+      // Show toast notification
+      Toast.show({
+        type: 'info',
+        text1: 'Call Declined',
+        text2: `${receiverName} declined your call.`,
+        visibilityTime: 3000,
+      });
+      
+      // Navigate back after a short delay
+      setTimeout(() => {
+        try {
+          if (navigation.canGoBack()) {
+            navigation.goBack();
+          } else {
+            // If we can't go back, navigate to main screen
+            navigation.navigate('Main');
+          }
+        } catch (error) {
+          console.error('Navigation error after call rejected:', error);
+          // Last resort: reset to main screen
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'Main' }],
+          });
+        }
+      }, 500);
+    };
+    
     // Add event listeners
     callService.addEventListener('call-ended', handleCallEnded);
     callService.addEventListener('call-state-changed', handleCallStateChanged);
+    callService.addEventListener('call-rejected', handleCallRejected);
     
     // Start a timer to update call duration
     if (durationTimerRef.current) {
@@ -319,6 +363,7 @@ const CallScreen = () => {
       // Remove the event listeners using the same function references
       callService.removeEventListener('call-ended', handleCallEnded);
       callService.removeEventListener('call-state-changed', handleCallStateChanged);
+      callService.removeEventListener('call-rejected', handleCallRejected);
       
       if (durationTimerRef.current) {
         clearInterval(durationTimerRef.current);
@@ -366,22 +411,40 @@ const CallScreen = () => {
   // Toggle mute
   const handleToggleMute = async () => {
     try {
+      // Check if call is connected before attempting to toggle
+      if (callState.status !== CallStatus.CONNECTED) {
+        Toast.show({
+          type: 'info',
+          text1: 'Not Connected',
+          text2: 'Please wait for the call to connect.',
+        });
+        return;
+      }
+      
       const result = await dispatch(toggleAudioMute());
-      // The Redux state should be updated via call-state-changed event
-      // But we can also manually update if needed
-      if (result.type === 'call/toggleAudioMute/fulfilled') {
+      
+      // Handle the result
+      if (toggleAudioMute.fulfilled.match(result)) {
         const isEnabled = (result.payload as any)?.isEnabled;
         if (isEnabled !== undefined) {
           // State will be updated via call-state-changed event from callService
           console.log('Mute toggled, audio enabled:', isEnabled);
         }
+      } else if (toggleAudioMute.rejected.match(result)) {
+        // Handle rejection with user-friendly error message
+        const errorMessage = result.payload as string || 'Failed to toggle mute. Please try again.';
+        Toast.show({
+          type: 'error',
+          text1: 'Error',
+          text2: errorMessage,
+        });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error toggling mute:', error);
       Toast.show({
         type: 'error',
         text1: 'Error',
-        text2: 'Failed to toggle mute. Please try again.',
+        text2: error?.message || 'Failed to toggle mute. Please try again.',
       });
     }
   };
@@ -389,41 +452,41 @@ const CallScreen = () => {
   // Toggle speaker
   const handleToggleSpeaker = async () => {
     try {
-      const newSpeakerState = !isSpeakerOn;
-      
-      // Get the peer connection from callService to toggle speaker
-      const callState = callService.getCallState();
-      if (callState.status === CallStatus.CONNECTED) {
-        try {
-          // Use callService's toggleSpeaker method
-          await callService.toggleSpeaker(newSpeakerState);
-          
-          // Only update UI state if native call succeeded
-          setIsSpeakerOn(newSpeakerState);
-          console.log('Speaker successfully toggled to:', newSpeakerState);
-        } catch (error) {
-          console.error('Error toggling speaker:', error);
-          // Don't update UI state if native call failed
-          Toast.show({
-            type: 'error',
-            text1: 'Error',
-            text2: 'Failed to toggle speaker. Please try again.',
-          });
-        }
-      } else {
+      // Check if call is connected before attempting to toggle
+      if (callState.status !== CallStatus.CONNECTED) {
         Toast.show({
           type: 'info',
           text1: 'Not Connected',
           text2: 'Please wait for the call to connect.',
         });
-        // Don't change state if call not connected
+        return;
       }
-    } catch (error) {
+      
+      const newSpeakerState = !isSpeakerOn;
+      
+      try {
+        // Use callService's toggleSpeaker method
+        await callService.toggleSpeaker(newSpeakerState);
+        
+        // Only update UI state if native call succeeded
+        setIsSpeakerOn(newSpeakerState);
+        console.log('Speaker successfully toggled to:', newSpeakerState);
+      } catch (error: any) {
+        console.error('Error toggling speaker:', error);
+        // Don't update UI state if native call failed
+        const errorMessage = error?.message || 'Failed to toggle speaker. Speaker may not be available on this device.';
+        Toast.show({
+          type: 'error',
+          text1: 'Error',
+          text2: errorMessage,
+        });
+      }
+    } catch (error: any) {
       console.error('Error in handleToggleSpeaker:', error);
       Toast.show({
         type: 'error',
         text1: 'Error',
-        text2: 'Failed to toggle speaker. Please try again.',
+        text2: error?.message || 'Failed to toggle speaker. Please try again.',
       });
     }
   };

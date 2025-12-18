@@ -121,14 +121,20 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
         
         <View style={styles.userInfo}>
           <Text style={[styles.userName, { color: theme.text }]}>
-            {user.name} {user.gender === 'Female' ? '🌸' : user.gender === 'Male' ? '👨' : ''}
+            {user.name}
           </Text>
           <View style={styles.ratingContainer}>
-            <Text style={[styles.thumbsUp, { color: theme.textSecondary }]}>👍 {user.rating || 95}%</Text>
-            <Text style={[styles.userGender, { color: theme.textSecondary }]}> • {user.gender || 'Not specified'}</Text>
+            {user.rating && (
+              <Text style={[styles.thumbsUp, { color: theme.textSecondary }]}>👍 {user.rating}%</Text>
+            )}
+            {user.gender && (
+              <Text style={[styles.userGender, { color: theme.textSecondary }]}>
+                {user.rating ? ' • ' : ''}{user.gender}
+              </Text>
+            )}
         </View>
           <Text style={[styles.userCountry, { color: theme.textSecondary }]}>
-            {user.country || '🌎 Global'} • {user.talks || 0} talks
+            {user.country || '🌎 Global'}{user.talks && user.talks > 0 ? ` • ${user.talks} talks` : ''}
           </Text>
           <Text style={[
             (userStatus?.isOnline ?? user.isOnline) ? styles.onlineText : styles.offlineText,
@@ -228,14 +234,24 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   // Initialize user status service
   const { isInitialized: statusServiceReady } = useUserStatusService();
 
+  // Track which users have been added to status tracking to prevent infinite loops
+  const trackedUserIdsRef = React.useRef<Set<string>>(new Set());
+
   // Memoize sorted users list to avoid re-rendering issues
   const sortedUsers = useMemo(() => {
+    console.log('🔍 sortedUsers memo recalculating with:', {
+      totalUsers: users.length,
+      readyUsers: readyUsers.length,
+      filterSettings
+    });
+    
     // Apply filters to users
     const filteredUsers = users.filter((user: User) => {
       // Gender filter
       if (filterSettings.gender !== 'all') {
         const userGender = (user.gender || '').toLowerCase();
         if (userGender !== filterSettings.gender.toLowerCase()) {
+          if (__DEV__) console.log(`🔍 User ${user.name} filtered out by gender: ${userGender} !== ${filterSettings.gender}`);
           return false;
         }
       }
@@ -243,6 +259,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       // Rating filter
       if (user.rating) {
         if (user.rating < filterSettings.ratingMin || user.rating > filterSettings.ratingMax) {
+          if (__DEV__) console.log(`🔍 User ${user.name} filtered out by rating: ${user.rating} not in [${filterSettings.ratingMin}, ${filterSettings.ratingMax}]`);
           return false;
         }
       }
@@ -251,12 +268,24 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       if (user.level) {
         const englishLevels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
         const userLevelIndex = englishLevels.indexOf(user.level);
-        if (userLevelIndex === -1 || userLevelIndex < filterSettings.levelMin || userLevelIndex > filterSettings.levelMax) {
+        
+        // If user has a non-standard level (like "Intermediate"), allow them through
+        // Only filter if they have a standard level that's outside the range
+        if (userLevelIndex !== -1 && (userLevelIndex < filterSettings.levelMin || userLevelIndex > filterSettings.levelMax)) {
+          if (__DEV__) console.log(`🔍 User ${user.name} filtered out by level: ${user.level} (index ${userLevelIndex}) not in [${filterSettings.levelMin}, ${filterSettings.levelMax}]`);
           return false;
         }
+        // If userLevelIndex is -1 (non-standard level), allow them through
       }
       
       return true;
+    });
+    
+    console.log('🔍 After filter application:', {
+      filteredUsersCount: filteredUsers.length,
+      filteredUserIds: filteredUsers.map(u => u._id),
+      allUserIds: users.map(u => u._id),
+      allUserNames: users.map(u => u.name)
     });
     
     // First, get ready-to-talk users (sorted by rating descending)
@@ -277,31 +306,146 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         if (user.level) {
           const englishLevels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
           const userLevelIndex = englishLevels.indexOf(user.level);
-          if (userLevelIndex === -1 || userLevelIndex < filterSettings.levelMin || userLevelIndex > filterSettings.levelMax) {
+          
+          // If user has a non-standard level (like "Intermediate"), allow them through
+          // Only filter if they have a standard level that's outside the range
+          if (userLevelIndex !== -1 && (userLevelIndex < filterSettings.levelMin || userLevelIndex > filterSettings.levelMax)) {
             return false;
           }
+          // If userLevelIndex is -1 (non-standard level), allow them through
         }
         return true;
       })
       .sort((a, b) => (b.rating || 0) - (a.rating || 0));
     
     // Then get other online users (not ready to talk, sorted by rating descending)
+    // Check status service as fallback for online status
     const otherOnlineUsers = filteredUsers
-      .filter((user: User) => user.isOnline && !user.readyToTalk && !user.isOnCall)
+      .filter((user: User) => {
+        const status = simpleUserStatusService.getUserStatus(user._id);
+        const isOnline = status?.isOnline ?? user.isOnline;
+        const isOnCall = status?.isOnCall ?? user.isOnCall;
+        const shouldShow = isOnline && !user.readyToTalk && !isOnCall;
+        
+        // Debug logging for all users
+        console.log(`🔍 Filtering user ${user.name} (${user._id}):`, {
+          userId: user._id,
+          userIsOnline: user.isOnline,
+          statusIsOnline: status?.isOnline,
+          statusExists: !!status,
+          finalIsOnline: isOnline,
+          readyToTalk: user.readyToTalk,
+          isOnCall,
+          shouldShow,
+          userObject: {
+            _id: user._id,
+            name: user.name,
+            isOnline: user.isOnline,
+            readyToTalk: user.readyToTalk,
+            isOnCall: user.isOnCall
+          }
+        });
+        
+        return shouldShow;
+      })
       .sort((a: User, b: User) => (b.rating || 0) - (a.rating || 0));
+    
+    // Debug: Log final sorted users
+    if (__DEV__) {
+      console.log('📊 Final sortedUsers:', {
+        readyUsers: readyUsersSorted.length,
+        otherOnlineUsers: otherOnlineUsers.length,
+        total: readyUsersSorted.length + otherOnlineUsers.length,
+        readyUserIds: readyUsersSorted.map(u => u._id),
+        otherOnlineUserIds: otherOnlineUsers.map(u => u._id)
+      });
+    }
     
     // Return ready users first, then other online users
     return [...readyUsersSorted, ...otherOnlineUsers];
   }, [readyUsers, users, filterSettings]);
 
-  // Add users to status tracking when users list changes
+  // Add users to status tracking when users list changes with initial status
+  // Only add new users that haven't been tracked yet to prevent infinite loops
   useEffect(() => {
     if (statusServiceReady && users.length > 0) {
+      console.log('🔧 Adding users to status tracking:', users.length);
       users.forEach(user => {
-        simpleUserStatusService.addUserToTracking(user._id);
+        // Only add if not already tracked
+        if (!trackedUserIdsRef.current.has(user._id)) {
+          trackedUserIdsRef.current.add(user._id);
+          const initialStatus = {
+            isOnline: user.isOnline ?? true, // Default to true for users from API
+            lastSeenAt: undefined
+          };
+          console.log(`🔧 Adding user ${user.name} (${user._id}) to tracking with initial status:`, initialStatus);
+          // Pass initial status from API to status service
+          simpleUserStatusService.addUserToTracking(user._id, initialStatus);
+          
+          // Verify status was set correctly
+          const setStatus = simpleUserStatusService.getUserStatus(user._id);
+          console.log(`🔧 User ${user.name} status after adding:`, setStatus);
+        } else {
+          console.log(`🔧 User ${user.name} (${user._id}) already tracked, updating status if needed`);
+          // Update existing status if user data changed
+          simpleUserStatusService.addUserToTracking(user._id, {
+            isOnline: user.isOnline ?? true,
+            lastSeenAt: undefined
+          });
+        }
       });
     }
   }, [statusServiceReady, users]);
+
+  // Subscribe to status updates and sync to local users state
+  // Use useCallback to prevent recreating the subscription on every render
+  useEffect(() => {
+    if (!statusServiceReady) return;
+
+    const unsubscribe = simpleUserStatusService.subscribeToStatusUpdates((allStatuses) => {
+      console.log('📊 LobbyScreen: Status update received, syncing to local state');
+      
+      setUsers(prevUsers => {
+        let hasChanges = false;
+        const updatedUsers = prevUsers.map((user: User) => {
+          const status = allStatuses.get(user._id);
+          if (status) {
+            // Check if status actually changed before updating
+            const isOnlineChanged = user.isOnline !== status.isOnline;
+            const isOnCallChanged = (user.isOnCall ?? false) !== (status.isOnCall ?? false);
+            
+            if (isOnlineChanged || isOnCallChanged) {
+              hasChanges = true;
+              // Update user's online status from the service
+              return {
+                ...user,
+                isOnline: status.isOnline,
+                isOnCall: status.isOnCall ?? false
+              };
+            }
+          }
+          return user;
+        });
+        
+        // Only update state if there were actual changes
+        if (hasChanges) {
+          // Also update ready users list based on updated status
+          const filteredReadyUsers = updatedUsers.filter((user: User) => {
+            const status = allStatuses.get(user._id);
+            const isOnline = status?.isOnline ?? user.isOnline;
+            return isOnline && user.readyToTalk && !(status?.isOnCall ?? user.isOnCall);
+          });
+          setReadyUsers(filteredReadyUsers);
+        }
+        
+        return hasChanges ? updatedUsers : prevUsers;
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [statusServiceReady]);
 
   // Check microphone permission on component mount
   useEffect(() => {
@@ -346,23 +490,39 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       }
       
       const fetchedUsers = await response.json();
-      console.log('Fetched online users:', fetchedUsers.length);
+      console.log('📥 Fetched online users:', fetchedUsers.length);
+      console.log('📥 Fetched users data:', fetchedUsers.map((u: User) => ({ 
+        id: u._id, 
+        name: u.name, 
+        isOnline: u.isOnline, 
+        readyToTalk: u.readyToTalk,
+        gender: u.gender,
+        rating: u.rating,
+        level: u.level
+      })));
       
-      // Add mock data for demo
-      const enhancedUsers = fetchedUsers.map((user: User) => ({
+      // Ensure all users have isOnline property set correctly
+      const usersWithStatus = fetchedUsers.map((user: User) => ({
         ...user,
-        gender: Math.random() > 0.5 ? 'Male' : 'Female',
-        rating: Math.floor(Math.random() * 20) + 80, // 80-100
-        talks: Math.floor(Math.random() * 1000) + 1,
-        level: ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'][Math.floor(Math.random() * 6)],
-        readyToTalk: Math.random() > 0.3 // 70% ready to talk
+        isOnline: user.isOnline ?? true // Default to true for users from online-users endpoint
       }));
       
+      console.log('📥 Users with status:', usersWithStatus.map((u: User) => ({ 
+        id: u._id, 
+        name: u.name, 
+        isOnline: u.isOnline 
+      })));
+      
+      // Clear tracked users ref when fetching new users to allow re-tracking
+      trackedUserIdsRef.current.clear();
+      
+      // Use real data only - no mock data
       // Update state with fetched users
-      setUsers(enhancedUsers);
+      setUsers(usersWithStatus);
       
       // Filter users who are ready to talk
-      const usersReadyToTalk = enhancedUsers.filter((user: User) => user.isOnline && user.readyToTalk);
+      const usersReadyToTalk = usersWithStatus.filter((user: User) => user.isOnline && user.readyToTalk);
+      console.log('📥 Ready to talk users:', usersReadyToTalk.length);
       setReadyUsers(usersReadyToTalk);
       
       // Initialize socket service to receive user status updates
@@ -384,15 +544,14 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       const standardUsers = await getAllUsers();
       
       // Make sure we have the online status property for each user, but default to false
+      // Use real data only - no mock data
       const usersWithStatus = standardUsers.map((user: User) => ({
         ...user,
-        isOnline: false, // Default to offline unless socket confirms they're online
-        gender: Math.random() > 0.5 ? 'Male' : 'Female',
-        rating: Math.floor(Math.random() * 20) + 80, // 80-100
-        talks: Math.floor(Math.random() * 1000) + 1,
-        level: ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'][Math.floor(Math.random() * 6)],
-        readyToTalk: Math.random() > 0.3 // 70% ready to talk
+        isOnline: false // Default to offline unless socket confirms they're online
       }));
+      
+      // Clear tracked users ref when fetching new users to allow re-tracking
+      trackedUserIdsRef.current.clear();
       
       setUsers(usersWithStatus);
       
@@ -577,11 +736,15 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       });
       
       // Filter ready users: must be online AND ready to talk AND not on call
+      // Check status service as fallback for online/call status
       const filteredReadyUsers = updatedUsers.filter((user: User) => {
-        const isReadyUser = user.isOnline && user.readyToTalk && !user.isOnCall;
+        const status = simpleUserStatusService.getUserStatus(user._id);
+        const isOnline = status?.isOnline ?? user.isOnline;
+        const isOnCall = status?.isOnCall ?? user.isOnCall;
+        const isReadyUser = isOnline && user.readyToTalk && !isOnCall;
         if (isReadyUser) {
           console.log(`✅ User ${user.name} is ready to talk`);
-        } else if (user.isOnline && user.readyToTalk && user.isOnCall) {
+        } else if (isOnline && user.readyToTalk && isOnCall) {
           console.log(`📞 User ${user.name} is ready to talk but currently on call`);
         }
         return isReadyUser;
@@ -647,8 +810,12 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       const updatedUsers = Array.from(userMap.values());
       
       // Filter to only show users who are online AND ready to talk AND not on call
+      // Check status service as fallback for online/call status
       const filteredReadyUsers = updatedUsers.filter((user: User) => {
-        return user.isOnline && user.readyToTalk && !user.isOnCall;
+        const status = simpleUserStatusService.getUserStatus(user._id);
+        const isOnline = status?.isOnline ?? user.isOnline;
+        const isOnCall = status?.isOnCall ?? user.isOnCall;
+        return isOnline && user.readyToTalk && !isOnCall;
       });
       
       console.log(`📊 Total ready users after list update: ${filteredReadyUsers.length}`);
@@ -1231,26 +1398,40 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   // Handle call ended event
   const handleCallEnded = async (data: any) => {
     console.log('📞 Call ended event:', data);
-    if (data.userId) {
-      // Update call status for BOTH users (caller and receiver)
-      simpleUserStatusService.setUserCallStatus(data.userId, false);
-      
-      // Get current user ID and mark both users as not on call
-      const currentUserId = await getCurrentUserId();
-      
-      // Update call status for both users
-      if (currentUserId) {
-        simpleUserStatusService.setUserCallStatus(currentUserId, false);
-      }
-      
-      // Update user status in the list - mark both users as not on call
-      setUsers(prevUsers => prevUsers.map((user: User) => {
-        if (user._id === data.userId || user._id === currentUserId) {
-          return { ...user, isOnCall: false };
-        }
-        return user;
-      }));
+    
+    // Get current user ID
+    const currentUserId = await getCurrentUserId();
+    
+    // Get remote user ID from event data or callState
+    const remoteUserId = data.userId || data.remoteUserId;
+    
+    // Update call status IMMEDIATELY for both users (caller and receiver)
+    if (remoteUserId) {
+      console.log('📞 Updating call status to false for remote user:', remoteUserId);
+      simpleUserStatusService.setUserCallStatus(remoteUserId, false);
     }
+    
+    if (currentUserId) {
+      console.log('📞 Updating call status to false for current user:', currentUserId);
+      simpleUserStatusService.setUserCallStatus(currentUserId, false);
+    }
+    
+    // Update user status in the list - mark both users as not on call
+    setUsers(prevUsers => prevUsers.map((user: User) => {
+      if (user._id === remoteUserId || user._id === currentUserId) {
+        console.log('📞 Marking user as not on call in list:', user.name);
+        return { ...user, isOnCall: false };
+      }
+      return user;
+    }));
+    
+    // Also update ready users list - remove call status
+    setReadyUsers(prevReady => prevReady.map((user: User) => {
+      if (user._id === remoteUserId || user._id === currentUserId) {
+        return { ...user, isOnCall: false };
+      }
+      return user;
+    }));
   };
 
 
@@ -1497,7 +1678,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     );
   }
 
-  return (
+  return ( 
     <SafeAreaView style={[styles.container, { backgroundColor: theme.surface }]} edges={['top', 'left', 'right']}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={theme.background} />
       
@@ -1597,6 +1778,11 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
             <Text style={styles.emptySubtext}>
               Try using "Find a perfect partner" to get matched with someone!
             </Text>
+            {__DEV__ && (
+              <Text style={[styles.emptySubtext, { marginTop: 10, fontSize: 12 }]}>
+                Debug: Total users: {users.length}, Sorted: {sortedUsers.length}, Ready: {readyUsers.length}
+              </Text>
+            )}
           </View>
         }
       />

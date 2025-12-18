@@ -88,14 +88,53 @@ export const initialize = async (): Promise<void> => {
     socket.on('connect_error', (error) => {
       console.error('❌ Socket connection error:', error.message);
       console.error('   Error type:', error.type);
+      
+      // Check if it's an authentication error
+      if (error.message?.includes('unauthorized') || 
+          error.message?.includes('401') || 
+          error.message?.includes('authentication') ||
+          error.type === 'UnauthorizedError') {
+        console.warn('🚨 Socket connection failed due to authentication - logging out');
+        import('./authUtils').then(({ forceLogoutOnError }) => {
+          forceLogoutOnError('Socket authentication failed during connection');
+        });
+      }
     });
+    
+    // Track disconnection reasons and attempts for logout detection
+    let disconnectCount = 0;
+    let lastDisconnectTime = 0;
+    const DISCONNECT_THRESHOLD = 3; // Number of disconnects before considering logout
+    const DISCONNECT_WINDOW = 30000; // 30 seconds window
     
     socket.on('disconnect', (reason) => {
       console.log('🔌 Socket disconnected:', reason);
       
-      // If it's a transport error, try to reconnect
-      if (reason === 'transport close' || reason === 'transport error') {
-        console.log('🔄 Transport error detected, will attempt reconnection...');
+      const now = Date.now();
+      
+      // Check if disconnection is due to authentication issues
+      if (reason === 'io server disconnect' || reason === 'unauthorized') {
+        console.warn('🚨 Socket disconnected due to authentication issue - logging out');
+        // Import and call force logout
+        import('./authUtils').then(({ forceLogoutOnError }) => {
+          forceLogoutOnError('Socket authentication failed');
+        });
+        return;
+      }
+      
+      // Track disconnections for persistent server issues
+      if (reason === 'transport close' || reason === 'transport error' || reason === 'ping timeout') {
+        disconnectCount++;
+        lastDisconnectTime = now;
+        
+        // If multiple disconnects in short time, might be server issue
+        if (disconnectCount >= DISCONNECT_THRESHOLD) {
+          console.warn(`🚨 Multiple socket disconnections (${disconnectCount}) - possible server issue`);
+          // Don't logout immediately, but track it
+        }
+      } else {
+        // Reset counter for other disconnect reasons
+        disconnectCount = 0;
       }
     });
     
@@ -103,6 +142,9 @@ export const initialize = async (): Promise<void> => {
       console.log(`✅ Socket reconnected after ${attemptNumber} attempts`);
       console.log('   Socket ID:', socket?.id);
       console.log('   Transport:', socket.io.engine?.transport?.name || 'unknown');
+      
+      // Reset disconnect counter on successful reconnect
+      disconnectCount = 0;
       
       // Emit reconnection event for services that need to refresh
       socket.emit('socket-reconnected');
@@ -114,15 +156,32 @@ export const initialize = async (): Promise<void> => {
     
     socket.on('reconnect_error', (error) => {
       console.error('❌ Socket reconnection error:', error.message);
+      
+      // If reconnection fails repeatedly, might be server down
+      if (error.message?.includes('unauthorized') || error.message?.includes('401')) {
+        console.warn('🚨 Socket reconnection failed due to authentication - logging out');
+        import('./authUtils').then(({ forceLogoutOnError }) => {
+          forceLogoutOnError('Socket reconnection authentication failed');
+        });
+      }
     });
     
     socket.on('reconnect_failed', () => {
       console.error('❌ Socket reconnection failed after all attempts');
-      // Try to reinitialize
-      setTimeout(() => {
-        console.log('🔄 Attempting to reinitialize socket...');
-        initialize();
-      }, 5000);
+      
+      // If we had multiple disconnects and reconnection failed, likely server issue
+      if (disconnectCount >= DISCONNECT_THRESHOLD) {
+        console.warn('🚨 Persistent socket connection failures - possible server error');
+        import('./authUtils').then(({ forceLogoutOnError }) => {
+          forceLogoutOnError('Persistent socket connection failures');
+        });
+      } else {
+        // Try to reinitialize one more time
+        setTimeout(() => {
+          console.log('🔄 Attempting to reinitialize socket...');
+          initialize();
+        }, 5000);
+      }
     });
     
   } catch (error) {
