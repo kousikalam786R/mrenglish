@@ -12,7 +12,56 @@
  */
 
 import socketService from './socketService';
-import { EventEmitter } from 'events';
+
+// Simple EventEmitter implementation for React Native (no Node.js events module needed)
+class SimpleEventEmitter {
+  private events: Map<string, Array<(...args: any[]) => void>> = new Map();
+
+  on(event: string, callback: (...args: any[]) => void): void {
+    if (!this.events.has(event)) {
+      this.events.set(event, []);
+    }
+    this.events.get(event)!.push(callback);
+  }
+
+  off(event: string, callback?: (...args: any[]) => void): void {
+    if (!this.events.has(event)) {
+      return;
+    }
+    if (callback) {
+      const callbacks = this.events.get(event)!;
+      const index = callbacks.indexOf(callback);
+      if (index > -1) {
+        callbacks.splice(index, 1);
+      }
+    } else {
+      this.events.delete(event);
+    }
+  }
+
+  emit(event: string, ...args: any[]): void {
+    if (!this.events.has(event)) {
+      return;
+    }
+    const callbacks = this.events.get(event)!;
+    // Create a copy to avoid issues if callbacks modify the array
+    [...callbacks].forEach(callback => {
+      try {
+        callback(...args);
+      } catch (error) {
+        console.error(`Error in event handler for ${event}:`, error);
+      }
+    });
+  }
+
+  removeAllListeners(event?: string): void {
+    if (event) {
+      this.events.delete(event);
+    } else {
+      this.events.clear();
+    }
+  }
+}
 
 // Call State Enum (matches backend)
 export enum CallState {
@@ -70,7 +119,7 @@ export interface IncomingCallData {
   autoAccept?: boolean;
 }
 
-class CallFlowService extends EventEmitter {
+class CallFlowService extends SimpleEventEmitter {
   private static instance: CallFlowService;
   private currentCall: CallSession | null = null;
   private incomingCall: IncomingCallData | null = null;
@@ -212,6 +261,83 @@ class CallFlowService extends EventEmitter {
     socket.on('call:end:error', (data: { error: string }) => {
       console.error('❌ Call end error:', data);
       this.emit('call:error', data);
+    });
+
+    // call:connected - Call connected (BOTH users receive this after acceptance)
+    // This is when WebRTC should be initialized
+    socket.on('call:connected', (data: { 
+      callId: string; 
+      callState: string; 
+      callerId?: string;
+      callerName?: string;
+      callerProfilePic?: string;
+      receiverId?: string;
+      receiverName?: string;
+      callHistoryId?: string;
+      metadata?: any;
+    }) => {
+      console.log('✅ Call connected - ready for WebRTC:', data);
+      
+      // Update current call if it matches
+      if (this.currentCall && this.currentCall.callId === data.callId) {
+        this.currentCall.callState = CallState.ACCEPTED;
+        this.currentCall.callHistoryId = data.callHistoryId;
+        if (data.receiverName) {
+          // Caller received this - update receiver info
+          this.currentCall.receiverName = data.receiverName;
+        }
+        if (data.callerName) {
+          // Receiver received this - update caller info
+          this.currentCall.callerName = data.callerName;
+          this.currentCall.callerProfilePic = data.callerProfilePic;
+        }
+        this.emit('call:state-changed', this.currentCall);
+      } else if (!this.currentCall) {
+        // Might be a reconnect scenario - create call session
+        this.currentCall = {
+          callId: data.callId,
+          callerId: data.callerId || '',
+          receiverId: data.receiverId || '',
+          callType: CallType.DIRECT_CALL,
+          callState: CallState.ACCEPTED,
+          callerName: data.callerName,
+          callerProfilePic: data.callerProfilePic,
+          callHistoryId: data.callHistoryId,
+          metadata: data.metadata || {}
+        };
+        this.emit('call:state-changed', this.currentCall);
+      }
+      
+      // Emit ready-for-webrtc event - WebRTC should initialize NOW
+      this.emit('call:ready-for-webrtc', this.currentCall);
+    });
+
+    // call:unavailable - Receiver is offline/busy (for caller)
+    socket.on('call:unavailable', (data: { error: string; receiverId: string }) => {
+      console.log('❌ Call unavailable:', data);
+      if (this.currentCall && this.currentCall.receiverId === data.receiverId) {
+        this.updateCallState(CallState.ENDED);
+        this.clearCall();
+        this.emit('call:error', { error: data.error, receiverId: data.receiverId });
+      }
+    });
+
+    // call:ended - Call ended (for both users)
+    socket.on('call:ended', (data: { 
+      callId: string; 
+      callState: string; 
+      reason?: string;
+      endedBy?: string;
+      cancelledBy?: string;
+      declinedBy?: string;
+    }) => {
+      console.log('📴 Call ended:', data);
+      if (this.currentCall && this.currentCall.callId === data.callId) {
+        this.handleCallEnded(data);
+      }
+      if (this.incomingCall && this.incomingCall.callId === data.callId) {
+        this.handleCallCancelled(data);
+      }
     });
 
     console.log('✅ CallFlowService socket listeners set up');

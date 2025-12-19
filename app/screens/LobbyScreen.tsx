@@ -17,6 +17,7 @@ import { RootStackParamList } from '../navigation/types';
 import { getAllUsers } from '../utils/userService';
 import socketService from '../utils/socketService';
 import callService from '../utils/callService';
+import callFlowService, { CallType } from '../utils/callFlowService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '../utils/config';
 import { getAuthToken } from '../utils/authUtils';
@@ -907,55 +908,34 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       setProgressMessage(`Connecting to ${user.name}...`);
       setShowProgress(true);
       
-      // Initialize call service if needed
-      callService.initialize();
-      
-      // Navigate to call screen first so UI is ready
+      // Initialize call flow service
+      callFlowService.initialize();
+
+      // Use the new direct call flow - emit call:initiate (WebRTC will start after call:connected)
+      console.log('Initiating direct call to:', user._id);
+      await callFlowService.initiateCall(
+        user._id,
+        CallType.DIRECT_CALL,
+        { isVideo: false }
+      );
+
+      // Navigate to call screen - it will show "Calling..." state
       console.log('Navigating to call screen');
-      // Hide connecting screen if it's showing
       setShowConnecting(false);
       setConnectingPartner(null);
-      
+
       navigation.navigate('CallScreen', { 
         id: user._id, 
         name: user.name, 
         isVideoCall: false 
       });
       
-      // Add a longer delay to ensure navigation is complete
-      setTimeout(async () => {
-        try {
-          // Start the call with audio only (no video)
-          console.log('Starting call with user:', user._id);
-          await callService.startCall(user._id, user.name, { audio: true, video: false });
-          console.log('Call initiated successfully');
-          
-          // Update call status for both users
-          const currentUserId = await getCurrentUserId();
-          simpleUserStatusService.setUserCallStatus(currentUserId, true);
-          simpleUserStatusService.setUserCallStatus(user._id, true);
-          
-          // Clear ready-to-talk status when call starts
-          setCurrentUserReady(false);
-          socketService.socketEmit('set-ready-to-talk', { status: false });
-          
-          // Hide progress dialog
-          setShowProgress(false);
-        } catch (callStartError: any) {
-          console.error('Error in delayed call start:', callStartError);
-          
-          // Hide progress dialog
-          setShowProgress(false);
-          
-          Alert.alert(
-            'Call Failed', 
-            `Could not start call: ${callStartError.message || 'Please check microphone permissions and try again.'}`
-          );
-          
-          // Navigate back if there was an error
-          navigation.goBack();
-        }
-      }, 1000); // Increased delay to ensure navigation completes
+      // Hide progress dialog - CallScreen will handle the calling state
+      setShowProgress(false);
+      
+      // Clear ready-to-talk status
+      setCurrentUserReady(false);
+      socketService.socketEmit('set-ready-to-talk', { status: false });
       
     } catch (error: any) {
       console.error('Error starting call:', error);
@@ -1077,12 +1057,19 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       setProgressMessage(`Starting video call with ${user.name}...`);
       setShowProgress(true);
       
-      // Initialize call service
-      callService.initialize();
+      // Initialize call flow service
+      callFlowService.initialize();
       
-      // Navigate to call screen first so UI is ready
+      // Use the new direct call flow - emit call:initiate (WebRTC will start after call:connected)
+      console.log('Initiating direct video call to:', user._id);
+      await callFlowService.initiateCall(
+        user._id,
+        CallType.DIRECT_CALL,
+        { isVideo: true }
+      );
+      
+      // Navigate to call screen - it will show "Calling..." state
       console.log('Navigating to call screen');
-      // Hide connecting screen if it's showing
       setShowConnecting(false);
       setConnectingPartner(null);
       
@@ -1092,40 +1079,12 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         isVideoCall: true 
       });
       
-      // Add a longer delay to ensure navigation is complete
-      setTimeout(async () => {
-        try {
-          // Start the video call with both audio and video enabled
-          console.log('Starting video call with user:', user._id);
-          await callService.startCall(user._id, user.name, { audio: true, video: true });
-          console.log('Video call initiated successfully');
-          
-          // Update call status for both users
-          const currentUserId = await getCurrentUserId();
-          simpleUserStatusService.setUserCallStatus(currentUserId, true);
-          simpleUserStatusService.setUserCallStatus(user._id, true);
-          
-          // Clear ready-to-talk status when video call starts
-          setCurrentUserReady(false);
-          socketService.socketEmit('set-ready-to-talk', { status: false });
-          
-          // Hide progress dialog
-          setShowProgress(false);
-        } catch (callStartError) {
-          console.error('Error in delayed video call start:', callStartError);
-          
-          // Hide progress dialog
-          setShowProgress(false);
-          
-          Alert.alert(
-            'Video Call Failed', 
-            `Could not start video call: ${callStartError instanceof Error ? callStartError.message : 'Please check camera and microphone permissions'}`
-          );
-          
-          // Navigate back if there was an error
-          navigation.goBack();
-        }
-      }, 1000); // Increased delay to ensure navigation completes
+      // Hide progress dialog - CallScreen will handle the calling state
+      setShowProgress(false);
+      
+      // Clear ready-to-talk status
+      setCurrentUserReady(false);
+      socketService.socketEmit('set-ready-to-talk', { status: false });
       
     } catch (error) {
       console.error('Error starting video call:', error);
