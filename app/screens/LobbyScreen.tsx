@@ -17,6 +17,7 @@ import { RootStackParamList } from '../navigation/types';
 import { getAllUsers } from '../utils/userService';
 import socketService from '../utils/socketService';
 import callService from '../utils/callService';
+import callFlowService, { CallType } from '../utils/callFlowService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '../utils/config';
 import { getAuthToken } from '../utils/authUtils';
@@ -869,7 +870,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     }
   };
 
-  // Proceed with the actual call logic
+  // Proceed with the actual call logic - FIXED: Uses callFlowService for proper signaling flow
   const proceedWithCall = async (user: User) => {
     try {
       // Request microphone permission before starting the call
@@ -880,89 +881,90 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         return;
       }
       
-      // Instead, store the ID in the local service
-      socketService.socketEmit('set_remote_user', { userId: user._id });
-      
-      // Check if socket is connected
+      // Ensure socket is connected
       const socket = socketService.getSocket();
       if (!socket || !socket.connected) {
         console.log('Socket not connected, initializing...');
-        
-        // Show connecting dialog
         setProgressMessage('Connecting to server...');
         setShowProgress(true);
-        
         await socketService.initialize();
-        
-        // Check again after initialization
         if (!socketService.getSocket()?.connected) {
           setShowProgress(false);
           throw new Error('Failed to connect to signaling server. Please check your internet connection.');
         }
       }
       
-      console.log(`Initiating call to ${user.name} (${user._id})`);
+      console.log(`📞 [DIRECT CALL] Initiating call to ${user.name} (${user._id})`);
       
-      // Update progress dialog
-      setProgressMessage(`Connecting to ${user.name}...`);
-      setShowProgress(true);
+      // Initialize call flow service
+      callFlowService.initialize();
       
-      // Initialize call service if needed
+      // Initialize call service (for WebRTC, will be used after acceptance)
       callService.initialize();
       
-      // Navigate to call screen first so UI is ready
-      console.log('Navigating to call screen');
-      // Hide connecting screen if it's showing
+      // Close any progress/connecting dialogs
       setShowConnecting(false);
       setConnectingPartner(null);
+      setShowProgress(false);
       
-      navigation.navigate('CallScreen', { 
-        id: user._id, 
-        name: user.name, 
-        isVideoCall: false 
-      });
+      // INVITATION-FIRST ARCHITECTURE:
+      // Send invitation (NOT call) - OutgoingInvitationModal will show at app root level
+      // Call starts ONLY after invitation acceptance via call:start event
+      // DO NOT initialize WebRTC here - it will start after call:start event
+      await callFlowService.sendInvitation(
+        user._id,
+        CallType.DIRECT_CALL,
+        { isVideo: false },
+        user.name // Pass receiver name for UI
+      );
       
-      // Add a longer delay to ensure navigation is complete
-      setTimeout(async () => {
+      console.log('✅ [DIRECT CALL] call:invite sent, waiting for acceptance...');
+      console.log('📱 OutgoingInvitationModal should now be visible (invitation status: inviting)');
+      
+      // Listen for call:ready-for-webrtc event (emitted after call:start is processed)
+      // This is when WebRTC should start
+      const onCallReady = async (callSession: any) => {
+        console.log('🎬 [DIRECT CALL] call:ready-for-webrtc received, NOW starting WebRTC...', callSession);
+        
+        // Remove listener to avoid multiple calls
+        callFlowService.off('call:ready-for-webrtc', onCallReady);
+        
         try {
-          // Start the call with audio only (no video)
-          console.log('Starting call with user:', user._id);
+          // NOW start WebRTC (create offer and send)
+          // This is the first time WebRTC is initialized (after invitation acceptance)
           await callService.startCall(user._id, user.name, { audio: true, video: false });
-          console.log('Call initiated successfully');
+          console.log('✅ [DIRECT CALL] WebRTC started successfully');
           
-          // Update call status for both users
+          // Navigation to CallScreen will happen automatically when status becomes CONNECTED
+          // (handled by OutgoingInvitationModal)
+          
+          // Set isOnCall status ONLY after call starts and WebRTC initializes
           const currentUserId = await getCurrentUserId();
           simpleUserStatusService.setUserCallStatus(currentUserId, true);
           simpleUserStatusService.setUserCallStatus(user._id, true);
           
-          // Clear ready-to-talk status when call starts
+          // Clear ready-to-talk status
           setCurrentUserReady(false);
           socketService.socketEmit('set-ready-to-talk', { status: false });
-          
-          // Hide progress dialog
-          setShowProgress(false);
-        } catch (callStartError: any) {
-          console.error('Error in delayed call start:', callStartError);
-          
-          // Hide progress dialog
-          setShowProgress(false);
-          
+        } catch (webrtcError: any) {
+          console.error('❌ [DIRECT CALL] Error starting WebRTC:', webrtcError);
           Alert.alert(
             'Call Failed', 
-            `Could not start call: ${callStartError.message || 'Please check microphone permissions and try again.'}`
+            `Could not connect call: ${webrtcError.message || 'Please try again.'}`
           );
-          
-          // Navigate back if there was an error
           navigation.goBack();
         }
-      }, 1000); // Increased delay to ensure navigation completes
+      };
+      
+      // Register listener for call:ready-for-webrtc (emitted after call:start event)
+      callFlowService.on('call:ready-for-webrtc', onCallReady);
+      
+      // Note: For invitation declined/cancelled/expired, we rely on Redux state changes
+      // The invitation state will be reset automatically, and the UI will update accordingly
       
     } catch (error: any) {
-      console.error('Error starting call:', error);
-      
-      // Hide progress dialog
+      console.error('❌ [DIRECT CALL] Error initiating call:', error);
       setShowProgress(false);
-      
       Alert.alert(
         'Call Failed', 
         `Failed to start call: ${error.message || 'Please try again later.'}`
@@ -1014,7 +1016,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     }
   };
 
-  // Proceed with the actual video call logic
+  // Proceed with the actual video call logic - FIXED: Uses callFlowService for proper signaling flow
   const proceedWithVideoCall = async (user: User) => {
     try {
       // Request microphone and camera permissions before starting the call
@@ -1050,41 +1052,31 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         return;
       }
       
-      // Instead, store the ID in the local service
-      socketService.socketEmit('set_remote_user', { userId: user._id });
-      
-      // Check if socket is connected
+      // Ensure socket is connected
       const socket = socketService.getSocket();
       if (!socket || !socket.connected) {
         console.log('Socket not connected, initializing...');
-        
-        // Show connecting dialog
         setProgressMessage('Connecting to server...');
         setShowProgress(true);
-        
         await socketService.initialize();
-        
-        // Check again after initialization
         if (!socketService.getSocket()?.connected) {
           setShowProgress(false);
           throw new Error('Failed to connect to signaling server. Please check your internet connection.');
         }
       }
       
-      console.log(`Initiating video call to ${user.name} (${user._id})`);
+      console.log(`📞 [DIRECT VIDEO CALL] Initiating video call to ${user.name} (${user._id})`);
       
-      // Update progress dialog
-      setProgressMessage(`Starting video call with ${user.name}...`);
-      setShowProgress(true);
+      // Initialize call flow service
+      callFlowService.initialize();
       
-      // Initialize call service
+      // Initialize call service (for WebRTC, will be used after acceptance)
       callService.initialize();
       
-      // Navigate to call screen first so UI is ready
-      console.log('Navigating to call screen');
-      // Hide connecting screen if it's showing
+      // Navigate to call screen (will show "Calling..." state)
       setShowConnecting(false);
       setConnectingPartner(null);
+      setShowProgress(false);
       
       navigation.navigate('CallScreen', { 
         id: user._id, 
@@ -1092,43 +1084,53 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         isVideoCall: true 
       });
       
-      // Add a longer delay to ensure navigation is complete
-      setTimeout(async () => {
+      // Initiate call using callFlowService (signaling only, no WebRTC yet)
+      await callFlowService.initiateCall(
+        user._id,
+        CallType.DIRECT_CALL,
+        { isVideo: true }
+      );
+      
+      console.log('✅ [DIRECT VIDEO CALL] call:initiate sent, waiting for acceptance...');
+      
+      // Listen for call ready (after receiver accepts)
+      const onCallReady = async (callSession: any) => {
+        console.log('✅ [DIRECT VIDEO CALL] Call accepted, starting WebRTC...', callSession);
+        
+        // Remove listener to avoid multiple calls
+        callFlowService.off('call:ready-for-webrtc', onCallReady);
+        
         try {
-          // Start the video call with both audio and video enabled
-          console.log('Starting video call with user:', user._id);
+          // Now start WebRTC (create offer and send)
           await callService.startCall(user._id, user.name, { audio: true, video: true });
-          console.log('Video call initiated successfully');
+          console.log('✅ [DIRECT VIDEO CALL] WebRTC started successfully');
           
-          // Update call status for both users
+          // Set isOnCall status ONLY after call is accepted and WebRTC starts
           const currentUserId = await getCurrentUserId();
           simpleUserStatusService.setUserCallStatus(currentUserId, true);
           simpleUserStatusService.setUserCallStatus(user._id, true);
           
-          // Clear ready-to-talk status when video call starts
+          // Clear ready-to-talk status
           setCurrentUserReady(false);
           socketService.socketEmit('set-ready-to-talk', { status: false });
-          
-          // Hide progress dialog
-          setShowProgress(false);
-        } catch (callStartError) {
-          console.error('Error in delayed video call start:', callStartError);
-          
-          // Hide progress dialog
-          setShowProgress(false);
-          
+        } catch (webrtcError: any) {
+          console.error('❌ [DIRECT VIDEO CALL] Error starting WebRTC:', webrtcError);
           Alert.alert(
             'Video Call Failed', 
-            `Could not start video call: ${callStartError instanceof Error ? callStartError.message : 'Please check camera and microphone permissions'}`
+            `Could not connect video call: ${webrtcError.message || 'Please try again.'}`
           );
-          
-          // Navigate back if there was an error
           navigation.goBack();
         }
-      }, 1000); // Increased delay to ensure navigation completes
+      };
+      
+      // Register listener for call:ready-for-webrtc (emitted after call:start event)
+      callFlowService.on('call:ready-for-webrtc', onCallReady);
+      
+      // Note: For invitation declined/cancelled/expired, we rely on Redux state changes
+      // The invitation state will be reset automatically, and the UI will update accordingly
       
     } catch (error) {
-      console.error('Error starting video call:', error);
+      console.error('❌ [DIRECT VIDEO CALL] Error initiating call:', error);
       
       // Hide progress dialog
       setShowProgress(false);

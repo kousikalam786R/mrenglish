@@ -16,6 +16,9 @@ import { useSelector } from 'react-redux';
 import { RootState } from '../redux/store';
 import { CallStatus } from '../utils/callService';
 import IncomingCallModal from '../components/IncomingCallModal';
+import OutgoingCallCard from '../components/OutgoingCallCard';
+import IncomingCallCard from '../components/IncomingCallCard';
+import ConnectingModal from '../components/ConnectingModal';
 import SplashScreen from '../screens/SplashScreen';
 import { navigationRef, processQueuedActions } from './NavigationService';
 import { useTheme } from '../context/ThemeContext';
@@ -318,17 +321,7 @@ const AuthNavigator = () => {
 const RootNavigator = () => {
   // Use Redux auth state instead of context
   const { isSignedIn, status } = useSelector((state: any) => state.auth);
-  const callState = useSelector((state: RootState) => state.call.activeCall);
-  const [showIncomingCall, setShowIncomingCall] = useState(false);
-  
-  // Show incoming call modal when call status is RINGING
-  useEffect(() => {
-    if (callState.status === CallStatus.RINGING) {
-      setShowIncomingCall(true);
-    } else {
-      setShowIncomingCall(false);
-    }
-  }, [callState.status]);
+  // IncomingCallModal reads callState directly from Redux - no local state needed
 
   return (
     <>
@@ -499,8 +492,18 @@ const RootNavigator = () => {
           <Stack.Screen name="Auth" component={AuthNavigator} />
         )}
       </Stack.Navigator>
-      {/* Incoming call modal now outside Stack.Navigator but inside the fragment */}
-      <IncomingCallModal visible={showIncomingCall} />
+      
+      {/* Call UI Components - Rendered at App Root Level */}
+      {/* All components read from Redux state (single source of truth) */}
+      
+      {/* Outgoing Call Card - Shows when caller is calling/waiting */}
+      <OutgoingCallCard />
+      
+      {/* Incoming Call Card - Shows when receiver receives call */}
+      <IncomingCallCard />
+      
+      {/* Connecting Modal - Shows when call is connecting (both users) */}
+      <ConnectingModal />
     </>
   );
 };

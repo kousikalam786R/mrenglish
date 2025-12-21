@@ -81,6 +81,15 @@ export const initialize = async (): Promise<void> => {
       console.log('✅ Socket connected successfully', socket?.id);
       console.log('   Transport:', socket.io.engine?.transport?.name || 'unknown');
       
+      // CRITICAL FIX: Initialize callFlowService when socket connects
+      // This ensures socket listeners are set up for incoming calls
+      import('./callFlowService').then(({ default: callFlowService }) => {
+        console.log('🔧 [socketService] Initializing callFlowService on socket connect');
+        callFlowService.initialize();
+      }).catch((error) => {
+        console.error('❌ [socketService] Failed to initialize callFlowService on connect:', error);
+      });
+      
       // Emit connection event for services that need to re-register listeners
       socket.emit('socket-reconnected');
     });
@@ -142,6 +151,15 @@ export const initialize = async (): Promise<void> => {
       console.log(`✅ Socket reconnected after ${attemptNumber} attempts`);
       console.log('   Socket ID:', socket?.id);
       console.log('   Transport:', socket.io.engine?.transport?.name || 'unknown');
+      
+      // CRITICAL FIX: Re-initialize callFlowService when socket reconnects
+      // This ensures socket listeners are re-set up after reconnection
+      import('./callFlowService').then(({ default: callFlowService }) => {
+        console.log('🔧 [socketService] Re-initializing callFlowService on socket reconnect');
+        callFlowService.reinitialize();
+      }).catch((error) => {
+        console.error('❌ [socketService] Failed to re-initialize callFlowService on reconnect:', error);
+      });
       
       // Reset disconnect counter on successful reconnect
       disconnectCount = 0;

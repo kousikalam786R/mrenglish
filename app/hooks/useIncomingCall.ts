@@ -8,6 +8,7 @@
 import { useState, useEffect } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import callFlowService, { IncomingCallData, CallType } from '../utils/callFlowService';
+import callService from '../utils/callService';
 import { useNavigation } from '@react-navigation/native';
 
 export const useIncomingCall = () => {
@@ -21,22 +22,34 @@ export const useIncomingCall = () => {
 
     // Listen for incoming calls
     const handleIncomingCall = (data: IncomingCallData) => {
-      console.log('📞 Incoming call received in hook:', data);
+      console.log('📞 [RECEIVER UI] Incoming call received in useIncomingCall hook:', data);
+      console.log('   callId:', data.callId);
+      console.log('   callerId:', data.callerId);
+      console.log('   callType:', data.callType);
+      console.log('   autoAccept:', data.autoAccept);
       
       // Only show modal for direct calls (match calls auto-accept)
       if (data.callType === CallType.DIRECT_CALL && !data.autoAccept) {
+        console.log('✅ [RECEIVER UI] Setting incoming call state and showing modal');
         setIncomingCall(data);
         setShowModal(true);
+        console.log('✅ [RECEIVER UI] Incoming call modal state updated - modal should be visible');
+      } else {
+        console.log('⚠️ [RECEIVER UI] Not showing modal - callType:', data.callType, 'autoAccept:', data.autoAccept);
       }
     };
 
     // Listen for call accepted (ready for WebRTC)
     const handleCallReady = (callSession: any) => {
-      console.log('✅ Call ready for WebRTC:', callSession);
+      console.log('✅ [RECEIVER] Call ready for WebRTC:', callSession);
       setShowModal(false);
       setIncomingCall(null);
       
-      // Navigate to CallScreen
+      // Initialize callService for receiver (to handle incoming WebRTC offer)
+      callService.initialize();
+      console.log('✅ [RECEIVER] CallService initialized, waiting for WebRTC offer from caller');
+      
+      // Navigate to CallScreen (receiver will wait for call-offer event from caller)
       navigation.navigate('CallScreen' as never, {
         id: callSession.callerId,
         name: callSession.callerName,
@@ -120,4 +133,6 @@ export const useIncomingCall = () => {
     handleDecline,
   };
 };
+
+
 

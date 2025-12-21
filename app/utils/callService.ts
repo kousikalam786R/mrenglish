@@ -2201,36 +2201,55 @@ class CallService {
   }
 
   // Load persisted call state from AsyncStorage
+  // FIXED: Only restore on cold app start, not during active socket connections
+  // This prevents persisted state from overriding live incoming calls
   private async loadPersistedCallState(): Promise<void> {
     try {
       const storedState = await AsyncStorage.getItem('callState');
-      if (storedState) {
-        const parsedState = JSON.parse(storedState);
-        const lastUpdated = parsedState.lastUpdated || 0;
-        const now = Date.now();
-        
-        // Only restore state if it's recent (within last 5 minutes) and we're not in an active call
-        if (now - lastUpdated < 300000 && this.callState.status === CallStatus.IDLE) {
-          delete parsedState.lastUpdated;
-          this.callState = {
-            ...parsedState,
-            // Ensure we don't restore ended calls
-            status: parsedState.status === CallStatus.ENDED ? CallStatus.IDLE : parsedState.status
-          };
-          console.log('Restored persisted call state:', this.callState);
-          this.emitCallStateChange();
-          
-          // If we restored an active call state, start sync
-          if (this.callState.status !== CallStatus.IDLE) {
-            this.startStateSync();
-          }
-        } else {
-          console.log('Persisted state too old or call active, not restoring');
-          await AsyncStorage.removeItem('callState');
-        }
+      if (!storedState) {
+        console.log('ℹ️ [loadPersistedCallState] No persisted state found');
+        return;
+      }
+      
+      const parsedState = JSON.parse(storedState);
+      const lastUpdated = parsedState.lastUpdated || 0;
+      const now = Date.now();
+      const stateAge = now - lastUpdated;
+      
+      // CRITICAL FIX: Only restore if state is very recent (within 1 minute)
+      // This ensures we only restore on cold app start, not during active socket events
+      // Older persisted state likely means the app was closed and we shouldn't restore
+      const MAX_RESTORE_AGE = 60000; // 1 minute
+      
+      if (stateAge > MAX_RESTORE_AGE) {
+        console.log(`⚠️ [loadPersistedCallState] Persisted state too old (${Math.round(stateAge / 1000)}s), not restoring`);
+        await AsyncStorage.removeItem('callState');
+        return;
+      }
+      
+      // Only restore if we're in idle state (no active call)
+      if (this.callState.status !== CallStatus.IDLE) {
+        console.log(`⚠️ [loadPersistedCallState] Call already active (status: ${this.callState.status}), not restoring persisted state`);
+        await AsyncStorage.removeItem('callState');
+        return;
+      }
+      
+      // Safe to restore - state is recent and we're idle
+      delete parsedState.lastUpdated;
+      this.callState = {
+        ...parsedState,
+        // Ensure we don't restore ended calls
+        status: parsedState.status === CallStatus.ENDED ? CallStatus.IDLE : parsedState.status
+      };
+      console.log('✅ [loadPersistedCallState] Restored persisted call state:', this.callState);
+      this.emitCallStateChange();
+      
+      // If we restored an active call state, start sync
+      if (this.callState.status !== CallStatus.IDLE) {
+        this.startStateSync();
       }
     } catch (error) {
-      console.error('Failed to load persisted call state:', error);
+      console.error('❌ [loadPersistedCallState] Failed to load persisted call state:', error);
     }
   }
 

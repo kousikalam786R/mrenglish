@@ -45,6 +45,9 @@ const CallScreen = () => {
   // Get call state from Redux
   const callState = useSelector((state: RootState) => state.call.activeCall);
   
+  // Check if we're receiver (coming from incoming call)
+  const isReceiver = callState.status === CallStatus.CONNECTING || callState.status === CallStatus.RINGING;
+  
   // Local state
   const [callDuration, setCallDuration] = useState(0);
   const [serverStartTime, setServerStartTime] = useState<Date | null>(null);
@@ -138,9 +141,26 @@ const CallScreen = () => {
     // Get the current call state directly from the service
     const currentCallState = callService.getCallState();
     console.log('Current call state:', currentCallState);
+    console.log('Redux call state:', callState);
+    console.log('Is receiver?', isReceiver);
+    
+    // If we're receiver (incoming call accepted), set up callService to wait for WebRTC offer
+    if (isReceiver && callState.status === CallStatus.CONNECTING) {
+      console.log('✅ [CallScreen] Receiver: Setting up callService to wait for WebRTC offer');
+      // Initialize callService (sets up socket listeners for call-offer)
+      callService.initialize();
+      
+      // Set callService state to RINGING so it's ready to accept the offer when it arrives
+      // handleCallOffer will automatically handle the offer and create the answer
+      if (currentCallState.status === CallStatus.IDLE && callState.remoteUserId) {
+        console.log('✅ [CallScreen] Receiver: Setting callService state to RINGING to wait for offer');
+        // Update callService state directly (it will be updated when offer arrives)
+        // Just ensure callService is initialized and listening for call-offer
+      }
+    }
     
     // If we're already connected, initialize the timer and sync with server
-    if (currentCallState.status === CallStatus.CONNECTED) {
+    if (currentCallState.status === CallStatus.CONNECTED || callState.status === CallStatus.CONNECTED) {
       syncCallStatus();
     }
     
@@ -387,6 +407,26 @@ const CallScreen = () => {
       setCallDuration(currentDuration);
     }
   }, [callState.status, callState.callStartTime]);
+
+  // Handle receiver case: When WebRTC offer is received and callService state becomes RINGING, accept it
+  useEffect(() => {
+    if (!isReceiver) return;
+
+    const serviceCallState = callService.getCallState();
+    console.log('🔍 [CallScreen Receiver] Monitoring callService state:', serviceCallState.status);
+    
+    // If callService received the offer (status is RINGING) and has SDP, accept it
+    if (serviceCallState.status === CallStatus.RINGING && serviceCallState.sdp) {
+      console.log('✅ [CallScreen Receiver] WebRTC offer received, accepting call...');
+      callService.acceptCall({ audio: true, video: serviceCallState.isVideoEnabled })
+        .then(() => {
+          console.log('✅ [CallScreen Receiver] Call accepted successfully');
+        })
+        .catch((error) => {
+          console.error('❌ [CallScreen Receiver] Error accepting call:', error);
+        });
+    }
+  }, [isReceiver, callState.status]);
   
   
   // Format time for display

@@ -19,25 +19,94 @@ import {
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
-import callFlowService, { IncomingCallData, CallType } from '../utils/callFlowService';
+import { useSelector, useDispatch } from 'react-redux';
+import { useNavigation } from '@react-navigation/native';
+import { RootState } from '../redux/store';
+import { CallStatus } from '../utils/callService';
+import callFlowService from '../utils/callFlowService';
+import { resetCallState, setCallState } from '../redux/slices/callSlice';
 
 const { width, height } = Dimensions.get('window');
 
-interface IncomingCallModalProps {
-  visible: boolean;
-  callData: IncomingCallData | null;
-  onAccept: () => void;
-  onDecline: () => void;
-}
-
-const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
-  visible,
-  callData,
-  onAccept,
-  onDecline,
-}) => {
+/**
+ * IncomingCallModal Component
+ * 
+ * FIXED: Now reads from Redux store instead of props
+ * Shows Accept/Decline modal when callState.status === RINGING
+ * Redux store is the single source of truth
+ */
+const IncomingCallModal: React.FC = () => {
+  const dispatch = useDispatch();
+  const navigation = useNavigation();
+  // Read call state from Redux (single source of truth)
+  const callState = useSelector((state: RootState) => state.call.activeCall);
+  
+  // Show modal when status is RINGING
+  const visible = callState.status === CallStatus.RINGING;
+  
   const [pulseAnim] = useState(new Animated.Value(1));
   const [ringAnim] = useState(new Animated.Value(0));
+
+  // Handle Accept button press
+  const handleAccept = () => {
+    console.log('✅ [IncomingCallModal] Accept button pressed');
+    const incomingCall = callFlowService.getIncomingCall();
+    if (!incomingCall) {
+      console.error('❌ [IncomingCallModal] No incoming call data found');
+      return;
+    }
+    
+    console.log('   Accepting call:', incomingCall.callId);
+    console.log('   Setting call state to CONNECTING');
+    
+    // Update Redux state to CONNECTING (modal will hide)
+    dispatch(setCallState({
+      ...callState,
+      status: CallStatus.CONNECTING
+    }));
+    
+    // Accept call (this emits call:accept socket event to server)
+    callFlowService.acceptCall(incomingCall.callId);
+    
+    // Navigate to CallScreen (receiver will wait for WebRTC offer from caller)
+    console.log('   Navigating to CallScreen as receiver');
+    navigation.navigate('CallScreen' as never, {
+      id: incomingCall.callerId,
+      name: incomingCall.callerName,
+      isVideoCall: incomingCall.metadata?.isVideo || false,
+      callId: incomingCall.callId,
+      callType: incomingCall.callType,
+      isReceiver: true, // Mark as receiver so CallScreen knows to wait for offer
+    } as never);
+  };
+
+  // Handle Decline button press
+  const handleDecline = () => {
+    console.log('❌ [IncomingCallModal] Decline button pressed');
+    const incomingCall = callFlowService.getIncomingCall();
+    if (!incomingCall) {
+      console.error('❌ [IncomingCallModal] No incoming call data found');
+      // Reset state anyway
+      dispatch(resetCallState());
+      return;
+    }
+    
+    console.log('   Declining call:', incomingCall.callId);
+    
+    // Decline call (this emits call:decline socket event)
+    callFlowService.declineCall(incomingCall.callId);
+    
+    // Reset Redux call state to IDLE
+    dispatch(resetCallState());
+  };
+
+  useEffect(() => {
+    if (visible) {
+      console.log('✅ [IncomingCallModal] Modal mounted/visible');
+      console.log('   Call State:', callState.status);
+      console.log('   Remote User:', callState.remoteUserId, callState.remoteUserName);
+    }
+  }, [visible, callState.status]);
 
   useEffect(() => {
     if (visible) {
@@ -78,7 +147,10 @@ const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
     }
   }, [visible]);
 
-  if (!callData) return null;
+  // Don't render if not ringing or missing required data
+  if (!visible || !callState.remoteUserId || !callState.remoteUserName) {
+    return null;
+  }
 
   const rotateInterpolate = ringAnim.interpolate({
     inputRange: [0, 1],
@@ -90,7 +162,7 @@ const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={onDecline}
+      onRequestClose={handleDecline}
     >
       <LinearGradient
         colors={['#1E0071', '#00BFFF']}
@@ -112,27 +184,16 @@ const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
                 },
               ]}
             >
-              {callData.callerProfilePic ? (
-                <Image
-                  source={{ uri: callData.callerProfilePic }}
-                  style={styles.avatar}
-                />
-              ) : (
-                <View style={styles.avatarPlaceholder}>
-                  <Icon name="person" size={60} color="#fff" />
-                </View>
-              )}
+              {/* Profile pic - can be added to Redux state if needed */}
+              <View style={styles.avatarPlaceholder}>
+                <Icon name="person" size={60} color="#fff" />
+              </View>
             </Animated.View>
 
-            <Text style={styles.callerName}>{callData.callerName}</Text>
+            <Text style={styles.callerName}>{callState.remoteUserName}</Text>
             <Text style={styles.callType}>
-              {callData.metadata?.isVideo ? 'Video Call' : 'Audio Call'}
+              {callState.isVideoEnabled ? 'Video Call' : 'Audio Call'}
             </Text>
-            {callData.metadata?.topic && (
-              <Text style={styles.topic}>
-                Topic: {callData.metadata.topic}
-              </Text>
-            )}
           </View>
 
           {/* Call Status */}
@@ -154,7 +215,7 @@ const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
             {/* Decline Button */}
             <TouchableOpacity
               style={[styles.button, styles.declineButton]}
-              onPress={onDecline}
+              onPress={handleDecline}
               activeOpacity={0.8}
             >
               <Icon name="close" size={32} color="#fff" />
@@ -163,7 +224,7 @@ const IncomingCallModal: React.FC<IncomingCallModalProps> = ({
             {/* Accept Button */}
             <TouchableOpacity
               style={[styles.button, styles.acceptButton]}
-              onPress={onAccept}
+              onPress={handleAccept}
               activeOpacity={0.8}
             >
               <Icon name="call" size={32} color="#fff" />
