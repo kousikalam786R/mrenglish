@@ -1035,32 +1035,53 @@ class CallFlowService {
     console.log('   callerId:', data.callerId);
     console.log('   receiverId:', data.receiverId);
     
-    // Create call session
+    // Get current user ID from Redux to determine if we're caller or receiver
+    const currentUserId = store.getState().auth.userId;
+    const isCaller = currentUserId === data.callerId;
+    const isReceiver = currentUserId === data.receiverId;
+    
+    console.log('   Current user ID:', currentUserId);
+    console.log('   Is caller?', isCaller);
+    console.log('   Is receiver?', isReceiver);
+    
+    // Get invitation data before resetting (contains user names)
+    const invitationState = store.getState().call.invitation;
+    const remoteUserId = isCaller ? data.receiverId : data.callerId;
+    const remoteUserName = invitationState.remoteUserName || '';
+    
+    console.log('   Remote user ID:', remoteUserId);
+    console.log('   Remote user name:', remoteUserName);
+    
+    // Create call session with proper names
     this.currentCall = {
       callId: data.callId,
       callerId: data.callerId,
       receiverId: data.receiverId,
       callType: CallType.DIRECT_CALL,
       callState: CallState.CONNECTING,
+      callerName: isReceiver ? invitationState.remoteUserName : undefined, // For receiver, caller name is in invitation
       metadata: data.metadata,
       callHistoryId: data.callHistoryId
     };
     
-    // Reset invitation state (invitation is now converted to call)
-    store.dispatch(resetInvitationState());
-    this.currentInvitation = null;
-    
-    // Update call state to CONNECTING
+    // Update call state to CONNECTING with correct remote user info
     store.dispatch(setCallState({
       status: CallStatus.CONNECTING,
-      remoteUserId: data.callerId, // TODO: Determine if we're caller or receiver
-      remoteUserName: '', // Will be set from invitation data
+      remoteUserId: remoteUserId,
+      remoteUserName: remoteUserName,
       isVideoEnabled: data.metadata?.isVideo || false,
       isAudioEnabled: true,
       callStartTime: null,
       callDuration: 0,
       callHistoryId: data.callHistoryId
     }));
+    
+    console.log('✅ [BOTH] Call state updated to CONNECTING');
+    console.log('   Remote user:', remoteUserId, remoteUserName);
+    
+    // Reset invitation state (invitation is now converted to call)
+    store.dispatch(resetInvitationState());
+    this.currentInvitation = null;
     
     // Emit event for WebRTC initialization (this is when WebRTC should start)
     this.emit('call:ready-for-webrtc', this.currentCall);

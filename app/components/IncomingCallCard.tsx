@@ -23,6 +23,7 @@ import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../redux/store';
 import callFlowService from '../utils/callFlowService';
 import { resetInvitationState, setInvitationState } from '../redux/slices/callSlice';
+import { CallStatus } from '../utils/callService';
 import Icon from 'react-native-vector-icons/Ionicons';
 import NavigationService from '../navigation/NavigationService';
 
@@ -194,7 +195,7 @@ const IncomingCallCard: React.FC = () => {
   useEffect(() => {
     // Navigate to CallScreen when call state becomes CONNECTING (after call:start event)
     // This happens after receiver accepts invitation and server emits call:start
-    if (callState.status === 'connecting' && callState.remoteUserId) {
+    if (callState.status === CallStatus.CONNECTING && callState.remoteUserId) {
       console.log('✅ [IncomingCallCard] Call started (call:start received), navigating to CallScreen');
       console.log('   Call state:', callState);
       const currentCall = callFlowService.getCurrentCall();

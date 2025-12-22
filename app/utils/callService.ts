@@ -21,6 +21,7 @@ export enum CallStatus {
   IDLE = 'idle',
   CALLING = 'calling',       // Outgoing call in progress
   RINGING = 'ringing',       // Incoming call ringing
+  CONNECTING = 'connecting', // Call accepted, WebRTC connecting
   CONNECTED = 'connected',   // Call is active
   RECONNECTING = 'reconnecting',
   ENDED = 'ended'

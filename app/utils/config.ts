@@ -25,7 +25,7 @@ export const  METERED_TURN_API_KEY = envTurnApiKey || '';
 
 // For actual device testing, use your computer's local network IP
 // For emulator, use 10.0.2.2 (Android) or localhost (iOS)
-const LOCAL_IP = '192.168.0.239'; // Your actual local network IP
+const LOCAL_IP = '192.168.29.151'; // Your actual local network IP
 
 // List of backup IPs to try if the main connection fails - order matters!
 export const BACKUP_IPS = [
