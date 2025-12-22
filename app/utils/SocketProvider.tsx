@@ -78,20 +78,42 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           // FALLBACK: Also set up notification handler to trigger incoming call modal
           // This ensures the modal shows even if socket event is missed
           import('../utils/notificationService').then(({ default: notificationService }) => {
+            console.log('📱 [SocketProvider] Setting up notification handler for invitations');
+            
             notificationService.onForegroundMessage((remoteMessage) => {
+              console.log('📱 [SocketProvider] Foreground notification received:', remoteMessage);
+              
               // Check if this is a call/invitation notification
               const notificationData = remoteMessage.data;
+              console.log('📱 [SocketProvider] Notification data:', notificationData);
+              
               if (notificationData?.type === 'call' && notificationData?.callerId) {
                 // Check if this is an invitation (has inviteId) or old call format
                 if (notificationData.inviteId) {
-                  // Check if we already have this invitation (socket event might have already handled it)
-                  const currentInvitation = callFlowService.getCurrentInvitation();
-                  if (currentInvitation && currentInvitation.inviteId === notificationData.inviteId) {
-                    console.log('📱 [SocketProvider] Invitation notification received but already handled via socket event, ignoring');
+                  console.log('📱 [SocketProvider] Invitation notification detected, inviteId:', notificationData.inviteId);
+                  
+                  // Check Redux state to see if invitation was already handled
+                  const currentReduxState = store.getState().call.invitation;
+                  console.log('📱 [SocketProvider] Current Redux invitation state:', currentReduxState);
+                  
+                  // Only process if invitation is not already in Redux state
+                  if (currentReduxState.inviteId === notificationData.inviteId && currentReduxState.status === 'incoming') {
+                    console.log('📱 [SocketProvider] Invitation already in Redux state (socket event handled it), ignoring notification');
                     return;
                   }
                   
-                  console.log('📱 [SocketProvider] Invitation notification received, triggering handleIncomingInvitation');
+                  // Also check callFlowService local state
+                  const currentInvitation = callFlowService.getCurrentInvitation();
+                  if (currentInvitation && currentInvitation.inviteId === notificationData.inviteId) {
+                    console.log('📱 [SocketProvider] Invitation already in callFlowService (socket event handled it), ignoring notification');
+                    return;
+                  }
+                  
+                  console.log('📱 [SocketProvider] Processing invitation notification - triggering handleIncomingInvitation');
+                  console.log('   inviteId:', notificationData.inviteId);
+                  console.log('   callerId:', notificationData.callerId);
+                  console.log('   callerName:', notificationData.callerName);
+                  
                   const invitationData = {
                     inviteId: notificationData.inviteId,
                     callerId: notificationData.callerId,
@@ -103,14 +125,42 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                     callHistoryId: notificationData.callHistoryId,
                     expiresAt: notificationData.expiresAt || new Date(Date.now() + 30000).toISOString()
                   };
+                  
                   // Trigger incoming invitation handler (will update invitation state and show modal)
                   callFlowService.handleIncomingInvitation(invitationData);
+                  console.log('✅ [SocketProvider] handleIncomingInvitation called - modal should appear');
                 } else {
                   // Legacy call notification (should not happen in invitation-first architecture)
                   console.warn('📱 [SocketProvider] Received legacy call notification (no inviteId), ignoring');
                 }
+              } else {
+                console.log('📱 [SocketProvider] Notification is not a call/invitation, ignoring');
               }
             });
+            
+            // Also handle notification when app is opened from notification
+            notificationService.onNotificationOpenedApp((remoteMessage) => {
+              console.log('📱 [SocketProvider] App opened from notification:', remoteMessage);
+              const notificationData = remoteMessage.data;
+              
+              if (notificationData?.type === 'call' && notificationData?.inviteId) {
+                console.log('📱 [SocketProvider] Processing invitation notification from app open');
+                const invitationData = {
+                  inviteId: notificationData.inviteId,
+                  callerId: notificationData.callerId,
+                  callerName: notificationData.callerName || 'Unknown',
+                  callerProfilePic: notificationData.callerProfilePic,
+                  metadata: {
+                    isVideo: notificationData.callType === 'video'
+                  },
+                  callHistoryId: notificationData.callHistoryId,
+                  expiresAt: notificationData.expiresAt || new Date(Date.now() + 30000).toISOString()
+                };
+                callFlowService.handleIncomingInvitation(invitationData);
+              }
+            });
+            
+            console.log('✅ [SocketProvider] Notification handlers set up successfully');
           }).catch((err) => {
             console.error('❌ [SocketProvider] Failed to set up notification handler:', err);
           });

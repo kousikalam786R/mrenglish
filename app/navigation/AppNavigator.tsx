@@ -15,10 +15,6 @@ import { checkAuthState } from '../redux/thunks/authThunks';
 import { useSelector } from 'react-redux';
 import { RootState } from '../redux/store';
 import { CallStatus } from '../utils/callService';
-import IncomingCallModal from '../components/IncomingCallModal';
-import OutgoingCallCard from '../components/OutgoingCallCard';
-import IncomingCallCard from '../components/IncomingCallCard';
-import ConnectingModal from '../components/ConnectingModal';
 import SplashScreen from '../screens/SplashScreen';
 import { navigationRef, processQueuedActions } from './NavigationService';
 import { useTheme } from '../context/ThemeContext';
@@ -492,18 +488,6 @@ const RootNavigator = () => {
           <Stack.Screen name="Auth" component={AuthNavigator} />
         )}
       </Stack.Navigator>
-      
-      {/* Call UI Components - Rendered at App Root Level */}
-      {/* All components read from Redux state (single source of truth) */}
-      
-      {/* Outgoing Call Card - Shows when caller is calling/waiting */}
-      <OutgoingCallCard />
-      
-      {/* Incoming Call Card - Shows when receiver receives call */}
-      <IncomingCallCard />
-      
-      {/* Connecting Modal - Shows when call is connecting (both users) */}
-      <ConnectingModal />
     </>
   );
 };

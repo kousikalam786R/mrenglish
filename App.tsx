@@ -25,6 +25,9 @@ import notificationService from './app/utils/notificationService';
 import callService from './app/utils/callService';
 import simpleUserStatusService from './app/services/simpleUserStatusService';
 import { prefetchIceServers } from './app/utils/turnService';
+import OutgoingCallCard from './app/components/OutgoingCallCard';
+import IncomingCallCard from './app/components/IncomingCallCard';
+import ConnectingModal from './app/components/ConnectingModal';
 
 function App(): React.JSX.Element {
   useEffect(() => {
@@ -147,6 +150,11 @@ function App(): React.JSX.Element {
             <PermissionsManager>
               <SocketProvider>
                 <AppNavigator />
+                {/* Call UI Components - Rendered at App Root Level (OUTSIDE NavigationContainer) */}
+                {/* This ensures Modals appear above navigation */}
+                <OutgoingCallCard />
+                <IncomingCallCard />
+                <ConnectingModal />
               </SocketProvider>
             </PermissionsManager>
             <Toast />

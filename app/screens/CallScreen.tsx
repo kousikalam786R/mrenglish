@@ -21,6 +21,7 @@ import { safeParam } from '../utils/safeProps';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '../redux/store';
 import callService, { CallStatus } from '../utils/callService';
+import callFlowService from '../utils/callFlowService';
 import { 
   endActiveCall, 
   toggleAudioMute
@@ -44,6 +45,7 @@ const CallScreen = () => {
   
   // Get call state from Redux
   const callState = useSelector((state: RootState) => state.call.activeCall);
+  const currentUserId = useSelector((state: RootState) => state.auth.userId);
   
   // Check if we're receiver (coming from incoming call)
   const isReceiver = callState.status === CallStatus.CONNECTING || callState.status === CallStatus.RINGING;
@@ -144,20 +146,8 @@ const CallScreen = () => {
     console.log('Redux call state:', callState);
     console.log('Is receiver?', isReceiver);
     
-    // If we're receiver (incoming call accepted), set up callService to wait for WebRTC offer
-    if (isReceiver && callState.status === CallStatus.CONNECTING) {
-      console.log('✅ [CallScreen] Receiver: Setting up callService to wait for WebRTC offer');
-      // Initialize callService (sets up socket listeners for call-offer)
-      callService.initialize();
-      
-      // Set callService state to RINGING so it's ready to accept the offer when it arrives
-      // handleCallOffer will automatically handle the offer and create the answer
-      if (currentCallState.status === CallStatus.IDLE && callState.remoteUserId) {
-        console.log('✅ [CallScreen] Receiver: Setting callService state to RINGING to wait for offer');
-        // Update callService state directly (it will be updated when offer arrives)
-        // Just ensure callService is initialized and listening for call-offer
-      }
-    }
+    // Initialize callService when CallScreen loads (for WebRTC)
+    callService.initialize();
     
     // If we're already connected, initialize the timer and sync with server
     if (currentCallState.status === CallStatus.CONNECTED || callState.status === CallStatus.CONNECTED) {
@@ -408,7 +398,63 @@ const CallScreen = () => {
     }
   }, [callState.status, callState.callStartTime]);
 
-  // Handle receiver case: When WebRTC offer is received and callService state becomes RINGING, accept it
+  // INVITATION-FIRST ARCHITECTURE: Handle call:ready-for-webrtc event
+  // This is emitted after call:start event - WebRTC can now start
+  useEffect(() => {
+    console.log('🔧 [CallScreen] Setting up call:ready-for-webrtc listener');
+    
+    const handleCallReady = (callSession: any) => {
+      console.log('🎬 [CallScreen] call:ready-for-webrtc received - Starting WebRTC now');
+      console.log('   Call session:', callSession);
+      console.log('   Call status:', callState.status);
+      
+      // Determine if we're caller or receiver
+      const isCaller = callSession.callerId === currentUserId;
+      
+      console.log('   Current user ID:', currentUserId);
+      console.log('   Caller ID:', callSession.callerId);
+      console.log('   Receiver ID:', callSession.receiverId);
+      console.log('   Is caller?', isCaller);
+      
+      // Get receiver name from call state or route params
+      const receiverName = callState.remoteUserName || name || 'User';
+      
+      // Initialize WebRTC connection
+      if (isCaller) {
+        console.log('📞 [CallScreen] Caller: Creating WebRTC offer...');
+        // Caller creates offer using startCall (creates offer and sends it)
+        callService.startCall(
+          callSession.receiverId,
+          receiverName,
+          {
+            audio: true,
+            video: callSession.metadata?.isVideo || false
+          }
+        ).catch((error) => {
+          console.error('❌ [CallScreen] Error starting call:', error);
+          Toast.show({
+            type: 'error',
+            text1: 'Call Failed',
+            text2: error.message || 'Could not start call. Please try again.',
+          });
+        });
+      } else {
+        console.log('📞 [CallScreen] Receiver: Waiting for WebRTC offer...');
+        // Receiver waits for offer (will be handled by call-offer socket event)
+        // callService should already be initialized and listening for call-offer
+      }
+    };
+    
+    // Listen for call:ready-for-webrtc event
+    callFlowService.on('call:ready-for-webrtc', handleCallReady);
+    
+    return () => {
+      console.log('🧹 [CallScreen] Removing call:ready-for-webrtc listener');
+      callFlowService.off('call:ready-for-webrtc', handleCallReady);
+    };
+  }, [callState.status, currentUserId, name]);
+
+  // Handle receiver case: When WebRTC offer is received, accept it
   useEffect(() => {
     if (!isReceiver) return;
 
@@ -539,6 +585,8 @@ const CallScreen = () => {
         return 'Calling...';
       case CallStatus.RINGING:
         return 'Ringing...';
+      case CallStatus.CONNECTING:
+        return 'Connecting...';
       case CallStatus.RECONNECTING:
         return 'Reconnecting...';
       case CallStatus.CONNECTED:
@@ -546,7 +594,7 @@ const CallScreen = () => {
       case CallStatus.ENDED:
         return 'Call ended';
       default:
-        return '';
+        return 'Connecting...';
     }
   };
   

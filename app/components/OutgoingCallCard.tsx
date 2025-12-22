@@ -17,13 +17,16 @@ import {
   TouchableOpacity,
   Image,
   Dimensions,
+  Animated,
+  Alert,
 } from 'react-native';
 import { useSelector, useDispatch } from 'react-redux';
-import { useNavigation } from '@react-navigation/native';
 import { RootState } from '../redux/store';
 import callFlowService from '../utils/callFlowService';
 import { resetInvitationState } from '../redux/slices/callSlice';
 import Icon from 'react-native-vector-icons/Ionicons';
+import NavigationService from '../navigation/NavigationService';
+import socketService from '../utils/socketService';
 
 const { width } = Dimensions.get('window');
 const INVITATION_TIMEOUT_SECONDS = 30; // 30 seconds timeout for invitations
@@ -36,12 +39,15 @@ const INVITATION_TIMEOUT_SECONDS = 30; // 30 seconds timeout for invitations
  */
 const OutgoingCallCard: React.FC = () => {
   const dispatch = useDispatch();
-  const navigation = useNavigation();
   const invitation = useSelector((state: RootState) => state.call.invitation);
   const callState = useSelector((state: RootState) => state.call.activeCall); // Needed for navigation after call starts
   const [timeRemaining, setTimeRemaining] = useState(INVITATION_TIMEOUT_SECONDS);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number>(Date.now());
+  const [pulseAnim] = useState(new Animated.Value(1));
+
+  // Get receiver profile picture from invitation data
+  const receiverProfilePic = invitation.remoteUserProfilePic;
 
   // COMPONENT MOUNT/UPDATE LOG - Always log to verify component is rendering
   useEffect(() => {
@@ -53,9 +59,9 @@ const OutgoingCallCard: React.FC = () => {
   });
 
   // Show card when invitation status is "inviting" (caller side)
-  const visible = invitation.status === 'inviting' &&
+  const visible = !!(invitation.status === 'inviting' &&
                   invitation.remoteUserId && 
-                  invitation.remoteUserName;
+                  invitation.remoteUserName);
   
   // Debug logging - ALWAYS log to help diagnose why modal isn't showing
   useEffect(() => {
@@ -80,6 +86,28 @@ const OutgoingCallCard: React.FC = () => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Pulse animation for avatar
+  useEffect(() => {
+    if (visible) {
+      const pulse = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.05,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulse.start();
+      return () => pulse.stop();
+    }
+  }, [visible, pulseAnim]);
+
 
   // Reset timer when invitation starts
   useEffect(() => {
@@ -90,24 +118,78 @@ const OutgoingCallCard: React.FC = () => {
     }
   }, [visible, invitation.expiresAt]);
 
-  // Navigate to CallScreen when call starts (after invitation acceptance)
+  // Listen for invitation declined event (backup listener in component)
   useEffect(() => {
-    if (callState.status === 'connecting' && callState.remoteUserId) {
-      console.log('✅ [OutgoingCallCard] Receiver accepted call, navigating to CallScreen');
+    const socket = socketService.getSocket();
+    if (!socket) {
+      console.warn('⚠️ [OutgoingCallCard] Socket not available for declined listener');
+      return;
+    }
+
+    console.log('✅ [OutgoingCallCard] Setting up call:invite:declined listener');
+    const handleDeclined = (data: { inviteId: string; receiverId?: string }) => {
+      console.log('❌ [OutgoingCallCard] call:invite:declined received in component:', data);
+      console.log('   Current invitation inviteId:', invitation.inviteId);
+      console.log('   Event inviteId:', data.inviteId);
+      
+      // Check if this decline is for the current invitation
+      if (invitation.inviteId === data.inviteId || invitation.status === 'inviting') {
+        console.log('✅ [OutgoingCallCard] This decline is for our current invitation, showing alert');
+        
+        // Close the modal first
+        dispatch(resetInvitationState());
+        
+        // Show alert after a brief delay to ensure modal closes
+        setTimeout(() => {
+          console.log('📱 [OutgoingCallCard] Showing Alert for declined invitation');
+          Alert.alert(
+            'Call Declined',
+            'The person you called declined your invitation.',
+            [{ text: 'OK' }],
+            { cancelable: true }
+          );
+        }, 300);
+      } else {
+        console.log('ℹ️ [OutgoingCallCard] Decline event is for a different invitation, ignoring');
+      }
+    };
+
+    socket.on('call:invite:declined', handleDeclined);
+    console.log('✅ [OutgoingCallCard] call:invite:declined listener registered');
+
+    return () => {
+      console.log('🧹 [OutgoingCallCard] Cleaning up call:invite:declined listener');
+      socket.off('call:invite:declined', handleDeclined);
+    };
+  }, [invitation.inviteId, invitation.status, dispatch]);
+
+  // Navigate to CallScreen when call starts (after invitation acceptance via call:start event)
+  useEffect(() => {
+    // Navigate when call state becomes CONNECTING (after receiver accepts and call:start is received)
+    // Note: Comparing as string since status may be stored as string in Redux
+    if (String(callState.status) === 'connecting' && callState.remoteUserId) {
+      console.log('✅ [OutgoingCallCard] Call started (call:start received), navigating to CallScreen');
+      console.log('   Call state:', callState);
       const currentCall = callFlowService.getCurrentCall();
       
       if (currentCall) {
-        navigation.navigate('CallScreen' as never, {
+        console.log('   Navigating to CallScreen with call session:', currentCall);
+        NavigationService.navigate('CallScreen', {
           id: callState.remoteUserId,
-          name: callState.remoteUserName,
-          isVideoCall: callState.isVideoEnabled || false,
+          name: callState.remoteUserName || invitation.remoteUserName || 'User',
+          isVideoCall: callState.isVideoEnabled || invitation.metadata?.isVideo || false,
           callId: currentCall.callId || '',
           callType: currentCall.callType,
           isReceiver: false,
-        } as never);
+        });
+        
+        // Close invitation modal after navigation
+        dispatch(resetInvitationState());
+      } else {
+        console.warn('⚠️ [OutgoingCallCard] No current call found, cannot navigate');
       }
     }
-  }, [callState.status, callState.remoteUserId, navigation]);
+  }, [callState.status, callState.remoteUserId]);
 
       // Countdown timer
       useEffect(() => {
@@ -138,37 +220,29 @@ const OutgoingCallCard: React.FC = () => {
         };
       }, [visible, invitation.expiresAt]);
 
-      // Handle cancel button
-      const handleCancel = () => {
-        const currentInvitation = callFlowService.getCurrentInvitation();
-        if (currentInvitation?.inviteId) {
-          console.log('🚫 [OutgoingInvitationModal] Cancelling invitation:', currentInvitation.inviteId);
-          callFlowService.cancelInvitation(currentInvitation.inviteId);
-        } else if (invitation.inviteId) {
-          console.log('🚫 [OutgoingInvitationModal] Cancelling invitation:', invitation.inviteId);
-          callFlowService.cancelInvitation(invitation.inviteId);
-        }
+  // Handle cancel button
+  const handleCancel = () => {
+    const currentInvitation = callFlowService.getCurrentInvitation();
+    if (currentInvitation?.inviteId) {
+      console.log('🚫 [OutgoingCallCard] Cancelling invitation:', currentInvitation.inviteId);
+      callFlowService.cancelInvitation(currentInvitation.inviteId);
+    } else if (invitation.inviteId) {
+      console.log('🚫 [OutgoingCallCard] Cancelling invitation:', invitation.inviteId);
+      callFlowService.cancelInvitation(invitation.inviteId);
+    }
 
-        // Reset invitation state
-        dispatch(resetInvitationState());
-      };
-
-  // Debug: Log before returning null
-  if (!visible) {
-    console.log('❌ [OutgoingCallCard] Not rendering - visible is false');
-    return null;
-  }
-  
-  console.log('✅ [OutgoingCallCard] RENDERING MODAL - visible is true');
+    // Reset invitation state
+    dispatch(resetInvitationState());
+  };
 
   // Placeholder user data (can be enhanced to fetch from backend or store in Redux)
-  const userProfilePic = undefined; // Will be added later
   const userRating = undefined; // Will be added later
   const userGender = undefined; // Will be added later
   const userAge = undefined; // Will be added later
   const userCountry = undefined; // Will be added later
   const userTalks = undefined; // Will be added later
 
+  // Always render Modal to maintain hooks order - control visibility with visible prop
   return (
     <Modal
       visible={visible}
@@ -176,6 +250,8 @@ const OutgoingCallCard: React.FC = () => {
       animationType="fade"
       onRequestClose={handleCancel}
       statusBarTranslucent
+      presentationStyle="overFullScreen"
+      hardwareAccelerated
     >
       <View style={styles.overlay}>
         <View style={styles.card}>
@@ -186,16 +262,25 @@ const OutgoingCallCard: React.FC = () => {
           <View style={styles.contentRow}>
             {/* Profile Picture (Left) */}
             <View style={styles.profileSection}>
-              {userProfilePic ? (
-                <Image 
-                  source={{ uri: userProfilePic }} 
-                  style={styles.avatar}
-                />
-              ) : (
-                <View style={styles.avatarPlaceholder}>
-                  <Icon name="person" size={50} color="#666" />
-                </View>
-              )}
+              <Animated.View
+                style={[
+                  styles.avatarContainer,
+                  {
+                    transform: [{ scale: pulseAnim }],
+                  },
+                ]}
+              >
+                {receiverProfilePic ? (
+                  <Image 
+                    source={{ uri: receiverProfilePic }} 
+                    style={styles.avatar}
+                  />
+                ) : (
+                  <View style={styles.avatarPlaceholder}>
+                    <Icon name="person" size={50} color="#666" />
+                  </View>
+                )}
+              </Animated.View>
             </View>
 
             {/* User Details (Middle) */}
@@ -256,6 +341,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 20,
+    zIndex: 9999,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   card: {
     backgroundColor: '#fff',
@@ -286,6 +377,9 @@ const styles = StyleSheet.create({
   },
   profileSection: {
     marginRight: 12,
+  },
+  avatarContainer: {
+    // Container for animated avatar
   },
   avatar: {
     width: 60,

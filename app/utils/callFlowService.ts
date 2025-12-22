@@ -15,6 +15,7 @@ import socketService from './socketService';
 import { store } from '../redux/store';
 import { setCallState, resetCallState, setInvitationState, resetInvitationState } from '../redux/slices/callSlice';
 import { CallStatus } from './callService';
+import { Alert } from 'react-native';
 
 // Call State Enum (matches backend)
 export enum CallState {
@@ -233,16 +234,27 @@ class CallFlowService {
     // INVITATION-FIRST ARCHITECTURE: New invitation events
     // call:invite:incoming - Receiver receives invitation
     const inviteIncomingHandler = (data: InvitationData) => {
-      console.log('📨 [RECEIVER] call:invite:incoming socket event received:', data);
-      console.log('   inviteId:', data.inviteId);
-      console.log('   callerId:', data.callerId);
-      console.log('   callerName:', data.callerName);
-      console.log('   Socket ID:', socket.id, 'Connected:', socket.connected);
-      this.handleIncomingInvitation(data);
+      console.log('📨 [RECEIVER] ============================================');
+      console.log('📨 [RECEIVER] call:invite:incoming socket event received!');
+      console.log('📨 [RECEIVER] ============================================');
+      console.log('📨 [RECEIVER] Full event data:', JSON.stringify(data, null, 2));
+      console.log('📨 [RECEIVER] inviteId:', data.inviteId);
+      console.log('📨 [RECEIVER] callerId:', data.callerId);
+      console.log('📨 [RECEIVER] callerName:', data.callerName);
+      console.log('📨 [RECEIVER] Socket ID:', socket.id, 'Connected:', socket.connected);
+      console.log('📨 [RECEIVER] Calling handleIncomingInvitation...');
+      
+      try {
+        this.handleIncomingInvitation(data);
+        console.log('✅ [RECEIVER] handleIncomingInvitation completed successfully');
+      } catch (error) {
+        console.error('❌ [RECEIVER] Error in handleIncomingInvitation:', error);
+      }
     };
     
     socket.on('call:invite:incoming', inviteIncomingHandler);
     console.log('✅ [CallFlowService] call:invite:incoming listener registered on socket:', socket.id);
+    console.log('   Listener count:', socket.listeners('call:invite:incoming').length);
     
     // call:start - Call starts after invitation acceptance (both users receive this)
     socket.on('call:start', (data: { callId: string; callerId: string; receiverId: string; metadata?: any; callHistoryId?: string }) => {
@@ -267,9 +279,24 @@ class CallFlowService {
     // INVITATION-FIRST ARCHITECTURE: Invitation response events
     // call:invite:declined - Invitation declined (for caller)
     socket.on('call:invite:declined', (data: { inviteId: string; receiverId?: string }) => {
-      console.log('❌ Invitation declined:', data);
+      console.log('❌ [CALLER] ============================================');
+      console.log('❌ [CALLER] call:invite:declined event received!');
+      console.log('❌ [CALLER] ============================================');
+      console.log('❌ [CALLER] Full event data:', JSON.stringify(data, null, 2));
+      console.log('❌ [CALLER] inviteId:', data.inviteId);
+      console.log('❌ [CALLER] receiverId:', data.receiverId);
+      console.log('❌ [CALLER] Socket ID:', socket.id, 'Connected:', socket.connected);
+      console.log('❌ [CALLER] Calling handleInvitationDeclined...');
       this.handleInvitationDeclined(data);
+      console.log('✅ [CALLER] handleInvitationDeclined completed');
     });
+    console.log('✅ [CallFlowService] call:invite:declined listener registered on socket:', socket.id);
+    // Verify listener is registered
+    const declinedListenerCount = socket.listeners('call:invite:declined').length;
+    console.log('   Verified: call:invite:declined has', declinedListenerCount, 'listener(s)');
+    if (declinedListenerCount === 0) {
+      console.error('❌ [CallFlowService] CRITICAL: call:invite:declined listener was NOT registered!');
+    }
 
     // call:invite:cancelled - Invitation cancelled (for receiver)
     socket.on('call:invite:cancelled', (data: { inviteId: string; cancelledBy?: string }) => {
@@ -362,7 +389,7 @@ class CallFlowService {
     });
 
     console.log('✅ [CallFlowService] All socket listeners set up successfully');
-    console.log('   Listening for: call:invite:incoming, call:invite:accept, call:invite:decline, call:invite:cancel, call:invite:expired, call:start, call:end');
+    console.log('   Listening for: call:invite:incoming, call:invite:accept, call:invite:decline, call:invite:declined, call:invite:cancel, call:invite:cancelled, call:invite:expired, call:start, call:end');
   }
 
   /**
@@ -873,15 +900,25 @@ class CallFlowService {
    * PUBLIC: Can be called from notification handler as fallback
    */
   public handleIncomingInvitation(data: InvitationData): void {
+    console.log('📨 [RECEIVER] ============================================');
     console.log('📨 [RECEIVER] handleIncomingInvitation called with:', data);
+    console.log('📨 [RECEIVER] ============================================');
     
     // Store invitation locally
     this.currentInvitation = data;
     
+    // Get current Redux state BEFORE update
+    const beforeState = store.getState().call.invitation;
+    console.log('📨 [RECEIVER] Redux state BEFORE update:', {
+      status: beforeState.status,
+      inviteId: beforeState.inviteId
+    });
+    
     // Update Redux invitation state (UI reads from this)
+    // IMPORTANT: Receiver should have status 'incoming', NOT 'inviting'
     const invitationStateUpdate = {
       inviteId: data.inviteId,
-      status: 'incoming' as const,
+      status: 'incoming' as const, // RECEIVER status is 'incoming'
       remoteUserId: data.callerId,
       remoteUserName: data.callerName,
       remoteUserProfilePic: data.callerProfilePic,
@@ -889,19 +926,28 @@ class CallFlowService {
       metadata: data.metadata,
       callHistoryId: data.callHistoryId
     };
+    
+    console.log('📨 [RECEIVER] Dispatching setInvitationState with:', JSON.stringify(invitationStateUpdate, null, 2));
     store.dispatch(setInvitationState(invitationStateUpdate));
     
-    console.log('✅ [RECEIVER] Invitation state updated - IncomingInvitationModal should render');
-    console.log('   Invitation state:', JSON.stringify(invitationStateUpdate, null, 2));
-    
-    // Verify Redux state was actually updated
+    // Verify Redux state was actually updated IMMEDIATELY
     const updatedInvitationState = store.getState().call.invitation;
-    console.log('   Verification - Redux invitation state after update:', {
+    console.log('✅ [RECEIVER] Redux state AFTER update:', {
       status: updatedInvitationState.status,
+      inviteId: updatedInvitationState.inviteId,
       remoteUserId: updatedInvitationState.remoteUserId,
-      remoteUserName: updatedInvitationState.remoteUserName,
-      inviteId: updatedInvitationState.inviteId
+      remoteUserName: updatedInvitationState.remoteUserName
     });
+    
+    if (updatedInvitationState.status !== 'incoming') {
+      console.error('❌ [RECEIVER] CRITICAL: Redux state status is NOT "incoming"!', {
+        expected: 'incoming',
+        actual: updatedInvitationState.status
+      });
+    } else {
+      console.log('✅ [RECEIVER] Invitation state updated correctly - status is "incoming"');
+      console.log('   IncomingInvitationModal should now render');
+    }
   }
 
   /**
@@ -933,11 +979,28 @@ class CallFlowService {
    * Handle invitation declined (caller side)
    */
   private handleInvitationDeclined(data: { inviteId: string; receiverId?: string }): void {
-    console.log('❌ [CALLER] Invitation declined:', data.inviteId);
+    console.log('❌ [CALLER] handleInvitationDeclined called with:', data);
+    console.log('   Current invitation:', this.currentInvitation);
+    console.log('   InviteId match:', this.currentInvitation?.inviteId === data.inviteId);
     
-    // Reset invitation state
+    // Reset invitation state first (this will close the OutgoingInvitationModal)
+    console.log('🔄 [CALLER] Resetting invitation state to close modal');
     store.dispatch(resetInvitationState());
     this.currentInvitation = null;
+    console.log('✅ [CALLER] Invitation state reset complete');
+    
+    // Show modal/alert to the sender after a brief delay to ensure modal is closed
+    console.log('📱 [CALLER] Scheduling Alert modal for declined invitation');
+    setTimeout(() => {
+      console.log('📱 [CALLER] Showing Alert modal now');
+      Alert.alert(
+        'Call Declined',
+        'The person you called declined your invitation.',
+        [{ text: 'OK' }],
+        { cancelable: true }
+      );
+      console.log('✅ [CALLER] Alert.alert called');
+    }, 300); // Small delay to ensure modal closes first
   }
 
   /**
