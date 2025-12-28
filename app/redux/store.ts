@@ -4,6 +4,7 @@ import userReducer from './slices/userSlice';
 import aiReducer from './slices/aiSlice';
 import callReducer from './slices/callSlice';
 import messageReducer from './slices/messageSlice';
+import userStatusReducer from './slices/userStatusSlice';
 
 export const store = configureStore({
   reducer: {
@@ -12,6 +13,7 @@ export const store = configureStore({
     ai: aiReducer,
     call: callReducer,
     message: messageReducer,
+    userStatus: userStatusReducer,
   },
   middleware: (getDefaultMiddleware) => 
     getDefaultMiddleware({

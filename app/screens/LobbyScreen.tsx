@@ -33,6 +33,9 @@ import simpleUserStatusService from '../services/simpleUserStatusService';
 import { useUserStatusService } from '../hooks/useUserStatus';
 import { useTheme } from '../context/ThemeContext';
 import { useTranslation } from 'react-i18next';
+import { useSelector } from 'react-redux';
+import { RootState } from '../redux/store';
+import type { UserStatusType } from '../redux/slices/userStatusSlice';
 
 // Define user type
 interface User {
@@ -60,36 +63,19 @@ interface UserCardProps {
 const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps) => {
   const { theme } = useTheme();
   const { t } = useTranslation();
-  // Get user status from centralized service with subscription
-  const [userStatus, setUserStatus] = useState(() => simpleUserStatusService.getUserStatus(user._id));
+  
+  // UNIFIED USER STATUS SYSTEM - Get status from Redux store
+  const userStatusData = useSelector((state: RootState) => 
+    state.userStatus.statuses[user._id] || { status: 'offline' as const, lastUpdated: new Date().toISOString() }
+  );
 
-  // Subscribe to status updates for this user
+  // Request status update when component mounts
   useEffect(() => {
-    // Add user to tracking
-    simpleUserStatusService.addUserToTracking(user._id);
-
-    // Get initial status
-    const initialStatus = simpleUserStatusService.getUserStatus(user._id);
-    if (initialStatus) {
-      setUserStatus(initialStatus);
-    }
-
-    // Subscribe to status updates
-    const unsubscribe = simpleUserStatusService.subscribeToStatusUpdates((allStatuses) => {
-      const status = allStatuses.get(user._id);
-      if (status) {
-        console.log(`📊 UserCard: Status updated for ${user.name} (${user._id}):`, {
-          isOnline: status.isOnline,
-          lastSeenAt: status.lastSeenAt
-        });
-        setUserStatus(status);
-      }
+    // Import and request status for this user
+    import('../services/userStatusService').then(({ default: userStatusService }) => {
+      userStatusService.requestUserStatus(user._id);
     });
-
-    return () => {
-      unsubscribe();
-    };
-  }, [user._id, user.name]);
+  }, [user._id]);
   // Level indicator background colors
   const getLevelBgColor = (level?: string) => {
     if (!level) return '#e0e0e0';
@@ -117,7 +103,14 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
           <View style={[styles.levelIndicator, { backgroundColor: getLevelBgColor(user.level) }]}>
             <Text style={styles.levelText}>{user.level || 'A1'}</Text>
           </View>
-          {(userStatus?.isOnline ?? user.isOnline) && <View style={styles.onlineIndicator} />}
+          {/* UNIFIED USER STATUS SYSTEM - Show online indicator based on status */}
+          {userStatusData.status === 'online' && <View style={styles.onlineIndicator} />}
+          {userStatusData.status === 'on_call' && (
+            <View style={[styles.onlineIndicator, { backgroundColor: '#FF9800' }]} />
+          )}
+          {userStatusData.status === 'searching' && (
+            <View style={[styles.onlineIndicator, { backgroundColor: '#9C27B0' }]} />
+          )}
         </View>
         
         <View style={styles.userInfo}>
@@ -137,11 +130,27 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
           <Text style={[styles.userCountry, { color: theme.textSecondary }]}>
             {user.country || '🌎 Global'}{user.talks && user.talks > 0 ? ` • ${user.talks} talks` : ''}
           </Text>
+          {/* UNIFIED USER STATUS SYSTEM - Display status text */}
           <Text style={[
-            (userStatus?.isOnline ?? user.isOnline) ? styles.onlineText : styles.offlineText,
-            { color: (userStatus?.isOnline ?? user.isOnline) ? theme.success : theme.textTertiary }
+            userStatusData.status === 'offline' ? styles.offlineText : styles.onlineText,
+            { 
+              color: userStatusData.status === 'offline' 
+                ? theme.textTertiary 
+                : userStatusData.status === 'on_call'
+                ? '#FF9800'
+                : userStatusData.status === 'searching'
+                ? '#9C27B0'
+                : theme.success
+            }
           ]}>
-            {(userStatus?.isOnline ?? user.isOnline) ? t('lobby.online') : t('lobby.offline')}
+            {userStatusData.status === 'offline' 
+              ? t('lobby.offline')
+              : userStatusData.status === 'on_call'
+              ? t('lobby.onCall')
+              : userStatusData.status === 'searching'
+              ? 'Searching...'
+              : t('lobby.online')
+            }
           </Text>
           {/* Debug info */}
           {/* {__DEV__ && (
@@ -152,8 +161,9 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
         </View>
         
         <View style={styles.buttonsContainer}>
-          {!(userStatus?.isOnline ?? user.isOnline) ? (
-            // Show message icon for offline users
+          {/* UNIFIED USER STATUS SYSTEM - Render UI based on status */}
+          {userStatusData.status === 'offline' ? (
+            // OFFLINE: Show message icon ONLY
             <TouchableOpacity 
               style={[
                 styles.callButton, 
@@ -162,7 +172,7 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
                 { backgroundColor: theme.primary },
               ]} 
               onPress={(e) => {
-                e.stopPropagation(); // Prevent triggering the parent's onPress
+                e.stopPropagation();
                 onMessagePress();
               }}
             >
@@ -172,28 +182,57 @@ const UserCard = ({ user, onCallPress, onMessagePress, onPress }: UserCardProps)
                 color="white" 
               />
             </TouchableOpacity>
-          ) : (
-            // Show call icon for online users
+          ) : userStatusData.status === 'on_call' ? (
+            // ON_CALL: Show disabled call icon with badge
             <TouchableOpacity 
               style={[
                 styles.callButton, 
                 styles.callButtonFullWidth,
-                { backgroundColor: userStatus?.isOnCall ? theme.inputBackground : theme.primary },
+                { backgroundColor: theme.inputBackground },
               ]} 
-              onPress={(e) => {
-                e.stopPropagation(); // Prevent triggering the parent's onPress
-                onCallPress();
-              }}
-              disabled={userStatus?.isOnCall}
+              disabled={true}
             >
               <IconMaterial 
-                name={userStatus?.isOnCall ? "call-end" : "call"} 
+                name="call-end" 
                 size={24} 
-                color={userStatus?.isOnCall ? theme.textTertiary : "white"} 
+                color={theme.textTertiary} 
               />
-              {userStatus?.isOnCall && (
-                <Text style={[styles.onCallText, { color: theme.textTertiary }]}>{t('lobby.onCall')}</Text>
-              )}
+              <Text style={[styles.onCallText, { color: theme.textTertiary }]}>{t('lobby.onCall')}</Text>
+            </TouchableOpacity>
+          ) : userStatusData.status === 'searching' ? (
+            // SEARCHING: Show "Talk Now" button (lightning/match icon)
+            <TouchableOpacity 
+              style={[
+                styles.callButton, 
+                styles.callButtonFullWidth,
+                { backgroundColor: '#9C27B0' },
+              ]} 
+              onPress={(e) => {
+                e.stopPropagation();
+                onCallPress();
+              }}
+            >
+              <Icon name="flash" size={24} color="white" />
+              <Text style={[styles.onCallText, { color: 'white' }]}>Talk Now</Text>
+            </TouchableOpacity>
+          ) : (
+            // ONLINE: Show call icon ENABLED
+            <TouchableOpacity 
+              style={[
+                styles.callButton, 
+                styles.callButtonFullWidth,
+                { backgroundColor: theme.primary },
+              ]} 
+              onPress={(e) => {
+                e.stopPropagation();
+                onCallPress();
+              }}
+            >
+              <IconMaterial 
+                name="call" 
+                size={24} 
+                color="white" 
+              />
             </TouchableOpacity>
           )}
         </View>
@@ -526,6 +565,15 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       console.log('📥 Ready to talk users:', usersReadyToTalk.length);
       setReadyUsers(usersReadyToTalk);
       
+      // UNIFIED USER STATUS SYSTEM - Request status updates for all displayed users
+      import('../services/userStatusService').then(({ default: userStatusService }) => {
+        const userIds = usersWithStatus.map((u: User) => u._id);
+        if (userIds.length > 0) {
+          console.log(`📊 Requesting status updates for ${userIds.length} users`);
+          userStatusService.requestMultipleUserStatuses(userIds);
+        }
+      });
+      
       // Initialize socket service to receive user status updates
       await initializeSocketConnection();
     } catch (error) {
@@ -555,6 +603,15 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       trackedUserIdsRef.current.clear();
       
       setUsers(usersWithStatus);
+      
+      // UNIFIED USER STATUS SYSTEM - Request status updates for all displayed users
+      import('../services/userStatusService').then(({ default: userStatusService }) => {
+        const userIds = usersWithStatus.map((u: User) => u._id);
+        if (userIds.length > 0) {
+          console.log(`📊 Requesting status updates for ${userIds.length} users (fallback)`);
+          userStatusService.requestMultipleUserStatuses(userIds);
+        }
+      });
       
       // Initialize socket to get real status updates
       await initializeSocketConnection();

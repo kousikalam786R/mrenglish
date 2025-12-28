@@ -1422,6 +1422,25 @@ class CallService {
       remoteUserId: remoteUserId
     });
     
+    // UNIFIED USER STATUS SYSTEM - Request fresh status updates after call ends
+    // This ensures status is updated even if the socket event was missed
+    // Use setTimeout to avoid blocking and ensure backend has processed call:end
+    setTimeout(() => {
+      import('../services/userStatusService').then(({ default: userStatusService }) => {
+        import('../redux/store').then(({ store }) => {
+          const currentUserId = store.getState().auth.userId;
+          const userIds: string[] = [];
+          if (currentUserId) userIds.push(currentUserId);
+          if (remoteUserId && remoteUserId !== currentUserId) userIds.push(remoteUserId);
+          
+          if (userIds.length > 0) {
+            console.log(`📊 [CallService] Requesting fresh status updates after call end for:`, userIds);
+            userStatusService.requestMultipleUserStatuses(userIds);
+          }
+        });
+      });
+    }, 500);
+    
     // Reset call state after a short delay
     setTimeout(() => {
       this.resetCallState();

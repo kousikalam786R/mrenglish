@@ -825,6 +825,25 @@ class CallFlowService {
     // Reset Redux state to IDLE (clears call state so new calls can be made)
     store.dispatch(resetCallState());
     console.log('✅ [RECEIVER] Redux state reset to IDLE after call ended');
+    
+    // UNIFIED USER STATUS SYSTEM - Request fresh status updates for both users
+    // This ensures status is updated even if the socket event was missed
+    const currentUserId = store.getState().auth.userId;
+    const callState = store.getState().call.activeCall;
+    const remoteUserId = callState.remoteUserId;
+    
+    if (currentUserId || remoteUserId) {
+      import('../services/userStatusService').then(({ default: userStatusService }) => {
+        const userIds: string[] = [];
+        if (currentUserId) userIds.push(currentUserId);
+        if (remoteUserId && remoteUserId !== currentUserId) userIds.push(remoteUserId);
+        
+        if (userIds.length > 0) {
+          console.log(`📊 [CallFlowService] Requesting fresh status updates after call end for:`, userIds);
+          userStatusService.requestMultipleUserStatuses(userIds);
+        }
+      });
+    }
   }
 
   /**

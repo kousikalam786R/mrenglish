@@ -69,6 +69,12 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         // Initialize call service
         initializeCallService();
         
+        // UNIFIED USER STATUS SYSTEM - Initialize user status service
+        import('../services/userStatusService').then(({ default: userStatusService }) => {
+          console.log('📊 [SocketProvider] Initializing userStatusService after socket connection');
+          userStatusService.initialize();
+        });
+        
         // CRITICAL FIX: Initialize callFlowService when socket connects
         // This ensures socket listeners are set up for incoming calls
         import('../utils/callFlowService').then(({ default: callFlowService }) => {
