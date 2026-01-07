@@ -14,7 +14,7 @@
 import socketService from './socketService';
 import { store } from '../redux/store';
 import { setCallState, resetCallState, setInvitationState, resetInvitationState } from '../redux/slices/callSlice';
-import { CallStatus } from './callService';
+import callService, { CallStatus } from './callService';
 import { Alert } from 'react-native';
 
 // Call State Enum (matches backend)
@@ -94,8 +94,14 @@ class CallFlowService {
   private static instance: CallFlowService;
   private currentCall: CallSession | null = null;
   private incomingCall: IncomingCallData | null = null;
+  private currentInvitation: InvitationData | null = null;
   private initialized = false;
   private listeners: Map<string, Set<(data: any) => void>> = new Map();
+  // Guard to prevent duplicate call:start handling
+  private handledCallIds: Set<string> = new Set();
+  // Guard to prevent multiple WebRTC starts per call
+  // ✅ REQUIREMENT 3: Track accepted invitations to prevent expiration from resetting active calls
+  private acceptedInvitations: Map<string, string> = new Map(); // inviteId → callId mapping
 
   private constructor() {
     // No super() needed - we implement our own event system
@@ -154,6 +160,75 @@ class CallFlowService {
     console.log('   Socket exists?', !!socket);
     console.log('   Socket connected?', socket?.connected || false);
     console.log('   Socket ID:', socket?.id || 'N/A');
+
+    // ✅ TASK 3 & 4: Listen to callService state changes to update Redux when CONNECTED
+    // This ensures callFlowService owns Redux state, callService only handles WebRTC
+    if (!this.initialized) {
+      console.log('✅ [CallFlowService] Setting up callService state change listener');
+      callService.addEventListener('call-state-changed', (state: any) => {
+        // ✅ TASK 4: Update Redux when status transitions to CONNECTED
+        // callFlowService is the single source of truth for Redux state
+        if (state.status === CallStatus.CONNECTED) {
+          console.log('🟢 [callFlowService] WebRTC connected - updating Redux to CONNECTED');
+          console.log('   Previous Redux status:', store.getState().call.activeCall.status);
+          
+          // Update Redux state to CONNECTED (promote from CONNECTING)
+          store.dispatch(setCallState({
+            ...state,
+            status: CallStatus.CONNECTED
+          }));
+          
+          console.log('✅ [callFlowService] Redux state updated to CONNECTED');
+          console.log('   ConnectingModal should now hide automatically');
+          
+          // ✅ REQUIREMENT 3: Emit navigation event when CONNECTED
+          // This triggers CallScreen navigation (components listen to this)
+          if (this.currentCall) {
+            this.emit('call:navigate-to-callscreen', {
+              callId: this.currentCall.callId,
+              remoteUserId: state.remoteUserId,
+              remoteUserName: state.remoteUserName,
+              isVideoCall: state.isVideoEnabled || false,
+              callType: CallType.DIRECT_CALL,
+              isReceiver: store.getState().auth.userId !== this.currentCall.callerId
+            });
+            console.log('✅ [callFlowService] call:navigate-to-callscreen emitted (CONNECTED state)');
+          }
+          
+          // ✅ TASK 4: Notify that WebRTC is connected (for any additional cleanup/setup)
+          this.notifyWebRTCConnected(state);
+        }
+      });
+      
+      // Also listen for call-connected event (additional trigger for CONNECTED transition)
+      callService.addEventListener('call-connected', (data: any) => {
+        console.log('🟢 [callFlowService] call-connected event received:', data);
+        const currentReduxState = store.getState().call.activeCall;
+        if (currentReduxState.status === CallStatus.CONNECTING) {
+          console.log('🟢 [callFlowService] Promoting Redux state from CONNECTING to CONNECTED');
+          store.dispatch(setCallState({
+            ...currentReduxState,
+            status: CallStatus.CONNECTED,
+            callStartTime: data.timestamp || currentReduxState.callStartTime || Date.now()
+          }));
+          
+          // ✅ REQUIREMENT 3: Emit navigation event when CONNECTED
+          if (this.currentCall) {
+            this.emit('call:navigate-to-callscreen', {
+              callId: this.currentCall.callId,
+              remoteUserId: currentReduxState.remoteUserId,
+              remoteUserName: currentReduxState.remoteUserName,
+              isVideoCall: currentReduxState.isVideoEnabled || false,
+              callType: CallType.DIRECT_CALL,
+              isReceiver: store.getState().auth.userId !== this.currentCall.callerId
+            });
+            console.log('✅ [callFlowService] call:navigate-to-callscreen emitted (CONNECTED via call-connected event)');
+          }
+          
+          this.notifyWebRTCConnected(currentReduxState);
+        }
+      });
+    }
 
     // Always set up listeners if socket is ready (handles reconnections)
     // CRITICAL: Force setup listeners even if already initialized (handles reconnections)
@@ -774,7 +849,7 @@ class CallFlowService {
           callHistoryId: this.incomingCall.callHistoryId
         };
         this.incomingCall = null;
-        this.emit('call:ready-for-webrtc', this.currentCall);
+        // WebRTC handled by callService (listens to call:start directly)
       }
     }
   }
@@ -852,6 +927,16 @@ class CallFlowService {
    */
   private handleCallTimeout(data: { callId: string }): void {
     console.log('⏰ [RECEIVER] Call timed out:', data.callId);
+    
+    // Handle timeout during connecting phase
+    const currentCallState = store.getState().call.activeCall;
+    if (currentCallState.status === CallStatus.CONNECTING) {
+      console.log('🔴 [BOTH] Resetting connecting state due to call timeout');
+      console.log('   Showing "Call failed" feedback to user');
+      store.dispatch(resetCallState());
+      // Note: Toast notification can be shown here or at App level
+    }
+    
     if (this.currentCall && this.currentCall.callId === data.callId) {
       this.updateCallState(CallState.MISSED);
       this.clearCall();
@@ -904,6 +989,22 @@ class CallFlowService {
    * Clear current call
    */
   private clearCall(): void {
+      // Clean up call tracking guards when call ends
+      if (this.currentCall?.callId) {
+        const callId = this.currentCall.callId;
+        this.handledCallIds.delete(callId);
+        console.log('🧹 [callFlowService] Cleaned up guards for callId:', callId);
+      
+      // ✅ REQUIREMENT 3: Clean up accepted invitations mapping
+      // Find and remove any inviteId linked to this callId
+      for (const [inviteId, mappedCallId] of this.acceptedInvitations.entries()) {
+        if (mappedCallId === callId) {
+          this.acceptedInvitations.delete(inviteId);
+          console.log('🧹 [callFlowService] Removed invitation mapping:', inviteId, '→', callId);
+        }
+      }
+    }
+    
     this.currentCall = null;
     this.incomingCall = null;
     this.emit('call:state-changed', null);
@@ -1024,31 +1125,140 @@ class CallFlowService {
 
   /**
    * Handle invitation cancelled (receiver side)
+   * ✅ REQUIREMENT 2: Don't cancel active calls - only reset invitation UI
    */
   private handleInvitationCancelled(data: { inviteId: string; cancelledBy?: string }): void {
     console.log('🚫 [RECEIVER] Invitation cancelled:', data.inviteId);
     
+    // ✅ REQUIREMENT 2: Check if invitation is linked to an active call
+    const linkedCallId = this.acceptedInvitations.get(data.inviteId);
+    const currentCallState = store.getState().call.activeCall;
+    const hasActiveCall = currentCallState.status === CallStatus.CONNECTING ||
+                         currentCallState.status === CallStatus.CONNECTED ||
+                         currentCallState.status === CallStatus.CALLING ||
+                         currentCallState.status === CallStatus.RINGING;
+    
+    // ✅ REQUIREMENT 2: If invitation is linked to active call, ignore cancellation
+    if (linkedCallId && hasActiveCall) {
+      console.log('✅ [RECEIVER] Ignoring invitation cancellation because call is active');
+      console.log('   inviteId:', data.inviteId);
+      console.log('   linkedCallId:', linkedCallId);
+      console.log('   currentCallState:', currentCallState.status);
+      console.log('   Call will continue - invitation cancellation does not affect active calls');
+      return; // Don't reset anything - call is active
+    }
+    
+    // ✅ REQUIREMENT 2: If call:start was already received, invitation cancellation is irrelevant
+    if (this.currentCall && this.currentCall.callId) {
+      console.log('✅ [RECEIVER] Ignoring invitation cancellation - call:start already received');
+      console.log('   callId:', this.currentCall.callId);
+      console.log('   Call state:', currentCallState.status);
+      console.log('   Invitation cancellation cannot cancel an active call session');
+      
+      // Reset invitation UI only
+      if (this.currentInvitation?.inviteId === data.inviteId) {
+        this.currentInvitation = null;
+      }
+      store.dispatch(resetInvitationState());
+      return;
+    }
+    
+    // ✅ REQUIREMENT 2: Only reset call state if cancellation happened before acceptance
+    // Normal cancellation flow - no active call yet
+    if (currentCallState.status === CallStatus.CONNECTING && !this.currentCall) {
+      console.log('⚠️ [RECEIVER] Invitation cancelled during CONNECTING (before call:start)');
+      console.log('   Resetting call state');
+      store.dispatch(resetCallState());
+    }
+    
     // Reset invitation state
     store.dispatch(resetInvitationState());
-    this.currentInvitation = null;
+    if (this.currentInvitation?.inviteId === data.inviteId) {
+      this.currentInvitation = null;
+    }
   }
 
   /**
    * Handle invitation expired (both sides)
+   * ✅ REQUIREMENT 1 & 2: Only reset invitation UI, NOT active calls
    */
   private handleInvitationExpired(data: { inviteId: string }): void {
     console.log('⏰ Invitation expired:', data.inviteId);
     
-    // Reset invitation state
+    // ✅ REQUIREMENT 2: Check if invitation is linked to an active call
+    const linkedCallId = this.acceptedInvitations.get(data.inviteId);
+    const currentCallState = store.getState().call.activeCall;
+    const hasActiveCall = currentCallState.status === CallStatus.CONNECTING ||
+                         currentCallState.status === CallStatus.CONNECTED ||
+                         currentCallState.status === CallStatus.CALLING ||
+                         currentCallState.status === CallStatus.RINGING;
+    
+    // ✅ REQUIREMENT 2: If invitation is linked to active call, ignore expiration
+    if (linkedCallId && hasActiveCall) {
+      console.log('✅ [BOTH] Ignoring invitation expiration because call is active');
+      console.log('   inviteId:', data.inviteId);
+      console.log('   linkedCallId:', linkedCallId);
+      console.log('   currentCallState:', currentCallState.status);
+      console.log('   Call will continue - invitation expiration does not affect active calls');
+      
+      // Clean up the mapping (call is active, invitation is no longer relevant)
+      this.acceptedInvitations.delete(data.inviteId);
+      return; // Don't reset anything - call is active
+    }
+    
+    // ✅ REQUIREMENT 3: If call is in connecting state but invitation wasn't accepted, still ignore
+    // Once call:start is received, invitation is irrelevant
+    if (this.currentCall && this.currentCall.callId) {
+      console.log('✅ [BOTH] Ignoring invitation expiration - call:start already received');
+      console.log('   callId:', this.currentCall.callId);
+      console.log('   Call state:', currentCallState.status);
+      console.log('   Invitation expiration cannot cancel an active call session');
+      
+      // Reset invitation UI only (don't touch call state)
+      if (this.currentInvitation?.inviteId === data.inviteId) {
+        this.currentInvitation = null;
+      }
+      store.dispatch(resetInvitationState());
+      return;
+    }
+    
+    // ✅ REQUIREMENT 3: Only reset if invitation expired BEFORE acceptance
+    // This handles case where invitation times out before user accepts
+    console.log('⚠️ [BOTH] Invitation expired before acceptance');
+    console.log('   No active call linked to this invitation');
+    console.log('   Resetting invitation UI only (no call state changes)');
+    
+    // Reset invitation state (UI only - no call state reset)
+    if (this.currentInvitation?.inviteId === data.inviteId) {
+      this.currentInvitation = null;
+    }
     store.dispatch(resetInvitationState());
-    this.currentInvitation = null;
+    
+    // ✅ REQUIREMENT 2: Only reset call state if there's no active call
+    // If call state is CONNECTING but no call:start was received, it means acceptance failed
+    if (currentCallState.status === CallStatus.CONNECTING && !this.currentCall) {
+      console.log('⚠️ [BOTH] Call state is CONNECTING but no call session found');
+      console.log('   This might indicate acceptance failed - resetting call state');
+      store.dispatch(resetCallState());
+    }
   }
 
   /**
    * Handle call:start - Call actually starts after invitation acceptance
    * This is when WebRTC should be initialized
+   * 
+   * IDEMPOTENT: Only handles each callId once to prevent duplicate processing
    */
   private handleCallStart(data: { callId: string; callerId: string; receiverId: string; metadata?: any; callHistoryId?: string }): void {
+    // ✅ TASK 1: Make call:start idempotent - ignore duplicate events
+    if (this.handledCallIds.has(data.callId)) {
+      console.warn('⚠️ [callFlowService] Duplicate call:start ignored for callId:', data.callId);
+      console.warn('   This call has already been processed. Ignoring duplicate event.');
+      return;
+    }
+    
+    // Mark this callId as handled
+    this.handledCallIds.add(data.callId);
     console.log('🎬 [BOTH] call:start received - Call session created, WebRTC can now start');
     console.log('   callId:', data.callId);
     console.log('   callerId:', data.callerId);
@@ -1083,7 +1293,27 @@ class CallFlowService {
       callHistoryId: data.callHistoryId
     };
     
+    // ✅ REQUIREMENT 3: Link accepted invitation to callId (if invitation was accepted)
+    // This prevents invitation expiration from resetting the active call
+    const invitationStateForMapping = store.getState().call.invitation;
+    
+    // Check both invitation state and currentInvitation (one might be reset already)
+    const inviteIdToLink = invitationStateForMapping.inviteId || this.currentInvitation?.inviteId;
+    
+    if (inviteIdToLink) {
+      // Update pending mapping to actual callId, or create new mapping
+      this.acceptedInvitations.set(inviteIdToLink, data.callId);
+      console.log('✅ [BOTH] Linked accepted invitation to callId');
+      console.log('   inviteId:', inviteIdToLink);
+      console.log('   callId:', data.callId);
+      console.log('   Invitation expiration will now be ignored for this call');
+    }
+    
+    // ✅ TASK 4: callFlowService owns Redux state - update it here
     // Update call state to CONNECTING with correct remote user info
+    // This ensures connecting state is set even if acceptInvitation didn't set it
+    // (e.g., for caller side or if receiver missed the immediate update)
+    console.log('🔵 [BOTH] Call state → connecting (from call:start)');
     store.dispatch(setCallState({
       status: CallStatus.CONNECTING,
       remoteUserId: remoteUserId,
@@ -1097,29 +1327,90 @@ class CallFlowService {
     
     console.log('✅ [BOTH] Call state updated to CONNECTING');
     console.log('   Remote user:', remoteUserId, remoteUserName);
+    console.log('   ConnectingModal should now be visible');
+    
+    // ✅ FIX #1 & #4: Sync Redux state to callService for receiver side
+    // This ensures when call-offer arrives, callService knows state is CONNECTING
+    const reduxState = store.getState().call.activeCall;
+    if (isReceiver) {
+      console.log('🔄 [RECEIVER] Syncing Redux state to callService in handleCallStart');
+      // Sync state immediately (don't wait for initialize - it's already done in acceptInvitation)
+      callService.syncStateFromRedux(reduxState);
+      // Ensure callService is initialized (should already be done, but safety check)
+      callService.initialize();
+      console.log('✅ [RECEIVER] State synced to callService, status should be:', reduxState.status);
+    }
     
     // Reset invitation state (invitation is now converted to call)
     store.dispatch(resetInvitationState());
     this.currentInvitation = null;
     
-    // Emit event for WebRTC initialization (this is when WebRTC should start)
-    this.emit('call:ready-for-webrtc', this.currentCall);
-    console.log('✅ [BOTH] call:ready-for-webrtc emitted - WebRTC can now start');
+    // ✅ REQUIREMENT 1: callFlowService ONLY updates call state, NO WebRTC side-effects
+    // WebRTC is handled entirely by callService, which listens directly to call:start socket event
+    console.log('✅ [BOTH] Call state updated to CONNECTING');
+    console.log('   WebRTC will be started by callService (listens to call:start directly)');
+    console.log('   Role: ' + (isCaller ? 'CALLER (will create offer)' : 'RECEIVER (will wait for offer)'));
+    
+    // ✅ REQUIREMENT 3: Navigation happens ONLY when CONNECTED
+    // Don't emit navigation here - wait for CONNECTED state
+    // Navigation will be triggered by components listening to CONNECTED state change
+    console.log('⏳ [BOTH] Waiting for CONNECTED state before navigation');
+    console.log('   CallScreen will be navigated when callState.status === CONNECTED');
   }
 
   /**
    * Accept invitation (receiver side)
+   * 
+   * Sets connecting state immediately for instant UI feedback.
+   * WebRTC setup will happen after call:start event is received.
    */
   public acceptInvitation(inviteId: string): void {
     console.log('✅ [RECEIVER] Accepting invitation:', inviteId);
+    console.log('🔵 [RECEIVER] Call state → connecting (immediate UI feedback)');
     
-    // Emit call:invite:accept
+    // ✅ REQUIREMENT 1: Mark invitation as accepted (will link to callId when call:start is received)
+    // Store inviteId temporarily - callId will be added in handleCallStart
+    this.acceptedInvitations.set(inviteId, 'pending'); // Will be updated to actual callId in handleCallStart
+    
+    // ✅ REQUIREMENT 1: Clear any invitation expiration timers (if any)
+    // Note: Timers are in UI components, they should stop when invitation state is reset
+    // But we mark invitation as accepted here so expiration handler knows to ignore it
+    
+    // Get invitation state to preserve remote user info
+    const invitationState = store.getState().call.invitation;
+    
+    // Set call state to CONNECTING immediately for instant UI feedback
+    // This shows ConnectingModal while waiting for call:start and WebRTC setup
+    store.dispatch(setCallState({
+      status: CallStatus.CONNECTING,
+      remoteUserId: invitationState.remoteUserId || '',
+      remoteUserName: invitationState.remoteUserName || '',
+      isVideoEnabled: invitationState.metadata?.isVideo || false,
+      isAudioEnabled: true,
+      callStartTime: null,
+      callDuration: 0,
+      callHistoryId: invitationState.callHistoryId
+    }));
+    
+    console.log('   Remote user:', invitationState.remoteUserId, invitationState.remoteUserName);
+    console.log('   ConnectingModal should now be visible');
+    console.log('✅ [RECEIVER] Invitation marked as accepted - expiration will be ignored');
+    
+    // ✅ FIX #1: Sync Redux state to callService so handleCallOffer can detect CONNECTING status
+    // This is critical - when offer arrives, callService needs to know state is CONNECTING
+    const reduxCallState = store.getState().call.activeCall;
+    callService.syncStateFromRedux(reduxCallState);
+    console.log('✅ [RECEIVER] callService state synced with Redux (CONNECTING)');
+    
+    // Ensure callService is initialized (sets up socket listeners)
+    callService.initialize();
+    console.log('✅ [RECEIVER] callService initialized, ready to receive call-offer');
+    
+    // Emit call:invite:accept (server will respond with call:start)
     socketService.socketEmit('call:invite:accept', { inviteId });
     
-    // Update invitation state (UI will show connecting)
-    store.dispatch(setInvitationState({
-      status: 'idle' // Will be reset when call:start is received
-    }));
+    // Note: Invitation state will be reset when call:start is received
+    // The connecting state set above provides immediate feedback
   }
 
   /**
@@ -1127,6 +1418,14 @@ class CallFlowService {
    */
   public declineInvitation(inviteId: string): void {
     console.log('❌ [RECEIVER] Declining invitation:', inviteId);
+    
+    // If call is in connecting state, reset it (closes ConnectingModal)
+    // This handles edge case where user declines after accidentally accepting
+    const currentCallState = store.getState().call.activeCall;
+    if (currentCallState.status === CallStatus.CONNECTING) {
+      console.log('🔴 [RECEIVER] Resetting connecting state due to invitation decline');
+      store.dispatch(resetCallState());
+    }
     
     // Emit call:invite:decline
     socketService.socketEmit('call:invite:decline', { inviteId });
@@ -1141,6 +1440,14 @@ class CallFlowService {
    */
   public cancelInvitation(inviteId: string): void {
     console.log('🚫 [CALLER] Cancelling invitation:', inviteId);
+    
+    // If call is in connecting state, reset it (closes ConnectingModal)
+    // This handles edge case where caller cancels after receiver accepts
+    const currentCallState = store.getState().call.activeCall;
+    if (currentCallState.status === CallStatus.CONNECTING) {
+      console.log('🔴 [CALLER] Resetting connecting state due to invitation cancellation');
+      store.dispatch(resetCallState());
+    }
     
     // Emit call:invite:cancel
     socketService.socketEmit('call:invite:cancel', { inviteId });
@@ -1163,6 +1470,24 @@ class CallFlowService {
   public reinitialize(): void {
     this.initialized = false;
     this.initialize();
+  }
+
+  /**
+   * ✅ TASK 4: Notify that WebRTC is connected
+   * Called when WebRTC connection is established
+   * Redux state should already be updated to CONNECTED
+   */
+  private notifyWebRTCConnected(callState: any): void {
+    console.log('🟢 [callFlowService] notifyWebRTCConnected called');
+    console.log('   Call is now fully connected');
+    console.log('   ConnectingModal should hide, CallScreen should appear');
+    
+    // Emit event for any components that need to know connection is ready
+    this.emit('webrtc:connected', {
+      callId: this.currentCall?.callId,
+      remoteUserId: callState.remoteUserId,
+      remoteUserName: callState.remoteUserName
+    });
   }
 }
 

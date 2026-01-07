@@ -90,6 +90,15 @@ export const initialize = async (): Promise<void> => {
         console.error('❌ [socketService] Failed to initialize callFlowService on connect:', error);
       });
       
+      // CRITICAL FIX: Initialize callService when socket connects
+      // This ensures call:start listener is registered for WebRTC initialization
+      import('./callService').then(({ default: callService }) => {
+        console.log('🔧 [socketService] Initializing callService on socket connect');
+        callService.initialize();
+      }).catch((error) => {
+        console.error('❌ [socketService] Failed to initialize callService on connect:', error);
+      });
+      
       // Emit connection event for services that need to re-register listeners
       socket.emit('socket-reconnected');
     });

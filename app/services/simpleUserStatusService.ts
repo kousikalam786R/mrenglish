@@ -23,6 +23,8 @@ class SimpleUserStatusService {
   private isInitialized = false;
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private statusUpdateCallbacks: Set<(statuses: Map<string, UserStatus>) => void> = new Set();
+  private lastStatusRequest: Map<string, number> = new Map(); // Track last request time per user to prevent loops
+  private readonly STATUS_REQUEST_DEBOUNCE_MS = 2000; // Don't request status more than once per 2 seconds per user
 
   constructor() {
     // Initialize
@@ -411,6 +413,15 @@ class SimpleUserStatusService {
    * Request status for a specific user
    */
   requestUserStatus(userId: string): void {
+    // Check debounce before requesting
+    const lastRequest = this.lastStatusRequest.get(userId) || 0;
+    const timeSinceLastRequest = Date.now() - lastRequest;
+    if (timeSinceLastRequest < this.STATUS_REQUEST_DEBOUNCE_MS) {
+      console.log(`📡 SimpleUserStatusService: Skipping status request for ${userId} (debounced, last request ${timeSinceLastRequest}ms ago)`);
+      return;
+    }
+    
+    this.lastStatusRequest.set(userId, Date.now());
     console.log('📡 SimpleUserStatusService: Requesting status for user:', userId);
     
     const socket = socketService.getSocket();
@@ -475,8 +486,15 @@ class SimpleUserStatusService {
         }
       }
       
-      // Still request status to ensure it's up to date
-      this.requestUserStatus(userId);
+      // Only request status if we haven't requested it recently (debounce to prevent loops)
+      const lastRequest = this.lastStatusRequest.get(userId) || 0;
+      const timeSinceLastRequest = Date.now() - lastRequest;
+      if (timeSinceLastRequest > this.STATUS_REQUEST_DEBOUNCE_MS) {
+        this.lastStatusRequest.set(userId, Date.now());
+        this.requestUserStatus(userId);
+      } else {
+        console.log(`👤 SimpleUserStatusService: Skipping status request for ${userId} (requested ${timeSinceLastRequest}ms ago, debounce: ${this.STATUS_REQUEST_DEBOUNCE_MS}ms)`);
+      }
       return;
     }
 

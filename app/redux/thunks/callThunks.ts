@@ -103,20 +103,25 @@ export const endActiveCall = createAsyncThunk(
   'call/endActiveCall',
   async (_, { dispatch }) => {
     try {
-      console.log('Ending active call');
+      console.log('📞 [endActiveCall] Ending active call');
       
-      // End the call
+      // Set Redux status to ENDED (single source of truth)
+      dispatch(setCallStatus(CallStatus.ENDED));
+      
+      // Clean up WebRTC resources (stops tracks, closes connection, emits socket)
+      // NOTE: callService.endCall() does NOT mutate state or emit UI changes
       callService.endCall();
       
-      // Update status to ended - the reset will happen after a delay
-      dispatch(setCallStatus(CallStatus.ENDED));
+      console.log('📞 [endActiveCall] Call status set to ENDED, WebRTC cleanup initiated');
+      console.log('📞 [endActiveCall] CallScreen will handle navigation and state reset');
       
       return { success: true };
     } catch (error: any) {
-      console.error('Error ending call:', error);
+      console.error('📞 [endActiveCall] Error ending call:', error);
       
-      // Still reset the call state
-      dispatch(resetCallState());
+      // On error, still set status to ENDED and clean up
+      dispatch(setCallStatus(CallStatus.ENDED));
+      callService.endCall();
       
       return { success: false, error: error.message };
     }

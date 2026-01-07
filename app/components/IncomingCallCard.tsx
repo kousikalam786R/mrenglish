@@ -23,7 +23,7 @@ import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../redux/store';
 import callFlowService from '../utils/callFlowService';
 import { resetInvitationState, setInvitationState } from '../redux/slices/callSlice';
-import { CallStatus } from '../utils/callService';
+import callService, { CallStatus } from '../utils/callService';
 import Icon from 'react-native-vector-icons/Ionicons';
 import NavigationService from '../navigation/NavigationService';
 
@@ -191,33 +191,37 @@ const IncomingCallCard: React.FC = () => {
     }
   }, [visible, pulseAnim]);
 
-  // Navigate to CallScreen when call starts (after invitation acceptance via call:start event)
+  // ✅ REQUIREMENT 4: No WebRTC logic in modals
+  // WebRTC is handled automatically by callService when call:ready-for-webrtc is received
+  // This component only handles UI and navigation
+
+  // ✅ REQUIREMENT 3: Navigate to CallScreen ONLY when CONNECTED
+  // Listen for navigation event from callFlowService (emitted when CONNECTED)
   useEffect(() => {
-    // Navigate to CallScreen when call state becomes CONNECTING (after call:start event)
-    // This happens after receiver accepts invitation and server emits call:start
-    if (callState.status === CallStatus.CONNECTING && callState.remoteUserId) {
-      console.log('✅ [IncomingCallCard] Call started (call:start received), navigating to CallScreen');
-      console.log('   Call state:', callState);
-      const currentCall = callFlowService.getCurrentCall();
+    const handleNavigateToCallScreen = (data: any) => {
+      console.log('✅ [IncomingCallCard] call:navigate-to-callscreen received (CONNECTED state)');
+      console.log('   Navigating to CallScreen');
       
-      if (currentCall) {
-        console.log('   Navigating to CallScreen with call session:', currentCall);
-        NavigationService.navigate('CallScreen', {
-          id: callState.remoteUserId,
-          name: callState.remoteUserName || invitation.remoteUserName || 'User',
-          isVideoCall: callState.isVideoEnabled || invitation.metadata?.isVideo || false,
-          callId: currentCall.callId || '',
-          callType: currentCall.callType,
-          isReceiver: true,
-        });
-        
-        // Close invitation modal after navigation
-        dispatch(resetInvitationState());
-      } else {
-        console.warn('⚠️ [IncomingCallCard] No current call found, cannot navigate');
-      }
-    }
-  }, [callState.status, callState.remoteUserId]);
+      // Navigate to CallScreen
+      NavigationService.navigate('CallScreen', {
+        id: data.remoteUserId,
+        name: data.remoteUserName || invitation.remoteUserName || 'User',
+        isVideoCall: data.isVideoCall || false,
+        callId: data.callId || '',
+        callType: data.callType || 'direct_call',
+        isReceiver: true,
+      });
+      
+      // Close invitation modal after navigation
+      dispatch(resetInvitationState());
+    };
+
+    callFlowService.on('call:navigate-to-callscreen', handleNavigateToCallScreen);
+
+    return () => {
+      callFlowService.off('call:navigate-to-callscreen', handleNavigateToCallScreen);
+    };
+  }, []);
 
   // Handle Accept button
   const handleAccept = () => {

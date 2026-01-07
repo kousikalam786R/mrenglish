@@ -183,7 +183,20 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   // Initialize call service and set up event listeners
   const initializeCallService = () => {
     try {
-      console.log('Initializing call service');
+      console.log('🔧 [SocketProvider] Initializing call service');
+      
+      // CRITICAL: Ensure socket is connected before initializing callService
+      const socket = socketService.getSocket();
+      if (!socket || !socket.connected) {
+        console.warn('⚠️ [SocketProvider] Cannot initialize callService - socket not ready');
+        console.warn('   Socket exists:', !!socket);
+        console.warn('   Socket connected:', socket?.connected);
+        console.warn('   Will retry when socket connects');
+        return;
+      }
+      
+      console.log('✅ [SocketProvider] Socket is ready, initializing callService');
+      console.log('   Socket ID:', socket.id);
       
       // Initialize the call service
       callService.initialize();
@@ -193,10 +206,17 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       // callFlowService updates Redux directly for direct calls to avoid conflicts
       callService.addEventListener('call-state-changed', (callState) => {
         console.log('Call state changed (callService):', callState);
-        // Only update Redux if current state is IDLE (callFlowService isn't managing a call)
-        // or if callService is resetting to IDLE
         const currentReduxState = store.getState().call.activeCall;
-        if (currentReduxState.status === CallStatus.IDLE || callState.status === CallStatus.IDLE) {
+        // Update Redux if:
+        // 1. Current state is IDLE (callFlowService isn't managing a call)
+        // 2. callService is resetting to IDLE (cleanup)
+        // 3. callService is setting to ENDED (allow end call to propagate)
+        // 4. callService is setting to CONNECTED from CONNECTING (normal connection flow)
+        //    Note: callFlowService also handles CONNECTED, but this ensures it works even if callFlowService isn't initialized
+        if (currentReduxState.status === CallStatus.IDLE || 
+            callState.status === CallStatus.IDLE || 
+            callState.status === CallStatus.ENDED ||
+            (callState.status === CallStatus.CONNECTED && currentReduxState.status === CallStatus.CONNECTING)) {
           dispatch(setCallState(callState));
         } else {
           console.log('⚠️ Skipping callService state update - callFlowService is managing call state');

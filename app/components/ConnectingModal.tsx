@@ -1,10 +1,21 @@
 /**
  * Connecting Modal Component
  * 
- * Shows "Connecting" screen with loading indicator
- * Displayed when callState.status === "connecting"
+ * LAZY-LOADING UX IMPROVEMENT:
+ * Shows instant feedback after invitation acceptance while WebRTC is setting up.
  * 
- * Auto-transitions to CallScreen when callState.status === "connected"
+ * Why this improves UX:
+ * - WebRTC setup (offer/answer/ICE negotiation) takes 2-5 seconds
+ * - Without this modal, the UI feels blank/unresponsive during this delay
+ * - This modal appears immediately, providing visual feedback that connection is in progress
+ * - User knows the system is working, reducing perceived wait time
+ * 
+ * Lifecycle:
+ * - Appears when: callState.status === "connecting" (immediately after invitation acceptance)
+ * - Hides when: callState.status === "connected" | "ended" | "idle"
+ * - Rendered at App root level (above all navigation) for maximum visibility
+ * 
+ * DO NOT place inside CallScreen or navigation stacks - must be at root level
  */
 
 import React, { useEffect, useRef } from 'react';
@@ -16,19 +27,73 @@ import {
   Dimensions,
   Animated,
 } from 'react-native';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../redux/store';
 import { CallStatus } from '../utils/callService';
+import { resetCallState } from '../redux/slices/callSlice';
+import callService from '../utils/callService';
 
 const { width } = Dimensions.get('window');
 
 const ConnectingModal: React.FC = () => {
+  const dispatch = useDispatch();
   const callState = useSelector((state: RootState) => state.call.activeCall);
   
   // Show modal when status is CONNECTING
-  // NOTE: For direct calls, we skip this modal completely - CallScreen shows directly after accept
-  // This modal is disabled for now (can be enabled for match calls later if needed)
-  const visible = false; // Disabled - direct calls go straight to CallScreen
+  // Hide when connected, ended, or idle
+  // This provides instant feedback after invitation acceptance while WebRTC is setting up
+  const visible = callState.status === CallStatus.CONNECTING;
+  
+  // Timeout to close modal if connection takes too long (30 seconds)
+  // This prevents the modal from showing indefinitely if connection fails
+  const connectingStartTime = useRef<number | null>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  useEffect(() => {
+    if (visible) {
+      // Record when connecting started
+      connectingStartTime.current = Date.now();
+      console.log('🟢 [ConnectingModal] ConnectingModal mounted');
+      
+      // Set timeout to close modal after 30 seconds if still connecting
+      timeoutRef.current = setTimeout(() => {
+        const elapsed = Date.now() - (connectingStartTime.current || Date.now());
+        console.warn('⏰ [ConnectingModal] Connection timeout after', Math.round(elapsed / 1000), 'seconds');
+        console.warn('   Resetting call state to close modal');
+        
+        // End the call in callService
+        callService.endCall();
+        
+        // Reset Redux state to close the modal
+        dispatch(resetCallState());
+        
+        console.log('✅ [ConnectingModal] Call state reset - modal should close');
+      }, 30000); // 30 seconds timeout
+    } else {
+      // Clear timeout if modal is hidden (connection succeeded or was cancelled)
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      connectingStartTime.current = null;
+      console.log('🔴 [ConnectingModal] ConnectingModal unmounted');
+    }
+    
+    // Cleanup on unmount
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, [visible, dispatch]);
+  
+  // Debug logs for connecting state transitions
+  useEffect(() => {
+    if (callState.status === CallStatus.CONNECTING) {
+      console.log('🔵 [ConnectingModal] Call state → connecting');
+    }
+  }, [callState.status]);
   
   // Animation values for dots
   const dot1Anim = useRef(new Animated.Value(0.3)).current;
@@ -94,14 +159,17 @@ const ConnectingModal: React.FC = () => {
       transparent
       animationType="fade"
       statusBarTranslucent
+      // ✅ REQUIREMENT 5: Block UI during CONNECTING state
+      // Modal blocks all interaction until CONNECTED or ENDED
+      // This prevents user from navigating away during WebRTC setup
     >
       <View style={styles.container}>
         <View style={styles.content}>
           {/* Title */}
-          <Text style={styles.title}>Connecting</Text>
+          <Text style={styles.title}>Connecting with your partner…</Text>
           
           {/* Subtitle */}
-          <Text style={styles.subtitle}>Be ready to meet your partner :)</Text>
+          <Text style={styles.subtitle}>Please wait a moment</Text>
           
           {/* Loading Dots */}
           <View style={styles.loadingContainer}>
