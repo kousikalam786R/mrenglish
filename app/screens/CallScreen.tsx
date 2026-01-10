@@ -30,25 +30,29 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { safeParam } from '../utils/safeProps';
 import { useDispatch, useSelector } from 'react-redux';
-import { RootState, AppDispatch } from '../redux/store';
-import callService, { CallStatus } from '../utils/callService';
+import { RootState, AppDispatch, store } from '../redux/store';
+import { resetCallState } from '../redux/slices/callSlice';
+//import callService, { CallStatus } from '../utils/callService';
+import callService from '../utils/callService';
+import { CallStatus } from '../utils/callService';
+
 import { 
-  endActiveCall, 
   toggleAudioMute
 } from '../redux/thunks/callThunks';
-import { resetCallState } from '../redux/slices/callSlice';
+import callFlowService from '../utils/callFlowService';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Toast from 'react-native-toast-message';
 
 const CallScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const route = useRoute<CallRouteProp>();
+  const route = useRoute<CallScreenRouteProp>();
   const dispatch = useDispatch<AppDispatch>();
   
   // Safely extract parameters with defaults
   const id = safeParam(route, 'id', '0');
   const name = safeParam(route, 'name', 'User');
   const avatar = safeParam(route, 'avatar', "https://randomuser.me/api/portraits/men/32.jpg");
+  const callId = safeParam(route, 'callId', ''); // Extract callId from route params
   
   // Get call state from Redux
   const callState = useSelector((state: RootState) => state.call.activeCall);
@@ -56,6 +60,8 @@ const CallScreen = () => {
   // Local state
   const [callDuration, setCallDuration] = useState(0);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+
   
   // Refs for tracking timers
   const durationTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -88,30 +94,53 @@ const CallScreen = () => {
   );
 
   // Initialize call timer when component mounts (only if CONNECTED)
+  // useEffect(() => {
+  //   if (callState.status !== CallStatus.CONNECTED) {
+  //     return;
+  //   }
+
+  //   // Get call start time from callService or Redux
+  //   // const currentCallState = callService.getCallState();
+  //   // const startTime = callState.callStartTime || currentCallState.callStartTime || Date.now();
+  //   const startTime = callState.callStartTime || Date.now();
+
+  //   // Calculate initial duration
+  //   const initialDuration = Math.floor((Date.now() - startTime) / 1000);
+  //   setCallDuration(Math.max(0, initialDuration));
+    
+  //   // Clear any existing timer
+  //   if (durationTimerRef.current) {
+  //     clearInterval(durationTimerRef.current);
+  //   }
+    
+  //   // Start timer that updates every second
+  //   durationTimerRef.current = setInterval(() => {
+  //     const currentDuration = Math.floor((Date.now() - startTime) / 1000);
+  //     setCallDuration(Math.max(0, currentDuration));
+  //   }, 1000);
+    
+  //   return () => {
+  //     if (durationTimerRef.current) {
+  //       clearInterval(durationTimerRef.current);
+  //       durationTimerRef.current = null;
+  //     }
+  //   };
+  // }, [callState.status, callState.callStartTime]);
+
   useEffect(() => {
-    if (callState.status !== CallStatus.CONNECTED) {
+    if (callState.status !== CallStatus.CONNECTED || !callState.callStartTime) {
       return;
     }
-
-    // Get call start time from callService or Redux
-    const currentCallState = callService.getCallState();
-    const startTime = callState.callStartTime || currentCallState.callStartTime || Date.now();
-    
-    // Calculate initial duration
-    const initialDuration = Math.floor((Date.now() - startTime) / 1000);
-    setCallDuration(Math.max(0, initialDuration));
-    
-    // Clear any existing timer
-    if (durationTimerRef.current) {
-      clearInterval(durationTimerRef.current);
-    }
-    
-    // Start timer that updates every second
-    durationTimerRef.current = setInterval(() => {
-      const currentDuration = Math.floor((Date.now() - startTime) / 1000);
-      setCallDuration(Math.max(0, currentDuration));
-    }, 1000);
-    
+  
+    const startTime = callState.callStartTime;
+  
+    const update = () => {
+      setCallDuration(Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
+    };
+  
+    update();
+    durationTimerRef.current = setInterval(update, 1000);
+  
     return () => {
       if (durationTimerRef.current) {
         clearInterval(durationTimerRef.current);
@@ -119,23 +148,16 @@ const CallScreen = () => {
       }
     };
   }, [callState.status, callState.callStartTime]);
+  
 
-  // Listen for call ended state to navigate back and reset state
+  // Listen for call ended state to navigate back
   useEffect(() => {
     if (callState.status === CallStatus.ENDED || callState.status === CallStatus.IDLE) {
       console.log('📞 [CallScreen] Call ended or idle, navigating back');
-      
-      // Navigate back first
+      // Navigate back - callFlowService handles state reset
       navigation.goBack();
-      
-      // Reset Redux state after navigation completes
-      // Use setTimeout to ensure navigation has time to complete
-      setTimeout(() => {
-        console.log('📞 [CallScreen] Resetting Redux call state after navigation');
-        dispatch(resetCallState());
-      }, 100);
     }
-  }, [callState.status, navigation, dispatch]);
+  }, [callState.status, navigation]);
   
   // Format time for display
   const formatTime = (seconds: number) => {
@@ -148,10 +170,41 @@ const CallScreen = () => {
   const handleEndCall = () => {
     try {
       console.log('📞 [CallScreen] End call button pressed');
-      void dispatch(endActiveCall());
+      console.log('   Route callId:', callId);
+      console.log('   Redux callState:', callState);
+      
+      // Get callId from multiple sources (fallback chain):
+      // 1. Route params (passed during navigation)
+      // 2. callFlowService.getCurrentCall()
+      // 3. Redux state (if available)
+      let endCallId = callId;
+      
+      if (!endCallId) {
+        const currentCall = callFlowService.getCurrentCall();
+        endCallId = currentCall?.callId || '';
+        console.log('   Got callId from callFlowService:', endCallId);
+      }
+      
+      if (!endCallId) {
+        console.warn('⚠️ [CallScreen] No callId found from any source');
+        console.warn('   Attempting to end call using callService directly');
+        // Fallback: Call callService.endCall() directly (will clean up WebRTC)
+        callService.endCall();
+        // Still need to update Redux and emit socket event
+        store.dispatch(resetCallState());
+        navigation.goBack();
+        return;
+      }
+      
+      console.log('✅ [CallScreen] Ending call with callId:', endCallId);
+      // Use callFlowService to end call (handles Redux state, WebRTC cleanup, and socket events)
+      callFlowService.endCall(endCallId, 'user_ended');
       // Navigation will happen via the useEffect listening to callState.status
     } catch (error) {
-      console.error('Error ending call:', error);
+      console.error('❌ [CallScreen] Error ending call:', error);
+      // Fallback: Force cleanup and navigation
+      callService.endCall();
+      store.dispatch(resetCallState());
       navigation.goBack();
     }
   };
@@ -173,6 +226,10 @@ const CallScreen = () => {
       
       if (toggleAudioMute.fulfilled.match(result)) {
         const isEnabled = (result.payload as any)?.isEnabled;
+        if (typeof isEnabled === 'boolean') {
+          setIsMuted(!isEnabled);
+        }
+        
         if (isEnabled !== undefined) {
           console.log('Mute toggled, audio enabled:', isEnabled);
         }
@@ -255,17 +312,18 @@ const CallScreen = () => {
       
       {/* Call actions */}
       <View style={styles.actionsContainer}>
-        <TouchableOpacity 
-          style={[styles.actionButton, !callState.isAudioEnabled && styles.actionButtonActive]} 
-          onPress={handleToggleMute}
-        >
-          <Icon 
-            name={callState.isAudioEnabled ? 'mic-outline' : 'mic-off-outline'} 
-            size={28} 
-            color="white" 
-          />
-          <Text style={styles.actionButtonText}>Mute</Text>
-        </TouchableOpacity>
+      <TouchableOpacity 
+  style={[styles.actionButton, isMuted && styles.actionButtonActive]} 
+  onPress={handleToggleMute}
+>
+  <Icon 
+    name={isMuted ? 'mic-off-outline' : 'mic-outline'} 
+    size={28} 
+    color="white" 
+  />
+  <Text style={styles.actionButtonText}>Mute</Text>
+</TouchableOpacity>
+
         
         <TouchableOpacity 
           style={[styles.actionButton, isSpeakerOn && styles.actionButtonActive]} 

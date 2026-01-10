@@ -1,5 +1,35 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { CallState, initialCallState, CallStatus } from '../../utils/callService';
+
+export enum CallStatus {
+  IDLE = 'idle',
+  INVITING = 'inviting',
+  RINGING = 'ringing',
+  CONNECTING = 'connecting',
+  CONNECTED = 'connected',
+  ENDED = 'ended',
+}
+
+export interface CallState {
+  status: CallStatus;
+  callId: string | null;
+  remoteUserId: string | null;
+  remoteUserName: string | null;
+  isAudioEnabled: boolean;
+  isVideoEnabled: boolean;
+  callStartTime: number | null;
+  callDuration: number;
+}
+
+export const initialCallState: CallState = {
+  status: CallStatus.IDLE,
+  callId: null,
+  remoteUserId: null,
+  remoteUserName: null,
+  isAudioEnabled: true,
+  isVideoEnabled: false,
+  callStartTime: null,
+  callDuration: 0,
+};
 
 // INVITATION-FIRST ARCHITECTURE:
 // Invitation state is separate from call state
@@ -85,24 +115,6 @@ const callSlice = createSlice({
     },
     
     resetCallState: (state) => {
-      // Add to call history if call was connected
-      if (state.activeCall.status === CallStatus.CONNECTED || 
-          state.activeCall.status === CallStatus.ENDED) {
-        const duration = state.activeCall.callDuration;
-        if (duration > 0) {
-          state.callHistory.unshift({
-            userId: state.activeCall.remoteUserId,
-            userName: state.activeCall.remoteUserName,
-            timestamp: Date.now(),
-            duration: duration,
-            wasVideoCall: state.activeCall.isVideoEnabled,
-            wasIncoming: false, // Would need to track this separately
-            profilePic: undefined,
-          });
-        }
-      }
-      
-      // Reset to initial state
       state.activeCall = initialCallState;
     },
     

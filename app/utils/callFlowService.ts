@@ -14,7 +14,10 @@
 import socketService from './socketService';
 import { store } from '../redux/store';
 import { setCallState, resetCallState, setInvitationState, resetInvitationState } from '../redux/slices/callSlice';
-import callService, { CallStatus } from './callService';
+import callService from './callService';
+import { CallStatus } from '../redux/slices/callSlice';
+import NavigationService from '../navigation/NavigationService';
+
 import { Alert } from 'react-native';
 
 // Call State Enum (matches backend)
@@ -161,75 +164,38 @@ class CallFlowService {
     console.log('   Socket connected?', socket?.connected || false);
     console.log('   Socket ID:', socket?.id || 'N/A');
 
-    // ✅ TASK 3 & 4: Listen to callService state changes to update Redux when CONNECTED
-    // This ensures callFlowService owns Redux state, callService only handles WebRTC
-    if (!this.initialized) {
-      console.log('✅ [CallFlowService] Setting up callService state change listener');
-      callService.addEventListener('call-state-changed', (state: any) => {
-        // ✅ TASK 4: Update Redux when status transitions to CONNECTED
-        // callFlowService is the single source of truth for Redux state
-        if (state.status === CallStatus.CONNECTED) {
-          console.log('🟢 [callFlowService] WebRTC connected - updating Redux to CONNECTED');
-          console.log('   Previous Redux status:', store.getState().call.activeCall.status);
-          
-          // Update Redux state to CONNECTED (promote from CONNECTING)
-          store.dispatch(setCallState({
-            ...state,
-            status: CallStatus.CONNECTED
-          }));
-          
-          console.log('✅ [callFlowService] Redux state updated to CONNECTED');
-          console.log('   ConnectingModal should now hide automatically');
-          
-          // ✅ REQUIREMENT 3: Emit navigation event when CONNECTED
-          // This triggers CallScreen navigation (components listen to this)
-          if (this.currentCall) {
-            this.emit('call:navigate-to-callscreen', {
-              callId: this.currentCall.callId,
-              remoteUserId: state.remoteUserId,
-              remoteUserName: state.remoteUserName,
-              isVideoCall: state.isVideoEnabled || false,
-              callType: CallType.DIRECT_CALL,
-              isReceiver: store.getState().auth.userId !== this.currentCall.callerId
-            });
-            console.log('✅ [callFlowService] call:navigate-to-callscreen emitted (CONNECTED state)');
-          }
-          
-          // ✅ TASK 4: Notify that WebRTC is connected (for any additional cleanup/setup)
-          this.notifyWebRTCConnected(state);
-        }
-      });
-      
-      // Also listen for call-connected event (additional trigger for CONNECTED transition)
-      callService.addEventListener('call-connected', (data: any) => {
-        console.log('🟢 [callFlowService] call-connected event received:', data);
-        const currentReduxState = store.getState().call.activeCall;
-        if (currentReduxState.status === CallStatus.CONNECTING) {
-          console.log('🟢 [callFlowService] Promoting Redux state from CONNECTING to CONNECTED');
-          store.dispatch(setCallState({
-            ...currentReduxState,
-            status: CallStatus.CONNECTED,
-            callStartTime: data.timestamp || currentReduxState.callStartTime || Date.now()
-          }));
-          
-          // ✅ REQUIREMENT 3: Emit navigation event when CONNECTED
-          if (this.currentCall) {
-            this.emit('call:navigate-to-callscreen', {
-              callId: this.currentCall.callId,
-              remoteUserId: currentReduxState.remoteUserId,
-              remoteUserName: currentReduxState.remoteUserName,
-              isVideoCall: currentReduxState.isVideoEnabled || false,
-              callType: CallType.DIRECT_CALL,
-              isReceiver: store.getState().auth.userId !== this.currentCall.callerId
-            });
-            console.log('✅ [callFlowService] call:navigate-to-callscreen emitted (CONNECTED via call-connected event)');
-          }
-          
-          this.notifyWebRTCConnected(currentReduxState);
-        }
-      });
-    }
+   // ✅ LISTEN FOR WebRTC CONNECTED (single source of truth)
+   callService.removeEventListener?.('webrtc-connected');
 
+   callService.addEventListener('webrtc-connected', () => {
+     console.log('🟢 [callFlowService] webrtc-connected received');
+   
+     const currentReduxState = store.getState().call.activeCall;
+   
+     if (currentReduxState.status !== CallStatus.CONNECTED) {
+       store.dispatch(setCallState({
+         ...currentReduxState,
+         status: CallStatus.CONNECTED,
+         callStartTime: currentReduxState.callStartTime || Date.now()
+       }));
+     }
+   
+     if (this.currentCall) {
+       this.emit('call:navigate-to-callscreen', {
+         callId: this.currentCall.callId,
+         remoteUserId: currentReduxState.remoteUserId,
+         remoteUserName: currentReduxState.remoteUserName,
+         isVideoCall: currentReduxState.isVideoEnabled || false,
+         callType: CallType.DIRECT_CALL,
+         isReceiver: store.getState().auth.userId !== this.currentCall.callerId
+       });
+     }
+   });
+   
+  
+
+      
+     
     // Always set up listeners if socket is ready (handles reconnections)
     // CRITICAL: Force setup listeners even if already initialized (handles reconnections)
     if (socket && socket.connected) {
@@ -668,21 +634,170 @@ class CallFlowService {
    */
   public endCall(callId: string, reason?: string): void {
     try {
-      console.log(`📴 Ending call: ${callId}, reason: ${reason || 'normal'}`);
+      console.log('📴 [callFlowService] ============================================');
+      console.log(`📴 [callFlowService] Ending call: ${callId}, reason: ${reason || 'normal'}`);
+      console.log('📴 [callFlowService] ============================================');
 
+      // ✅ CRITICAL FIX: Allow ending even if currentCall doesn't match
+      // The callId might come from route params, so we should still end the call
       if (!this.currentCall || this.currentCall.callId !== callId) {
-        console.warn('⚠️ No active call to end');
-        return;
+        console.warn('⚠️ [callFlowService] currentCall does not match callId or is null');
+        console.warn('   currentCall?.callId:', this.currentCall?.callId);
+        console.warn('   provided callId:', callId);
+        console.warn('   Still proceeding with end call (callId from route params is valid)');
       }
 
-      // Emit call:end event
-      socketService.socketEmit('call:end', { callId, reason });
+      // ✅ CRITICAL FIX: Clean up WebRTC resources FIRST
+      // This stops media streams and closes peer connection
+      console.log('📴 [callFlowService] Cleaning up WebRTC resources...');
+      try {
+        callService.endCall();
+        console.log('✅ [callFlowService] WebRTC cleanup completed');
+      } catch (webrtcError) {
+        console.error('❌ [callFlowService] Error during WebRTC cleanup:', webrtcError);
+        // Continue with end call flow even if WebRTC cleanup fails
+      }
 
+      // ✅ CRITICAL FIX: Capture call data BEFORE clearing (needed for PostCallFlow navigation)
+      // Get Redux state before updating to ENDED
+      const currentCallState = store.getState().call.activeCall;
+      const invitationState = store.getState().call.invitation;
+      
+      // Calculate call duration from callStartTime
+      let callDuration = 0;
+      if (currentCallState.callStartTime) {
+        callDuration = Math.floor((Date.now() - currentCallState.callStartTime) / 1000);
+        console.log('📊 [callFlowService] Call duration calculated:', callDuration, 'seconds');
+        console.log('   callStartTime:', currentCallState.callStartTime);
+        console.log('   currentTime:', Date.now());
+      } else {
+        console.warn('⚠️ [callFlowService] No callStartTime found, duration will be 0');
+      }
+      
+      // Capture data needed for PostCallFlow navigation BEFORE clearing
+      const remoteUserId = currentCallState.remoteUserId;
+      const remoteUserName = currentCallState.remoteUserName;
+      // callHistoryId can be null/undefined, convert to undefined for navigation params
+      const callHistoryId = this.currentCall?.callHistoryId || invitationState.callHistoryId || undefined;
+      const userAvatar = invitationState.remoteUserProfilePic || undefined; // Get avatar from invitation state
+      
+      console.log('📊 [callFlowService] Captured call data for PostCallFlow:');
+      console.log('   remoteUserId:', remoteUserId);
+      console.log('   remoteUserName:', remoteUserName);
+      console.log('   callHistoryId:', callHistoryId);
+      console.log('   callDuration:', callDuration, 'seconds');
+      console.log('   userAvatar:', userAvatar ? 'available' : 'not available');
+
+      // ✅ CRITICAL FIX: Navigate to PostCallFlowScreen FIRST (before updating to ENDED)
+      // This prevents CallScreen's useEffect from navigating back and closing PostCallFlowScreen
+      // Navigate to PostCallFlowScreen if call duration > 10 seconds
+      if (callDuration > 10 && remoteUserId && remoteUserName) {
+        console.log('📞 [callFlowService] ============================================');
+        console.log('📞 [callFlowService] Call duration > 10 seconds - navigating to PostCallFlow');
+        console.log('📞 [callFlowService] ============================================');
+        console.log('📞 [callFlowService] Duration:', callDuration, 'seconds');
+        console.log('📞 [callFlowService] Remote user:', remoteUserId, remoteUserName);
+        console.log('📞 [callFlowService] Call history ID:', callHistoryId);
+        
+        // Navigate to PostCallFlowScreen with required params BEFORE updating status to ENDED
+        // At this point, TypeScript knows remoteUserId and remoteUserName are not null due to the if condition
+        try {
+          const postCallParams: {
+            userId: string;
+            userName: string;
+            userAvatar?: string;
+            callDuration: number;
+            interactionId?: string;
+          } = {
+            userId: remoteUserId, // TypeScript knows it's not null from the if condition
+            userName: remoteUserName, // TypeScript knows it's not null from the if condition
+            callDuration: callDuration,
+          };
+          
+          if (userAvatar) {
+            postCallParams.userAvatar = userAvatar;
+          }
+          
+          if (callHistoryId) {
+            postCallParams.interactionId = callHistoryId;
+          }
+          
+          // ✅ CRITICAL FIX: Use replace instead of navigate to replace CallScreen with PostCallFlowScreen
+          // This prevents CallScreen from navigating back and closing PostCallFlowScreen
+          // Navigate FIRST before updating status to ENDED to prevent CallScreen's useEffect from triggering
+          NavigationService.replace('PostCallFlow', postCallParams);
+          console.log('✅ [callFlowService] Replaced CallScreen with PostCallFlowScreen with params:', postCallParams);
+          console.log('📞 [callFlowService] ============================================');
+          
+          // ✅ CRITICAL: Update status to ENDED AFTER navigation (with a small delay to ensure navigation completes)
+          // This allows PostCallFlowScreen to be shown before CallScreen tries to navigate back
+          setTimeout(() => {
+            console.log('📴 [callFlowService] Updating Redux state to ENDED (after PostCallFlow navigation)...');
+            store.dispatch(setCallState({
+              ...currentCallState,
+              status: CallStatus.ENDED
+            }));
+            console.log('✅ [callFlowService] Redux state updated to ENDED');
+          }, 200); // Small delay to ensure navigation completes
+          
+        } catch (navError) {
+          console.error('❌ [callFlowService] Error navigating to PostCallFlowScreen:', navError);
+          // If navigation fails, update status to ENDED immediately so CallScreen can navigate back
+          store.dispatch(setCallState({
+            ...currentCallState,
+            status: CallStatus.ENDED
+          }));
+        }
+      } else {
+        console.log('📞 [callFlowService] Skipping PostCallFlow navigation:');
+        if (callDuration <= 10) {
+          console.log('   Reason: Call duration too short (', callDuration, 'seconds, need > 10)');
+        }
+        if (!remoteUserId || !remoteUserName) {
+          console.log('   Reason: Missing remote user data (userId:', remoteUserId, ', userName:', remoteUserName, ')');
+        }
+        
+        // If not navigating to PostCallFlow, update status to ENDED immediately
+        console.log('📴 [callFlowService] Updating Redux state to ENDED...');
+        store.dispatch(setCallState({
+          ...currentCallState,
+          status: CallStatus.ENDED
+        }));
+        console.log('✅ [callFlowService] Redux state updated to ENDED');
+      }
+
+      // Emit call:end socket event to notify other party
+      console.log('📴 [callFlowService] Emitting call:end socket event...');
+      socketService.socketEmit('call:end', { callId, reason });
+      console.log('✅ [callFlowService] call:end event emitted');
+
+      // Emit internal event for listeners
       this.emit('call:ended', { callId, reason });
+
+      // Clear local state (this resets currentCall and cleans up)
       this.clearCall();
 
+      // ✅ CRITICAL FIX: Reset Redux state to IDLE after a brief delay
+      // This allows UI to react to ENDED state first, then reset
+      // Also allows PostCallFlowScreen to be shown before state is reset
+      setTimeout(() => {
+        console.log('📴 [callFlowService] Resetting Redux state to IDLE...');
+        store.dispatch(resetCallState());
+        console.log('✅ [callFlowService] Redux state reset to IDLE');
+      }, 300); // Increased delay to allow PostCallFlow navigation
+
+      console.log('✅ [callFlowService] Call ended successfully');
+      console.log('📴 [callFlowService] ============================================');
+
     } catch (error) {
-      console.error('❌ Error ending call:', error);
+      console.error('❌ [callFlowService] Error ending call:', error);
+      // Fallback: Try to clean up anyway
+      try {
+        callService.endCall();
+        store.dispatch(resetCallState());
+      } catch (fallbackError) {
+        console.error('❌ [callFlowService] Fallback cleanup also failed:', fallbackError);
+      }
       this.emit('call:error', { error: error instanceof Error ? error.message : 'Failed to end call' });
     }
   }
@@ -880,12 +995,55 @@ class CallFlowService {
   }
 
   /**
-   * Handle call ended
-   * FIXED: Resets Redux state to IDLE when call ends
+   * Handle call ended (RECEIVER SIDE - when other party ends the call)
+   * FIXED: Now navigates to PostCallFlowScreen if duration > 10 seconds (same as caller side)
    */
   private handleCallEnded(data: { callId: string; callState: string; endedBy?: string; reason?: string }): void {
-    console.log('📴 [RECEIVER] Call ended:', data.callId, 'Reason:', data.reason || 'normal');
+    console.log('📴 [RECEIVER] ============================================');
+    console.log('📴 [RECEIVER] Call ended by other party:', data.callId, 'Reason:', data.reason || 'normal');
+    console.log('📴 [RECEIVER] ============================================');
     
+    // ✅ CRITICAL FIX: Clean up WebRTC resources FIRST (same as endCall)
+    console.log('📴 [RECEIVER] Cleaning up WebRTC resources...');
+    try {
+      callService.endCall();
+      console.log('✅ [RECEIVER] WebRTC cleanup completed');
+    } catch (webrtcError) {
+      console.error('❌ [RECEIVER] Error during WebRTC cleanup:', webrtcError);
+      // Continue with end call flow even if WebRTC cleanup fails
+    }
+
+    // ✅ CRITICAL FIX: Capture call data BEFORE clearing (needed for PostCallFlow navigation)
+    // Get Redux state before updating to ENDED
+    const currentCallState = store.getState().call.activeCall;
+    const invitationState = store.getState().call.invitation;
+    
+    // Calculate call duration from callStartTime
+    let callDuration = 0;
+    if (currentCallState.callStartTime) {
+      callDuration = Math.floor((Date.now() - currentCallState.callStartTime) / 1000);
+      console.log('📊 [RECEIVER] Call duration calculated:', callDuration, 'seconds');
+      console.log('   callStartTime:', currentCallState.callStartTime);
+      console.log('   currentTime:', Date.now());
+    } else {
+      console.warn('⚠️ [RECEIVER] No callStartTime found, duration will be 0');
+    }
+    
+    // Capture data needed for PostCallFlow navigation BEFORE clearing
+    const remoteUserId = currentCallState.remoteUserId;
+    const remoteUserName = currentCallState.remoteUserName;
+    // callHistoryId can be null/undefined, convert to undefined for navigation params
+    // Note: callHistoryId from socket event data is not typed, so we only use it from currentCall or invitationState
+    const callHistoryId = this.currentCall?.callHistoryId || invitationState.callHistoryId || undefined;
+    const userAvatar = invitationState.remoteUserProfilePic || undefined; // Get avatar from invitation state
+    
+    console.log('📊 [RECEIVER] Captured call data for PostCallFlow:');
+    console.log('   remoteUserId:', remoteUserId);
+    console.log('   remoteUserName:', remoteUserName);
+    console.log('   callHistoryId:', callHistoryId);
+    console.log('   callDuration:', callDuration, 'seconds');
+    console.log('   userAvatar:', userAvatar ? 'available' : 'not available');
+
     // Clear local state
     if (this.currentCall && this.currentCall.callId === data.callId) {
       this.updateCallState(CallState.ENDED);
@@ -896,29 +1054,115 @@ class CallFlowService {
     if (this.incomingCall && this.incomingCall.callId === data.callId) {
       this.incomingCall = null;
     }
+
+    // ✅ CRITICAL FIX: Navigate to PostCallFlowScreen FIRST (before updating to ENDED) - SAME LOGIC AS CALLER
+    // This prevents CallScreen's useEffect from navigating back and closing PostCallFlowScreen
+    // Navigate to PostCallFlowScreen if call duration > 10 seconds
+    if (callDuration > 10 && remoteUserId && remoteUserName) {
+      console.log('📞 [RECEIVER] ============================================');
+      console.log('📞 [RECEIVER] Call duration > 10 seconds - navigating to PostCallFlow');
+      console.log('📞 [RECEIVER] ============================================');
+      console.log('📞 [RECEIVER] Duration:', callDuration, 'seconds');
+      console.log('📞 [RECEIVER] Remote user:', remoteUserId, remoteUserName);
+      console.log('📞 [RECEIVER] Call history ID:', callHistoryId);
+      
+      // Navigate to PostCallFlowScreen with required params BEFORE updating status to ENDED
+      // At this point, TypeScript knows remoteUserId and remoteUserName are not null due to the if condition
+      try {
+        const postCallParams: {
+          userId: string;
+          userName: string;
+          userAvatar?: string;
+          callDuration: number;
+          interactionId?: string;
+        } = {
+          userId: remoteUserId, // TypeScript knows it's not null from the if condition
+          userName: remoteUserName, // TypeScript knows it's not null from the if condition
+          callDuration: callDuration,
+        };
+        
+        if (userAvatar) {
+          postCallParams.userAvatar = userAvatar;
+        }
+        
+        if (callHistoryId) {
+          postCallParams.interactionId = callHistoryId;
+        }
+        
+        // ✅ CRITICAL FIX: Use replace instead of navigate to replace CallScreen with PostCallFlowScreen
+        // This prevents CallScreen from navigating back and closing PostCallFlowScreen
+        // Navigate FIRST before updating status to ENDED to prevent CallScreen's useEffect from triggering
+        NavigationService.replace('PostCallFlow', postCallParams);
+        console.log('✅ [RECEIVER] Replaced CallScreen with PostCallFlowScreen with params:', postCallParams);
+        console.log('📞 [RECEIVER] ============================================');
+        
+        // ✅ CRITICAL: Update status to ENDED AFTER navigation (with a small delay to ensure navigation completes)
+        // This allows PostCallFlowScreen to be shown before CallScreen tries to navigate back
+        setTimeout(() => {
+          console.log('📴 [RECEIVER] Updating Redux state to ENDED (after PostCallFlow navigation)...');
+          store.dispatch(setCallState({
+            ...currentCallState,
+            status: CallStatus.ENDED
+          }));
+          console.log('✅ [RECEIVER] Redux state updated to ENDED');
+        }, 200); // Small delay to ensure navigation completes
+        
+      } catch (navError) {
+        console.error('❌ [RECEIVER] Error navigating to PostCallFlowScreen:', navError);
+        // If navigation fails, update status to ENDED immediately so CallScreen can navigate back
+        store.dispatch(setCallState({
+          ...currentCallState,
+          status: CallStatus.ENDED
+        }));
+      }
+    } else {
+      console.log('📞 [RECEIVER] Skipping PostCallFlow navigation:');
+      if (callDuration <= 10) {
+        console.log('   Reason: Call duration too short (', callDuration, 'seconds, need > 10)');
+      }
+      if (!remoteUserId || !remoteUserName) {
+        console.log('   Reason: Missing remote user data (userId:', remoteUserId, ', userName:', remoteUserName, ')');
+      }
+      
+      // If not navigating to PostCallFlow, update status to ENDED immediately
+      console.log('📴 [RECEIVER] Updating Redux state to ENDED...');
+      store.dispatch(setCallState({
+        ...currentCallState,
+        status: CallStatus.ENDED
+      }));
+      console.log('✅ [RECEIVER] Redux state updated to ENDED');
+    }
     
-    // Reset Redux state to IDLE (clears call state so new calls can be made)
-    store.dispatch(resetCallState());
-    console.log('✅ [RECEIVER] Redux state reset to IDLE after call ended');
+    // ✅ CRITICAL FIX: Reset Redux state to IDLE after a brief delay (same as endCall)
+    // This allows UI to react to ENDED state first, then reset
+    // Also allows PostCallFlowScreen to be shown before state is reset
+    setTimeout(() => {
+      console.log('📴 [RECEIVER] Resetting Redux state to IDLE...');
+      store.dispatch(resetCallState());
+      console.log('✅ [RECEIVER] Redux state reset to IDLE');
+    }, 300); // Increased delay to allow PostCallFlow navigation
     
     // UNIFIED USER STATUS SYSTEM - Request fresh status updates for both users
     // This ensures status is updated even if the socket event was missed
     const currentUserId = store.getState().auth.userId;
-    const callState = store.getState().call.activeCall;
-    const remoteUserId = callState.remoteUserId;
+    const callStateForStatus = store.getState().call.activeCall;
+    const remoteUserIdForStatus = callStateForStatus.remoteUserId || remoteUserId;
     
-    if (currentUserId || remoteUserId) {
+    if (currentUserId || remoteUserIdForStatus) {
       import('../services/userStatusService').then(({ default: userStatusService }) => {
         const userIds: string[] = [];
         if (currentUserId) userIds.push(currentUserId);
-        if (remoteUserId && remoteUserId !== currentUserId) userIds.push(remoteUserId);
+        if (remoteUserIdForStatus && remoteUserIdForStatus !== currentUserId) userIds.push(remoteUserIdForStatus);
         
         if (userIds.length > 0) {
-          console.log(`📊 [CallFlowService] Requesting fresh status updates after call end for:`, userIds);
+          console.log(`📊 [RECEIVER] Requesting fresh status updates after call end for:`, userIds);
           userStatusService.requestMultipleUserStatuses(userIds);
         }
       });
     }
+
+    console.log('✅ [RECEIVER] Call ended successfully');
+    console.log('📴 [RECEIVER] ============================================');
   }
 
   /**
@@ -1288,7 +1532,7 @@ class CallFlowService {
       receiverId: data.receiverId,
       callType: CallType.DIRECT_CALL,
       callState: CallState.CONNECTING,
-      callerName: isReceiver ? invitationState.remoteUserName : undefined, // For receiver, caller name is in invitation
+      callerName: isReceiver ? (invitationState.remoteUserName || undefined) : undefined, // For receiver, caller name is in invitation (convert null to undefined)
       metadata: data.metadata,
       callHistoryId: data.callHistoryId
     };
@@ -1329,17 +1573,15 @@ class CallFlowService {
     console.log('   Remote user:', remoteUserId, remoteUserName);
     console.log('   ConnectingModal should now be visible');
     
-    // ✅ FIX #1 & #4: Sync Redux state to callService for receiver side
-    // This ensures when call-offer arrives, callService knows state is CONNECTING
+    // ✅ FIX #1 & #4: Sync Redux state to callService for BOTH caller and receiver
+    // This ensures callService always has correct state and role detection works
     const reduxState = store.getState().call.activeCall;
-    if (isReceiver) {
-      console.log('🔄 [RECEIVER] Syncing Redux state to callService in handleCallStart');
-      // Sync state immediately (don't wait for initialize - it's already done in acceptInvitation)
-      callService.syncStateFromRedux(reduxState);
-      // Ensure callService is initialized (should already be done, but safety check)
-      callService.initialize();
-      console.log('✅ [RECEIVER] State synced to callService, status should be:', reduxState.status);
-    }
+    
+    console.log('🔄 [BOTH] Syncing Redux state to callService in handleCallStart');
+    callService.syncStateFromRedux(reduxState);
+    callService.initialize();
+    
+    console.log('✅ [BOTH] State synced to callService, status should be:', reduxState.status);
     
     // Reset invitation state (invitation is now converted to call)
     store.dispatch(resetInvitationState());
@@ -1464,31 +1706,10 @@ class CallFlowService {
     return this.currentInvitation;
   }
 
-  /**
-   * Re-initialize if socket reconnects
-   */
-  public reinitialize(): void {
-    this.initialized = false;
-    this.initialize();
-  }
 
-  /**
-   * ✅ TASK 4: Notify that WebRTC is connected
-   * Called when WebRTC connection is established
-   * Redux state should already be updated to CONNECTED
-   */
-  private notifyWebRTCConnected(callState: any): void {
-    console.log('🟢 [callFlowService] notifyWebRTCConnected called');
-    console.log('   Call is now fully connected');
-    console.log('   ConnectingModal should hide, CallScreen should appear');
-    
-    // Emit event for any components that need to know connection is ready
-    this.emit('webrtc:connected', {
-      callId: this.currentCall?.callId,
-      remoteUserId: callState.remoteUserId,
-      remoteUserName: callState.remoteUserName
-    });
-  }
+
+
+ 
 }
 
 // Export singleton instance

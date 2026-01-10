@@ -39,25 +39,12 @@ export const useIncomingCall = () => {
       }
     };
 
-    // Listen for call accepted (ready for WebRTC)
-    const handleCallReady = (callSession: any) => {
-      console.log('✅ [RECEIVER] Call ready for WebRTC:', callSession);
-      setShowModal(false);
-      setIncomingCall(null);
-      
-      // Initialize callService for receiver (to handle incoming WebRTC offer)
-      callService.initialize();
-      console.log('✅ [RECEIVER] CallService initialized, waiting for WebRTC offer from caller');
-      
-      // Navigate to CallScreen (receiver will wait for call-offer event from caller)
-      navigation.navigate('CallScreen' as never, {
-        id: callSession.callerId,
-        name: callSession.callerName,
-        isVideoCall: callSession.metadata?.isVideo || false,
-        callId: callSession.callId,
-        callType: callSession.callType,
-      } as never);
-    };
+    // DELETED: Direct navigation - navigation happens automatically when CONNECTED
+    // (handled by callFlowService 'call:navigate-to-callscreen' event)
+    // const handleCallReady = (callSession: any) => {
+    //   // Navigation to CallScreen happens automatically when CONNECTED
+    //   // (handled by callFlowService events in IncomingCallCard)
+    // };
 
     // Listen for call cancelled
     const handleCallCancelled = (data: any) => {
@@ -82,7 +69,8 @@ export const useIncomingCall = () => {
 
     // Register event listeners
     callFlowService.on('call:incoming', handleIncomingCall);
-    callFlowService.on('call:ready-for-webrtc', handleCallReady);
+    // DELETED: call:ready-for-webrtc listener - navigation happens when CONNECTED
+    // callFlowService.on('call:ready-for-webrtc', handleCallReady);
     callFlowService.on('call:cancelled', handleCallCancelled);
     callFlowService.on('call:ended', handleCallEnded);
     callFlowService.on('call:timeout', handleCallTimeout);
@@ -100,7 +88,8 @@ export const useIncomingCall = () => {
     // Cleanup
     return () => {
       callFlowService.off('call:incoming', handleIncomingCall);
-      callFlowService.off('call:ready-for-webrtc', handleCallReady);
+      // DELETED: call:ready-for-webrtc listener cleanup
+      // callFlowService.off('call:ready-for-webrtc', handleCallReady);
       callFlowService.off('call:cancelled', handleCallCancelled);
       callFlowService.off('call:ended', handleCallEnded);
       callFlowService.off('call:timeout', handleCallTimeout);
@@ -110,17 +99,20 @@ export const useIncomingCall = () => {
 
   const handleAccept = () => {
     if (incomingCall) {
-      console.log('✅ Accepting call:', incomingCall.callId);
-      callFlowService.acceptCall(incomingCall.callId);
+      console.log('✅ Accepting invitation:', incomingCall.inviteId || incomingCall.callId);
+      const inviteId = incomingCall.inviteId || incomingCall.callId;
+      callFlowService.acceptInvitation(inviteId);
       setShowModal(false);
-      // Navigation will happen via call:ready-for-webrtc event
+      // Navigation will happen automatically when CONNECTED
+      // (handled by callFlowService 'call:navigate-to-callscreen' event)
     }
   };
 
   const handleDecline = () => {
     if (incomingCall) {
-      console.log('❌ Declining call:', incomingCall.callId);
-      callFlowService.declineCall(incomingCall.callId);
+      console.log('❌ Declining invitation:', incomingCall.inviteId || incomingCall.callId);
+      const inviteId = incomingCall.inviteId || incomingCall.callId;
+      callFlowService.declineInvitation(inviteId);
       setShowModal(false);
       setIncomingCall(null);
     }

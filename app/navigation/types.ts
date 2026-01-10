@@ -41,7 +41,7 @@ export type ChatsStackParamList = {
   ChatDetail: { id: string; name: string; avatar?: string; user?: ChatUser };
   Call: { id: string; name: string; isVideoCall?: boolean; topic?: string; level?: string };
   AICallScreen: { id: string; name: string; isVideoCall?: boolean; topic?: string; level?: string };
-  CallScreen: { id: string; name: string; isVideoCall?: boolean; avatar?: string };
+  CallScreen: { id: string; name: string; isVideoCall?: boolean; avatar?: string; callId?: string };
 };
 
 export type ContactsStackParamList = {
@@ -49,7 +49,7 @@ export type ContactsStackParamList = {
   ChatDetail: { id: string; name: string; avatar?: string; user?: ChatUser };
   Call: { id: string; name: string; isVideoCall?: boolean; topic?: string; level?: string };
   AICallScreen: { id: string; name: string; isVideoCall?: boolean; topic?: string; level?: string };
-  CallScreen: { id: string; name: string; isVideoCall?: boolean; avatar?: string };
+  CallScreen: { id: string; name: string; isVideoCall?: boolean; avatar?: string; callId?: string };
 };
 
 // Combined parameter list for root navigation

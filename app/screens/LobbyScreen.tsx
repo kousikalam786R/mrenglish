@@ -16,7 +16,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/types';
 import { getAllUsers } from '../utils/userService';
 import socketService from '../utils/socketService';
-import callService from '../utils/callService';
+//import callService from '../utils/callService';
 import callFlowService, { CallType } from '../utils/callFlowService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '../utils/config';
@@ -28,7 +28,7 @@ import IconMaterial from 'react-native-vector-icons/MaterialIcons';
 import ConnectingScreen from '../components/ConnectingScreen';
 import PartnerSearchScreen from '../components/PartnerSearchScreen';
 import FilterModal, { FilterSettings } from '../components/FilterModal';
-import { mediaDevices } from 'react-native-webrtc';
+//import { mediaDevices } from 'react-native-webrtc';
 import simpleUserStatusService from '../services/simpleUserStatusService';
 import { useUserStatusService } from '../hooks/useUserStatus';
 import { useTheme } from '../context/ThemeContext';
@@ -737,16 +737,14 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         console.log('🔍 Test event response received:', data);
       });
 
-      // Add call service event listeners
-      console.log('🔧 SETUP: Adding call service event listeners');
-      console.log('🔧 SETUP: handlePartnerCallAutoAccepted function exists:', typeof handlePartnerCallAutoAccepted);
-      callService.addEventListener('call-state-changed', handleCallStateChange);
-      callService.addEventListener('partner-call-auto-accepted', handlePartnerCallAutoAccepted);
-      console.log('🔧 SETUP: Event listeners added - call-state-changed & partner-call-auto-accepted');
+      // DELETED: partner-call-auto-accepted listener - navigation happens when CONNECTED
+      // (handled by callFlowService 'call:navigate-to-callscreen' event)
+      // callService.addEventListener('call-state-changed', handleCallStateChange);
+      // callService.addEventListener('partner-call-auto-accepted', handlePartnerCallAutoAccepted);
       
       // Add call status tracking listeners
-      callService.addEventListener('call-started', handleCallStarted);
-      callService.addEventListener('call-ended', handleCallEnded);
+        // callService.addEventListener('call-started', handleCallStarted);
+        // callService.addEventListener('call-ended', handleCallEnded);
       
       // Request a list of ready users - emit the event instead of calling a non-existent method
       socketService.socketEmit('get-ready-users', {});
@@ -957,7 +955,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       callFlowService.initialize();
       
       // Initialize call service (for WebRTC, will be used after acceptance)
-      callService.initialize();
+      //callService.initialize();
       
       // Close any progress/connecting dialogs
       setShowConnecting(false);
@@ -981,7 +979,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       // ✅ REQUIREMENT 4: WebRTC initiation moved to callService
       // No WebRTC logic here - callService handles it automatically via setupWebRTCAutoInit()
       // Ensure callService is initialized (will setup auto-init listener)
-      callService.initialize();
+      //callService.initialize();
       console.log('✅ [DIRECT CALL] Invitation sent, WebRTC will start automatically via callService');
       
       // Note: For invitation declined/cancelled/expired, we rely on Redux state changes
@@ -1022,40 +1020,12 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   // Store timeout reference
   const searchTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   
-  // Handle partner call auto-accepted (navigate receiving user to CallScreen)
-  const handlePartnerCallAutoAccepted = (data: any) => {
-    console.log('🤝 NAVIGATION EVENT: Partner call auto-accepted - navigating to CallScreen');
-    console.log('🤝 NAVIGATION DATA:', JSON.stringify(data, null, 2));
-    console.log('🤝 CURRENT SCREEN STATE:', {
-      showConnecting,
-      connectingPartner: connectingPartner?.name,
-      showPartnerSearch,
-      findingPartner
-    });
-    
-    // Close connecting screen and partner search screen
-    setShowConnecting(false);
-    setConnectingPartner(null);
-    setShowPartnerSearch(false);
-    setFindingPartner(false);
-    
-    // Navigate to CallScreen
-    console.log('🤝 NAVIGATING TO CALLSCREEN with params:', {
-      id: data.callerId,
-      name: data.callerName,
-      isVideoCall: data.isVideo || false,
-      avatar: "https://randomuser.me/api/portraits/men/32.jpg"
-    });
-    
-    navigation.navigate('CallScreen', {
-      id: data.callerId,
-      name: data.callerName,
-      isVideoCall: data.isVideo || false,
-      avatar: "https://randomuser.me/api/portraits/men/32.jpg" // Default avatar
-    });
-    
-    console.log('🤝 NAVIGATION COMPLETED');
-  };
+  // DELETED: Direct navigation - navigation happens automatically when CONNECTED
+  // (handled by callFlowService 'call:navigate-to-callscreen' event in IncomingCallCard)
+  // const handlePartnerCallAutoAccepted = (data: any) => {
+  //   // Navigation to CallScreen happens automatically when CONNECTED
+  //   // (handled by callFlowService events in IncomingCallCard)
+  // };
   
   // Handle random call with the new functionality
   const handleRandomCall = async () => {
@@ -1202,97 +1172,6 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       return '';
     }
   };
-
-  // Handle call state changes to close connecting screen
-  const handleCallStateChange = (callState: any) => {
-    console.log('📞 Call state changed:', callState.status);
-    if (callState.status === 'connected' || callState.status === 'ringing') {
-      // Close connecting screen and partner search screen when call starts
-      console.log('📞 Call started - closing connecting screen and partner search screen');
-      setShowConnecting(false);
-      setConnectingPartner(null);
-      setShowPartnerSearch(false);
-      setFindingPartner(false);
-    }
-  };
-
-  // Handle call started event
-  const handleCallStarted = async (data: any) => {
-    console.log('📞 Call started event:', data);
-    
-    // Ensure partner search screen is closed when call starts
-    console.log('📞 Call started - ensuring partner search screen is closed');
-    setShowPartnerSearch(false);
-    setFindingPartner(false);
-    setShowConnecting(false);
-    setConnectingPartner(null);
-    
-    if (data.userId) {
-      // Update call status for BOTH users (caller and receiver)
-      simpleUserStatusService.setUserCallStatus(data.userId, true, data.callStartTime);
-      
-      // Get current user ID and mark both users as on call
-      const currentUserId = await getCurrentUserId();
-      
-      // Update call status for both users
-      if (currentUserId) {
-        simpleUserStatusService.setUserCallStatus(currentUserId, true, data.callStartTime);
-      }
-      
-      // Clear ready-to-talk status when call starts
-      setCurrentUserReady(false);
-      socketService.socketEmit('set-ready-to-talk', { status: false });
-      
-      // Update user status in the list - mark both users as on call
-      setUsers(prevUsers => prevUsers.map((user: User) => {
-        if (user._id === data.userId || user._id === currentUserId) {
-          return { ...user, isOnCall: true };
-        }
-        return user;
-      }));
-    }
-  };
-
-  // Handle call ended event
-  const handleCallEnded = async (data: any) => {
-    console.log('📞 Call ended event:', data);
-    
-    // Get current user ID
-    const currentUserId = await getCurrentUserId();
-    
-    // Get remote user ID from event data or callState
-    const remoteUserId = data.userId || data.remoteUserId;
-    
-    // Update call status IMMEDIATELY for both users (caller and receiver)
-    if (remoteUserId) {
-      console.log('📞 Updating call status to false for remote user:', remoteUserId);
-      simpleUserStatusService.setUserCallStatus(remoteUserId, false);
-    }
-    
-    if (currentUserId) {
-      console.log('📞 Updating call status to false for current user:', currentUserId);
-      simpleUserStatusService.setUserCallStatus(currentUserId, false);
-    }
-    
-    // Update user status in the list - mark both users as not on call
-    setUsers(prevUsers => prevUsers.map((user: User) => {
-      if (user._id === remoteUserId || user._id === currentUserId) {
-        console.log('📞 Marking user as not on call in list:', user.name);
-        return { ...user, isOnCall: false };
-      }
-      return user;
-    }));
-    
-    // Also update ready users list - remove call status
-    setReadyUsers(prevReady => prevReady.map((user: User) => {
-      if (user._id === remoteUserId || user._id === currentUserId) {
-        return { ...user, isOnCall: false };
-      }
-      return user;
-    }));
-  };
-
-
   // Global partner found handler (always active)
   const globalPartnerFoundHandler = (data: any) => {
     console.log('🌍 GLOBAL: Partner found event received:', JSON.stringify(data, null, 2));
@@ -1376,22 +1255,18 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     console.log('🧪 TEST: Search screen manually closed');
   };
 
-  // Test manual navigation (for debugging)
-  const testManualNavigation = () => {
-    console.log('🧪 TEST: Manually triggering navigation to CallScreen');
-    handlePartnerCallAutoAccepted({
-      callerId: 'test-caller-id',
-      callerName: 'Test Caller',
-      isVideo: false,
-      callHistoryId: 'test-call-history'
-    });
-  };
+  // DELETED: Test manual navigation - navigation happens automatically when CONNECTED
+  // const testManualNavigation = () => {
+  //   // Navigation to CallScreen happens automatically when CONNECTED
+  //   // (handled by callFlowService events)
+  // };
 
   // Make functions available globally for debugging (React Native)
   if (typeof global !== 'undefined') {
     (global as any).testSocketConnection = testSocketConnection;
     (global as any).testForceCloseSearch = testForceCloseSearch;
-    (global as any).testManualNavigation = testManualNavigation;
+    // DELETED: testManualNavigation - navigation happens automatically when CONNECTED
+    // (global as any).testManualNavigation = testManualNavigation;
   }
 
   // Handle automatic call for partner matching (bypasses incoming call modal)
@@ -1410,38 +1285,27 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       }
       
       // Set the remote user for the call service
-      socketService.socketEmit('set_remote_user', { userId: partner._id });
+      //socketService.socketEmit('set_remote_user', { userId: partner._id });
       
       // Initialize call service
-      callService.initialize();
+      //callService.initialize();
       
-      // Navigate to call screen first - ensure all search screens are closed
+      // Close all search screens
       setShowConnecting(false);
       setConnectingPartner(null);
       setShowPartnerSearch(false);
       setFindingPartner(false);
       
-      navigation.navigate('CallScreen', { 
-        id: partner._id, 
-        name: partner.name, 
-        isVideoCall: false 
-      });
+      // Send invitation via callFlowService (handles Redux state and WebRTC)
+      callFlowService.sendInvitation(
+        partner._id,
+        CallType.MATCH_CALL,
+        { isVideo: false },
+        partner.name
+      );
       
-      // Start the call using regular call service after navigation
-      setTimeout(async () => {
-        try {
-          console.log('📞 Starting partner matching call using regular call service...');
-          console.log('Socket connected:', socketService.getSocket()?.connected);
-          
-          // Use regular call service to start the call with partner matching flag
-          await callService.startCall(partner._id, partner.name, { audio: true, video: false, isPartnerMatching: true } as any);
-          console.log('✅ Partner matching call started successfully');
-        } catch (callError) {
-          console.error('❌ Error starting partner matching call:', callError);
-          // Navigate back to lobby if call fails
-          navigation.navigate('Lobby');
-        }
-      }, 1000);
+      // Navigation to CallScreen happens automatically when CONNECTED
+      // (handled by callFlowService events)
       
     } catch (error) {
       console.error('❌ Error in handleAutomaticCall:', error);
@@ -1519,11 +1383,12 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       socketService.socketOff('partner-search-error');
       socketService.socketOff('random-partner-result');
       
-      // Remove call service event listener
-      callService.removeEventListener('call-state-changed', handleCallStateChange);
-      callService.removeEventListener('partner-call-auto-accepted', handlePartnerCallAutoAccepted);
-      callService.removeEventListener('call-started', handleCallStarted);
-      callService.removeEventListener('call-ended', handleCallEnded);
+      // // Remove call service event listener
+      // callService.removeEventListener('call-state-changed', handleCallStateChange);
+      // // DELETED: partner-call-auto-accepted listener cleanup
+      // // callService.removeEventListener('partner-call-auto-accepted', handlePartnerCallAutoAccepted);
+      // callService.removeEventListener('call-started', handleCallStarted);
+      // callService.removeEventListener('call-ended', handleCallEnded);
     };
   }, []); // Remove findingPartner dependency to ensure listeners are always active
 

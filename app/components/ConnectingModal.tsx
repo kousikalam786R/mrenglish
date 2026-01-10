@@ -29,9 +29,7 @@ import {
 } from 'react-native';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../redux/store';
-import { CallStatus } from '../utils/callService';
-import { resetCallState } from '../redux/slices/callSlice';
-import callService from '../utils/callService';
+import { CallStatus, resetCallState } from '../redux/slices/callSlice';
 
 const { width } = Dimensions.get('window');
 
@@ -55,16 +53,13 @@ const ConnectingModal: React.FC = () => {
       connectingStartTime.current = Date.now();
       console.log('🟢 [ConnectingModal] ConnectingModal mounted');
       
-      // Set timeout to close modal after 30 seconds if still connecting
+      // Timeout only resets Redux UI state.
+      // Call termination and WebRTC cleanup are handled by callFlowService.
       timeoutRef.current = setTimeout(() => {
         const elapsed = Date.now() - (connectingStartTime.current || Date.now());
         console.warn('⏰ [ConnectingModal] Connection timeout after', Math.round(elapsed / 1000), 'seconds');
         console.warn('   Resetting call state to close modal');
         
-        // End the call in callService
-        callService.endCall();
-        
-        // Reset Redux state to close the modal
         dispatch(resetCallState());
         
         console.log('✅ [ConnectingModal] Call state reset - modal should close');

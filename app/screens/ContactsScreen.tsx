@@ -16,7 +16,8 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { ContactsStackNavigationProp } from '../navigation/types';
 import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '../redux/store';
-import { initiateCall, fetchCallHistory } from '../redux/thunks/callThunks';
+import { fetchCallHistory } from '../redux/thunks/callThunks';
+import callFlowService from '../utils/callFlowService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { API_URL } from '../utils/config';
@@ -78,14 +79,12 @@ const formatDate = (timestamp: number): string => {
 const FriendItem = ({ 
   friend, 
   onPress,
-  onCallPress,
   onMessagePress,
   onRemovePress,
   theme
 }: { 
   friend: Friend; 
   onPress: () => void;
-  onCallPress: () => void;
   onMessagePress: () => void;
   onRemovePress: () => void;
   theme: any;
@@ -146,12 +145,10 @@ const FriendItem = ({
 const CallItem = ({ 
   call, 
   onPress,
-  onCallPress,
   theme
 }: { 
   call: CallHistoryItem; 
   onPress: () => void;
-  onCallPress: () => void;
   theme: any;
 }) => {
   const dynamicStyles = {
@@ -355,24 +352,17 @@ const ContactsScreen = () => {
     navigation.getParent()?.navigate('UserProfile', { userId, userName });
   };
   
-  // Handle call press with call service
+  // Handle call press - send invitation via callFlowService
   const handleCallPress = (contact: Friend | CallHistoryItem) => {
     const userId = 'userId' in contact ? contact.userId : contact._id;
     const userName = 'userName' in contact ? contact.userName : contact.name;
     
-    // Initiate the call
-    void dispatch(initiateCall({
+    callFlowService.sendInvitation(
       userId,
-      userName,
-      options: { audio: true, video: false }
-    }));
-    
-    // Navigate to call screen
-    navigation.navigate('CallScreen', { 
-      id: userId, 
-      name: userName, 
-      isVideoCall: false 
-    });
+      'DIRECT_CALL',
+      { audio: true, video: false },
+      userName
+    );
   };
   
   const handleMessagePress = (contact: Friend | CallHistoryItem) => {
@@ -473,7 +463,6 @@ const ContactsScreen = () => {
         <CallItem
           call={item as CallHistoryItem}
           onPress={() => handleContactPress(item)}
-          onCallPress={() => handleCallPress(item)}
           theme={theme}
         />
       );
@@ -482,7 +471,6 @@ const ContactsScreen = () => {
         <FriendItem
           friend={item as Friend}
           onPress={() => handleContactPress(item)}
-          onCallPress={() => handleCallPress(item)}
           onMessagePress={() => handleMessagePress(item)}
           onRemovePress={() => handleRemoveFriend(item as Friend)}
           theme={theme}
@@ -494,7 +482,6 @@ const ContactsScreen = () => {
         <FriendItem
           friend={item as Friend}
           onPress={() => handleContactPress(item)}
-          onCallPress={() => handleCallPress(item)}
           onMessagePress={() => handleMessagePress(item)}
           onRemovePress={() => handleUnblockUser(item as Friend)}
           theme={theme}
@@ -533,7 +520,6 @@ const ContactsScreen = () => {
             key={`${call.userId}-${call.timestamp}-${index}`}
             call={call}
             onPress={() => handleContactPress(call)}
-            onCallPress={() => handleCallPress(call)}
             theme={theme}
           />
         ))}

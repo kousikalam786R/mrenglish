@@ -65,19 +65,11 @@ const IncomingCallModal: React.FC = () => {
       status: CallStatus.CONNECTING
     }));
     
-    // Accept call (this emits call:accept socket event to server)
-    callFlowService.acceptCall(incomingCall.callId);
-    
-    // Navigate to CallScreen (receiver will wait for WebRTC offer from caller)
-    console.log('   Navigating to CallScreen as receiver');
-    navigation.navigate('CallScreen' as never, {
-      id: incomingCall.callerId,
-      name: incomingCall.callerName,
-      isVideoCall: incomingCall.metadata?.isVideo || false,
-      callId: incomingCall.callId,
-      callType: incomingCall.callType,
-      isReceiver: true, // Mark as receiver so CallScreen knows to wait for offer
-    } as never);
+    // Accept invitation (this emits call:invite:accept socket event to server)
+    // Navigation to CallScreen happens automatically when CONNECTED
+    // (handled by callFlowService 'call:navigate-to-callscreen' event)
+    const inviteId = incomingCall.inviteId || incomingCall.callId;
+    callFlowService.acceptInvitation(inviteId);
   };
 
   // Handle Decline button press
@@ -93,8 +85,9 @@ const IncomingCallModal: React.FC = () => {
     
     console.log('   Declining call:', incomingCall.callId);
     
-    // Decline call (this emits call:decline socket event)
-    callFlowService.declineCall(incomingCall.callId);
+    // Decline invitation (this emits call:invite:decline socket event)
+    const inviteId = incomingCall.inviteId || incomingCall.callId;
+    callFlowService.declineInvitation(inviteId);
     
     // Reset Redux call state to IDLE
     dispatch(resetCallState());

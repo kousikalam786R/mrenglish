@@ -9,15 +9,11 @@ interface LogoProps {
 }
 
 const Logo: React.FC<LogoProps> = ({ 
-  size = 120, 
+  size = 100, 
   style,
   resizeMode = 'contain',
   rounded = true
 }) => {
-  // Logo will fill almost the entire circle, accounting for border
-  // Account for 3px border on each side (6px total)
-  const logoSize = size - 6;
-  
   return (
     <View style={[
       styles.container,
@@ -28,11 +24,11 @@ const Logo: React.FC<LogoProps> = ({
         source={require('../assets/images/mrenglish-logo.png')}
         style={[
           styles.logo,
-          { width: logoSize, height: logoSize },
-          rounded && { borderRadius: logoSize /0.5},
+          { width: size, height: size },
+          rounded && { borderRadius: size / 2 },
           style
         ]}
-        resizeMode="cover"
+        resizeMode={resizeMode}
       />
     </View>
   );
@@ -41,6 +37,8 @@ const Logo: React.FC<LogoProps> = ({
 const styles = StyleSheet.create({
   container: {
     overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
     // borderWidth: 3,
     // borderColor: '#4A90E2',
     //backgroundColor: '#E3F2FD', // Light blue background
@@ -49,8 +47,6 @@ const styles = StyleSheet.create({
     // shadowOpacity: 0.1,
     // shadowRadius: 4,
     // elevation: 3,
-    // justifyContent: 'center',
-    // alignItems: 'center',
   },
   logo: {
     backgroundColor: '#E3F2FD', // Light blue background

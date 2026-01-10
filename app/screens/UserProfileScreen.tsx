@@ -22,6 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import simpleUserStatusService from '../services/simpleUserStatusService';
 import { useUserStatus } from '../hooks/useUserStatus';
 import Toast from 'react-native-toast-message';
+import callFlowService, { CallType } from '../utils/callFlowService';
 
 // Interface for the user profile data
 interface UserProfile {
@@ -518,7 +519,7 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
     }
   };
 
-  // Handle call user
+  // Handle call user - send invitation via callFlowService
   const handleCallUser = () => {
     // Don't allow calling blocked users
     if (isBlocked) {
@@ -540,14 +541,19 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
       return;
     }
     
-    navigation.navigate('CallScreen', { 
-      id: userId, 
-      name: userName, 
-      isVideoCall: false 
-    });
+    // Send invitation (callFlowService handles Redux state and WebRTC)
+    callFlowService.sendInvitation(
+      userId,
+      CallType.DIRECT_CALL,
+      { isVideo: false },
+      userName
+    );
+    
+    // Navigation to CallScreen happens automatically when CONNECTED
+    // (handled by callFlowService events)
   };
 
-  // Handle video call user
+  // Handle video call user - send invitation via callFlowService
   const handleVideoCallUser = () => {
     // Don't allow calling blocked users
     if (isBlocked) {
@@ -569,11 +575,16 @@ const UserProfileScreen: React.FC<UserProfileScreenProps> = ({ route, navigation
       return;
     }
     
-    navigation.navigate('CallScreen', { 
-      id: userId, 
-      name: userName, 
-      isVideoCall: true 
-    });
+    // Send invitation (callFlowService handles Redux state and WebRTC)
+    callFlowService.sendInvitation(
+      userId,
+      CallType.DIRECT_CALL,
+      { isVideo: true },
+      userName
+    );
+    
+    // Navigation to CallScreen happens automatically when CONNECTED
+    // (handled by callFlowService events)
   };
 
   // Handle message user

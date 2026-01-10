@@ -1,6 +1,8 @@
 import { Platform, NativeModules } from 'react-native';
 import socketService from './socketService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { store } from '../redux/store';
+
 import {
   RTCPeerConnection,
   RTCIceCandidate,
@@ -86,7 +88,9 @@ class CallService {
    * @returns true if callService.callState.status === CONNECTED
    */
   private isTerminalConnected(): boolean {
-    return this.callState.status === CallStatus.CONNECTED;
+    // DELETED: Lifecycle check - replaced with WebRTC state check
+    // return this.callState.status === CallStatus.CONNECTED;
+    return this.pc?.connectionState === 'connected';
   }
 
   // Start monitoring connection state actively
@@ -109,24 +113,27 @@ class CallService {
       
       // If already connected, update status immediately
       if (connState === 'connected' && (iceState === 'connected' || iceState === 'completed')) {
-        if (this.callState.status === CallStatus.CONNECTING ||
-            this.callState.status === CallStatus.CALLING ||
-            this.callState.status === CallStatus.RECONNECTING) {
+        // DELETED: Lifecycle checks - replaced with WebRTC state checks
+        // if (this.callState.status === CallStatus.CONNECTING ||
+        //     this.callState.status === CallStatus.CALLING ||
+        //     this.callState.status === CallStatus.RECONNECTING) {
+        if (this.pc && this.pc.signalingState !== 'stable') {
           console.log('✅ [Connection Monitor] Immediate check: Already connected!');
-          const startTime = this.callState.callStartTime || Date.now();
-          this.callState = {
-            ...this.callState,
-            status: CallStatus.CONNECTED,
-            callStartTime: startTime,
-            callDuration: 0
-          };
+          // DELETED: Status assignment and lifecycle events - callFlowService owns lifecycle
+          // const startTime = this.callState.callStartTime || Date.now();
+          // this.callState = {
+          //   ...this.callState,
+          //   status: CallStatus.CONNECTED,
+          //   callStartTime: startTime,
+          //   callDuration: 0
+          // };
           
-          this.startDurationTracking();
-          this.emitCallStateChange();
-          this.emitEvent('call-connected', {
-            remoteUserId: this.callState.remoteUserId,
-            timestamp: startTime
-          });
+          // this.startDurationTracking();
+          // this.emitCallStateChange();
+          // this.emitEvent('call-connected', {
+          //   remoteUserId: this.callState.remoteUserId,
+          //   timestamp: startTime
+          // });
           
           this.stopConnectionStateMonitor();
           this.stopConnectingTimeout();
@@ -143,7 +150,9 @@ class CallService {
 
     // Monitor connection state every 2 seconds
     this.connectionStateMonitor = setInterval(() => {
-      if (!this.pc || this.callState.status === CallStatus.IDLE || this.callState.status === CallStatus.ENDED) {
+      // DELETED: Lifecycle checks - replaced with WebRTC state check
+      // if (!this.pc || this.callState.status === CallStatus.IDLE || this.callState.status === CallStatus.ENDED) {
+      if (!this.pc) {
         this.stopConnectionStateMonitor();
         return;
       }
@@ -161,11 +170,12 @@ class CallService {
         // Only downgrade CONNECTED to RECONNECTING if WebRTC connection actually failed
         if (connState === 'failed' || iceState === 'failed') {
           console.log('🔒 [Connection Monitor] CONNECTED → RECONNECTING (WebRTC failed)');
-          this.callState = {
-            ...this.callState,
-            status: CallStatus.RECONNECTING
-          };
-          this.emitCallStateChange();
+          // DELETED: Status assignment - callFlowService owns lifecycle
+          // this.callState = {
+          //   ...this.callState,
+          //   status: CallStatus.RECONNECTING
+          // };
+          // this.emitCallStateChange();
           // Continue monitoring to try to recover
         } else {
           // CONNECTED state is locked - ignore transient 'connecting' or 'disconnected' states
@@ -178,26 +188,30 @@ class CallService {
       // If we're actually connected but state says calling/reconnecting/connecting, update it
       // This is a fallback in case onconnectionstatechange event didn't fire properly
       if (connState === 'connected' && (iceState === 'connected' || iceState === 'completed')) {
-        if (this.callState.status === CallStatus.CALLING || 
-            this.callState.status === CallStatus.RECONNECTING ||
-            this.callState.status === CallStatus.CONNECTING) {
+        // DELETED: Lifecycle checks - replaced with WebRTC state check
+        // if (this.callState.status === CallStatus.CALLING || 
+        //     this.callState.status === CallStatus.RECONNECTING ||
+        //     this.callState.status === CallStatus.CONNECTING) {
+        if (this.pc && this.pc.signalingState !== 'stable') {
           console.log('✅ Connection state monitor detected connected state - updating from', this.callState.status);
           console.log('   This is a fallback detection (onconnectionstatechange may not have fired)');
           
-          const startTime = this.callState.callStartTime || Date.now();
-          this.callState = {
-            ...this.callState,
-            status: CallStatus.CONNECTED,
-            callStartTime: startTime,
-            callDuration: 0
-          };
+          // DELETED: Status assignment and lifecycle events - callFlowService owns lifecycle
+          // const startTime = this.callState.callStartTime || Date.now();
+          // this.callState = {
+          //   ...this.callState,
+          //   status: CallStatus.CONNECTED,
+          //   callStartTime: startTime,
+          //   callDuration: 0
+          // };
           
-          this.startDurationTracking();
-          this.emitCallStateChange();
-          this.emitEvent('call-connected', {
-            remoteUserId: this.callState.remoteUserId,
-            timestamp: startTime
-          });
+          // this.startDurationTracking();
+          // this.emitCallStateChange();
+          // DELETED: UI lifecycle event - callFlowService owns lifecycle
+          // this.emitEvent('call-connected', {
+          //   remoteUserId: this.callState.remoteUserId,
+          //   timestamp: startTime
+          // });
           
           // Stop connection state monitor since we're connected
           this.stopConnectionStateMonitor();
@@ -214,13 +228,15 @@ class CallService {
       } else if (connState === 'connecting' || iceState === 'checking') {
         // Still connecting, keep monitoring
         // 🔒 CONNECTED STATE LOCK: Do not downgrade CONNECTED to RECONNECTING here
-        if (this.callState.status === CallStatus.CALLING && !this.isTerminalConnected()) {
-          // Update to reconnecting if we're still in calling state (but not if already CONNECTED)
-          this.callState = {
-            ...this.callState,
-            status: CallStatus.RECONNECTING
-          };
-          this.emitCallStateChange();
+        // DELETED: Lifecycle check - WebRTC state is sufficient
+        // if (this.callState.status === CallStatus.CALLING && !this.isTerminalConnected()) {
+        if (!this.isTerminalConnected()) {
+          // DELETED: Status assignment - callFlowService owns lifecycle
+          // this.callState = {
+          //   ...this.callState,
+          //   status: CallStatus.RECONNECTING
+          // };
+          // this.emitCallStateChange();
         }
       }
     }, 2000);
@@ -241,10 +257,14 @@ class CallService {
 
     // Set timeout to end call if stuck in CONNECTING for 30 seconds
     this.connectingTimeout = setTimeout(() => {
-      if (this.callState.status === CallStatus.CONNECTING) {
-        console.error('⏰ [callService] Connection timeout - stuck in CONNECTING state for 30 seconds');
-        console.error('   Ending call due to connection failure');
-        this.endCall();
+      // DELETED: Lifecycle check - replaced with WebRTC state check
+      // if (this.callState.status === CallStatus.CONNECTING) {
+      if (this.pc && this.pc.signalingState !== 'stable') {
+        console.error('⏰ [callService] Connection timeout - stuck in connecting state for 30 seconds');
+        console.error('   Reporting WebRTC failure');
+        // DELETED: Internal endCall trigger - replaced with webrtc-failed event
+        // this.endCall();
+        this.emitEvent('webrtc-failed', { reason: 'connection-timeout' });
       }
     }, 30000); // 30 seconds
   }
@@ -285,8 +305,8 @@ class CallService {
   private readonly MAX_SYNC_RETRIES: number = 3;
 
   private constructor() {
-    // Load persisted call state on initialization
-    this.loadPersistedCallState();
+    // DELETED: State persistence - callFlowService owns lifecycle
+    // this.loadPersistedCallState();
   }
 
   private async createPeerConnection(): Promise<RTCPeerConnection> {
@@ -565,18 +585,27 @@ class CallService {
       return;
     }
     
-    // ✅ FIX #3: Prevent duplicate socket listeners
-    if (this.socketListenersSetup) {
-      console.log('⚠️ [callService] Socket listeners already setup, skipping duplicate initialization');
-      return;
-    }
-    
     console.log('🔧 [callService] Setting up socket listeners for WebRTC signaling');
     console.log('   Socket ID:', socket.id);
     console.log('   Socket connected:', socket.connected);
+    console.log('   Previous listeners setup?', this.socketListenersSetup);
+    
+    // ✅ CRITICAL FIX: Remove existing listeners first to prevent duplicates
+    // This ensures listeners are always registered correctly, even after reconnect
+    socket.off('call-offer', this.handleCallOffer);
+    socket.off('call-answer', this.handleCallAnswer);
+    socket.off('call-ice-candidate', this.handleIceCandidate);
+    socket.off('call-end', this.handleCallEnd);
+    socket.off('video-upgrade-request', this.handleVideoUpgradeRequest);
+    socket.off('video-upgrade-accepted', this.handleVideoUpgradeAccepted);
+    socket.off('video-upgrade-rejected', this.handleVideoUpgradeRejected);
+    socket.off('call-state-sync', this.handleStateSync);
+    socket.off('call:start', this.handleCallStartForWebRTC);
     
     // Register socket event listeners for call signaling
     socket.on('call-offer', this.handleCallOffer);
+    console.log('✅ [callService] call-offer listener registered - CRITICAL for receiving offers!');
+    
     socket.on('call-answer', this.handleCallAnswer);
     socket.on('call-ice-candidate', this.handleIceCandidate);
     socket.on('call-end', this.handleCallEnd);
@@ -601,12 +630,12 @@ class CallService {
     // Mark as setup
     this.socketListenersSetup = true;
     console.log('✅ [callService] Socket listeners setup complete');
+    console.log('   All listeners registered, ready to receive call-offer events');
     
-    // ✅ FIX: Load persisted state ASYNC but don't let it override active calls
-    // This runs after all syncs, so it won't override CONNECTING state
-    this.loadPersistedCallState().catch((error) => {
-      console.error('❌ [callService] Error loading persisted state:', error);
-    });
+    // DELETED: State persistence - callFlowService owns lifecycle
+    // this.loadPersistedCallState().catch((error) => {
+    //   console.error('❌ [callService] Error loading persisted state:', error);
+    // });
   }
 
   /**
@@ -637,47 +666,68 @@ class CallService {
     console.log('✅ [callService] call:start processing started for callId:', callId);
     console.log('   Current callService state:', this.callState.status);
     
-    // Determine role (caller or receiver)
-    const { store } = require('../redux/store');
-    const currentUserId = store.getState().auth.userId;
-    const isCaller = data.callerId === currentUserId;
-    const isReceiver = data.receiverId === currentUserId;
+    // Determine role (caller or receiver) from Redux auth userId
+    const reduxUserId = store.getState().auth.userId;
+    const isCaller = reduxUserId === data.callerId;
+    const isReceiver = reduxUserId === data.receiverId;
     
     console.log('🎬 [callService] call:start received - Starting WebRTC');
-    console.log('   Role:', isCaller ? 'CALLER (will create offer)' : 'RECEIVER (will wait for offer)');
+    console.log('   Redux userId:', reduxUserId);
+    console.log('   Data callerId:', data.callerId);
+    console.log('   Data receiverId:', data.receiverId);
+    console.log('   isCaller:', isCaller, '(reduxUserId === data.callerId)');
+    console.log('   isReceiver:', isReceiver, '(reduxUserId === data.receiverId)');
+    console.log('   Role:', isCaller ? 'CALLER (will create offer)' : isReceiver ? 'RECEIVER (will wait for offer)' : 'UNKNOWN ROLE!');
     console.log('   Current callService state:', this.callState.status);
     
+    // DELETED: Redux access - callService must not read Redux
     // ✅ REQUIREMENT 4: Always sync state from Redux (source of truth)
     // This ensures state is correct even if loadPersistedCallState reset it
-    try {
-      const reduxState = store.getState().call.activeCall;
-      console.log('🔄 [callService] Syncing state from Redux (source of truth)');
-      console.log('   Redux state:', reduxState.status);
-      console.log('   callService state before sync:', this.callState.status);
-      
-      // Always sync from Redux - it's the source of truth
-      this.syncStateFromRedux(reduxState);
-      console.log('✅ [callService] State synced from Redux:', this.callState.status);
-    } catch (error) {
-      console.error('❌ [callService] Failed to sync from Redux:', error);
-    }
+    // try {
+    //   const reduxState = store.getState().call.activeCall;
+    //   console.log('🔄 [callService] Syncing state from Redux (source of truth)');
+    //   console.log('   Redux state:', reduxState.status);
+    //   console.log('   callService state before sync:', this.callState.status);
+    //   
+    //   // Always sync from Redux - it's the source of truth
+    //   // DELETED: Redux sync - callFlowService owns lifecycle
+    //   // this.syncStateFromRedux(reduxState);
+    //   console.log('✅ [callService] State synced from Redux:', this.callState.status);
+    // } catch (error) {
+    //   console.error('❌ [callService] Failed to sync from Redux:', error);
+    // }
     
     if (isCaller) {
       // Caller creates offer
+      console.log('📞 [callService] ============================================');
+      console.log('📞 [callService] CALLER PATH: Creating WebRTC offer');
+      console.log('📞 [callService] ============================================');
       try {
         const receiverId = data.receiverId;
-        const reduxState = store.getState().call.activeCall;
-        const receiverName = reduxState.remoteUserName || 'User';
+        // DELETED: Redux access - callService must not read Redux
+        // const reduxState = store.getState().call.activeCall;
+        // const receiverName = reduxState.remoteUserName || 'User';
+        const receiverName = data.metadata?.receiverName || data.metadata?.receiverUserName || 'User'; // Use data from socket instead
         const isVideo = data.metadata?.isVideo || false;
         
+        console.log('📞 [callService] CALLER: Receiver ID:', receiverId);
+        console.log('📞 [callService] CALLER: Receiver Name:', receiverName);
+        console.log('📞 [callService] CALLER: Is Video:', isVideo);
+        console.log('📞 [callService] CALLER: About to call startCall()...');
         console.log('📞 [callService] CALLER: Creating WebRTC offer...');
         await this.startCall(receiverId, receiverName, {
           audio: true,
           video: isVideo
         }, true); // isCaller = true
-        console.log('✅ [callService] CALLER: WebRTC offer created and sent');
+        console.log('✅ [callService] CALLER: WebRTC offer created and sent successfully!');
+        console.log('✅ [callService] CALLER: Offer should now be delivered to receiver');
       } catch (error: any) {
-        console.error('❌ [callService] CALLER: Error starting WebRTC:', error);
+        console.error('❌ [callService] ============================================');
+        console.error('❌ [callService] CALLER: ERROR starting WebRTC!');
+        console.error('❌ [callService] ============================================');
+        console.error('❌ [callService] CALLER: Error message:', error.message);
+        console.error('❌ [callService] CALLER: Error stack:', error.stack);
+        console.error('❌ [callService] ============================================');
         this.emitEvent('webrtc-error', { error: error.message });
         // Remove from processed set on error so it can be retried
         this.processedReadyForWebRTCCallIds.delete(callId);
@@ -688,20 +738,39 @@ class CallService {
       console.log('   State:', this.callState.status);
       console.log('   Offer will be processed by handleCallOffer when received');
       
+      // DELETED: Redux access - callService must not read Redux
       // Ensure callService is ready to receive offer
-      if (this.callState.status !== CallStatus.CONNECTING) {
-        console.warn('⚠️ [callService] RECEIVER: State is not CONNECTING:', this.callState.status);
-        console.warn('   Re-syncing from Redux to ensure correct state...');
-        try {
-          const reduxState = store.getState().call.activeCall;
-          if (reduxState.status === CallStatus.CONNECTING) {
-            this.syncStateFromRedux(reduxState);
-            console.log('✅ [callService] State corrected to CONNECTING');
-          }
-        } catch (error) {
-          console.error('❌ [callService] Failed to re-sync state:', error);
-        }
-      }
+      // if (this.callState.status !== CallStatus.CONNECTING) {
+      //   console.warn('⚠️ [callService] RECEIVER: State is not CONNECTING:', this.callState.status);
+      //   console.warn('   Re-syncing from Redux to ensure correct state...');
+      //   try {
+      //     const reduxState = store.getState().call.activeCall;
+      //     if (reduxState.status === CallStatus.CONNECTING) {
+      //       // DELETED: Redux sync - callFlowService owns lifecycle
+      // // this.syncStateFromRedux(reduxState);
+      //       console.log('✅ [callService] State corrected to CONNECTING');
+      //     }
+      //   } catch (error) {
+      //     console.error('❌ [callService] Failed to re-sync state:', error);
+      //   }
+      // }
+    } else {
+      // CRITICAL ERROR: Role detection failed - neither caller nor receiver
+      console.error('❌ [callService] ============================================');
+      console.error('❌ [callService] CRITICAL: Role detection failed!');
+      console.error('❌ [callService] ============================================');
+      console.error('❌ [callService] Redux userId:', reduxUserId);
+      console.error('❌ [callService] Data callerId:', data.callerId);
+      console.error('❌ [callService] Data receiverId:', data.receiverId);
+      console.error('❌ [callService] isCaller:', isCaller);
+      console.error('❌ [callService] isReceiver:', isReceiver);
+      console.error('❌ [callService] Neither role matches - WebRTC will NOT start!');
+      console.error('❌ [callService] ============================================');
+      console.error('❌ [callService] This is why the offer is never created!');
+      console.error('❌ [callService] ============================================');
+      // Remove from processed set so it can be retried
+      this.processedReadyForWebRTCCallIds.delete(callId);
+      this.emitEvent('webrtc-error', { error: 'Role detection failed - unable to determine caller or receiver' });
     }
   };
 
@@ -712,19 +781,32 @@ class CallService {
       // Check if we already have a peer connection for this user
       if (this.pc && this.callState.remoteUserId === userId) {
         console.warn('⚠️ [callService] WebRTC already started for this user:', userId);
+        console.warn('   Current pc.remoteUserId:', this.callState.remoteUserId);
+        console.warn('   New call userId:', userId);
         console.warn('   Skipping duplicate startCall() call');
+        console.warn('   ⚠️ THIS IS WHY OFFER IS NOT BEING CREATED!');
         return; // Already started, don't start again
       }
       
+      console.log('✅ [callService] startCall() guard passed - no existing peer connection for this user');
+      
+      // DELETED: Lifecycle checks - replaced with WebRTC state check
       // Check if already in a call
       // Allow CONNECTING status for lazy-loading phase (WebRTC initialization)
-      if (this.callState.status !== CallStatus.IDLE && this.callState.status !== CallStatus.CONNECTING) {
+      // if (this.callState.status !== CallStatus.IDLE && this.callState.status !== CallStatus.CONNECTING) {
+      //   throw new Error('Already in a call');
+      // }
+      if (this.pc && this.pc.connectionState === 'connected') {
         throw new Error('Already in a call');
       }
       
+      // DELETED: Lifecycle check - replaced with WebRTC state check
       // If already CONNECTING, we're just continuing WebRTC setup (lazy-loading)
-      if (this.callState.status === CallStatus.CONNECTING) {
-        console.log('🔄 [callService] Continuing WebRTC setup from CONNECTING state (lazy-loading phase)');
+      // if (this.callState.status === CallStatus.CONNECTING) {
+      //   console.log('🔄 [callService] Continuing WebRTC setup from CONNECTING state (lazy-loading phase)');
+      // }
+      if (this.pc && this.pc.signalingState !== 'stable') {
+        console.log('🔄 [callService] Continuing WebRTC setup (signaling in progress)');
       }
 
       console.log(`Starting call to ${userName} (${userId}) with options:`, options);
@@ -740,23 +822,25 @@ class CallService {
 
       // ✅ TASK 4: Don't reset state if already CONNECTING (preserve Redux state from callFlowService)
       // Only update internal callService state, don't override CONNECTING from Redux
-      const preserveConnecting = this.callState.status === CallStatus.CONNECTING;
+      // DELETED: Lifecycle check - replaced with WebRTC state check
+      // const preserveConnecting = this.callState.status === CallStatus.CONNECTING;
+      const preserveConnecting = this.pc && this.pc.signalingState !== 'stable';
 
-      // Update call state
-      this.callState = {
-        ...(preserveConnecting ? this.callState : initialCallState),
-        status: preserveConnecting ? CallStatus.CONNECTING : CallStatus.CALLING,
-        remoteUserId: userId,
-        remoteUserName: userName,
-        isVideoEnabled: options.video || false,
-        isAudioEnabled: options.audio !== false, // Default to true if not specified
-      };
+      // DELETED: Status assignment - callFlowService owns lifecycle
+      // this.callState = {
+      //   ...(preserveConnecting ? this.callState : initialCallState),
+      //   status: preserveConnecting ? CallStatus.CONNECTING : CallStatus.CALLING,
+      //   remoteUserId: userId,
+      //   remoteUserName: userName,
+      //   isVideoEnabled: options.video || false,
+      //   isAudioEnabled: options.audio !== false, // Default to true if not specified
+      // };
       
-      if (preserveConnecting) {
-        console.log('✅ [callService] Preserving CONNECTING status (Redux owns this state)');
-      }
+      // if (preserveConnecting) {
+      //   console.log('✅ [callService] Preserving CONNECTING status (Redux owns this state)');
+      // }
       
-      this.emitCallStateChange();
+      // this.emitCallStateChange();
 
       // Initialize WebRTC - this will create the peer connection and set up media
       await this.initializeWebRTC(options);
@@ -828,26 +912,46 @@ class CallService {
       }
 
       // Send offer to remote user with updated SDP that includes all ICE candidates
-      console.log(`Sending call offer to ${userId}`);
-      socketService.getSocket()?.emit('call-offer', {
+      console.log('📤 [callService] ============================================');
+      console.log('📤 [callService] CALLER: Sending call-offer to receiver');
+      console.log('📤 [callService] ============================================');
+      console.log(`📤 [callService] CALLER: Sending call offer to ${userId} (${userName})`);
+      console.log('📤 [callService] CALLER: Socket exists?', !!socketService.getSocket());
+      console.log('📤 [callService] CALLER: Socket connected?', socketService.getSocket()?.connected);
+      console.log('📤 [callService] CALLER: SDP length:', finalOffer.sdp.length);
+      console.log('📤 [callService] CALLER: SDP type:', finalOffer.type);
+      console.log('📤 [callService] CALLER: Is Video:', options.video || false);
+      
+      const offerPayload = {
         targetUserId: userId,
         sdp: finalOffer.sdp, // Use updated SDP with all candidates
         type: finalOffer.type,
         isVideo: options.video || false,
         isPartnerMatching: options.isPartnerMatching || false
-      });
+      };
+      
+      socketService.getSocket()?.emit('call-offer', offerPayload);
+      console.log('✅ [callService] CALLER: call-offer event emitted to socket');
+      console.log('✅ [callService] CALLER: Server should forward to receiver');
+      console.log('📤 [callService] ============================================');
 
       // Set a timeout for call answer
       setTimeout(() => {
-        if (this.callState.status === CallStatus.CALLING) {
+        // DELETED: Lifecycle check - replaced with WebRTC state check
+        // if (this.callState.status === CallStatus.CALLING) {
+        if (this.pc && this.pc.signalingState === 'have-local-offer') {
           console.log('Call offer timeout - no answer received');
-          this.endCall();
+          // DELETED: Internal endCall trigger - replaced with webrtc-failed event
+          // this.endCall();
+          this.emitEvent('webrtc-failed', { reason: 'offer-timeout' });
         }
       }, 30000); // 30 seconds timeout for call answer
 
     } catch (error) {
       console.error('Error starting call:', error);
-      this.endCall();
+      // DELETED: Internal endCall trigger - replaced with webrtc-failed event
+      // this.endCall();
+      this.emitEvent('webrtc-failed', { reason: 'start-call-error', error: (error as Error).message });
       throw error;
     }
   }
@@ -855,62 +959,82 @@ class CallService {
   // Handle incoming call
   private handleCallOffer = async (data: any) => {
     try {
-      console.log('🔍 CALL OFFER RECEIVED:', JSON.stringify(data, null, 2));
+      console.log('📞 [callService] ============================================');
+      console.log('📞 [callService] call-offer socket event received!');
+      console.log('📞 [callService] ============================================');
+      console.log('📞 [callService] Full offer data:', JSON.stringify(data, null, 2));
+      console.log('📞 [callService] Caller ID:', data?.callerId);
+      console.log('📞 [callService] Caller Name:', data?.callerName);
+      console.log('📞 [callService] SDP Type:', data?.type);
+      console.log('📞 [callService] Is Video:', data?.isVideo);
+      console.log('📞 [callService] ============================================');
+      
       const { callerId, callerName, sdp, type, isVideo, callHistoryId, renegotiation, isPartnerMatching } = data;
       
+      // DELETED: Redux access - callService must not read Redux
       // ✅ REQUIREMENT 2: Receiver must ALWAYS process call-offer (remove state-based blocking)
       // Sync state from Redux first (source of truth) before checking
-      try {
-        const { store } = require('../redux/store');
-        const reduxState = store.getState().call.activeCall;
-        
-        // If Redux says CONNECTING but callService says IDLE, sync immediately
-        if (reduxState.status === CallStatus.CONNECTING && 
-            (this.callState.status === CallStatus.IDLE || this.callState.status === CallStatus.ENDED)) {
-          console.warn('⚠️ [handleCallOffer] State mismatch detected!');
-          console.warn('   Redux state:', reduxState.status);
-          console.warn('   callService state:', this.callState.status);
-          console.warn('   Syncing from Redux (source of truth)...');
-          this.syncStateFromRedux(reduxState);
-          console.log('✅ [handleCallOffer] State synced, new state:', this.callState.status);
-        }
-      } catch (error) {
-        console.error('❌ [handleCallOffer] Failed to sync from Redux:', error);
-      }
+      // try {
+      //   const { store } = require('../redux/store');
+      //   const reduxState = store.getState().call.activeCall;
+      //   
+      //   // If Redux says CONNECTING but callService says IDLE, sync immediately
+      //   if (reduxState.status === CallStatus.CONNECTING && 
+      //       (this.callState.status === CallStatus.IDLE || this.callState.status === CallStatus.ENDED)) {
+      //     console.warn('⚠️ [handleCallOffer] State mismatch detected!');
+      //     console.warn('   Redux state:', reduxState.status);
+      //     console.warn('   callService state:', this.callState.status);
+      //     console.warn('   Syncing from Redux (source of truth)...');
+      //     // DELETED: Redux sync - callFlowService owns lifecycle
+      // // this.syncStateFromRedux(reduxState);
+      //     console.log('✅ [handleCallOffer] State synced, new state:', this.callState.status);
+      //   }
+      // } catch (error) {
+      //   console.error('❌ [handleCallOffer] Failed to sync from Redux:', error);
+      // }
       
       // ✅ REQUIREMENT 2: Allow processing offers in CONNECTING state (receiver waiting for offer)
       // Only block if we're in CONNECTED state (unless renegotiation)
-      if (!renegotiation && this.callState.status === CallStatus.CONNECTED) {
-        console.warn('⚠️ Ignoring call offer: Already in CONNECTED call. Current status:', this.callState.status);
-        // If this is a partner matching call and we're already in a call, end the current call first
+      // DELETED: Lifecycle check - replaced with WebRTC state check
+      // if (!renegotiation && this.callState.status === CallStatus.CONNECTED) {
+      if (!renegotiation && this.pc?.connectionState === 'connected') {
+        console.warn('⚠️ Ignoring call offer: Already in connected call');
+        // If this is a partner matching call and we're already in a call, report failure
         if (isPartnerMatching) {
-          console.log('🤝 Ending current call to accept partner matching call');
-          this.endCall();
+          console.log('🤝 Reporting WebRTC failure to accept partner matching call');
+          // DELETED: Internal endCall trigger - replaced with webrtc-failed event
+          // this.endCall();
+          this.emitEvent('webrtc-failed', { reason: 'already-connected' });
           // Wait a bit for cleanup
           await new Promise(resolve => setTimeout(resolve, 300));
         } else {
-          return; // Ignore regular call offers when already in CONNECTED call
+          return; // Ignore regular call offers when already in connected call
         }
       }
       
       // ✅ REQUIREMENT 2: Always log offer reception - receiver should process it
-      if (this.callState.status === CallStatus.CONNECTING) {
-        console.log('✅ [handleCallOffer] Received WebRTC offer during CONNECTING phase (lazy-loading)');
+      // DELETED: Lifecycle checks - replaced with WebRTC state checks
+      // if (this.callState.status === CallStatus.CONNECTING) {
+      if (this.pc && this.pc.signalingState !== 'stable') {
+        console.log('✅ [handleCallOffer] Received WebRTC offer during signaling phase');
         console.log('   This is expected - receiver accepted invitation and is waiting for offer');
-      } else if (this.callState.status === CallStatus.IDLE || this.callState.status === CallStatus.ENDED) {
-        console.log('⚠️ [handleCallOffer] Received offer but state is:', this.callState.status);
+      // } else if (this.callState.status === CallStatus.IDLE || this.callState.status === CallStatus.ENDED) {
+      } else if (!this.pc) {
+        console.log('⚠️ [handleCallOffer] Received offer but no peer connection');
         console.log('   Processing anyway - receiver should always accept offers after invitation acceptance');
+        // DELETED: Redux access - callService must not read Redux
         // Update state to CONNECTING if it was reset
-        try {
-          const { store } = require('../redux/store');
-          const reduxState = store.getState().call.activeCall;
-          if (reduxState.status === CallStatus.CONNECTING) {
-            this.syncStateFromRedux(reduxState);
-            console.log('✅ [handleCallOffer] State updated to CONNECTING from Redux');
-          }
-        } catch (error) {
-          console.error('❌ [handleCallOffer] Failed to sync state:', error);
-        }
+        // try {
+        //   const { store } = require('../redux/store');
+        //   const reduxState = store.getState().call.activeCall;
+        //   if (reduxState.status === CallStatus.CONNECTING) {
+        //     // DELETED: Redux sync - callFlowService owns lifecycle
+        // // this.syncStateFromRedux(reduxState);
+        //     console.log('✅ [handleCallOffer] State updated to CONNECTING from Redux');
+        //   }
+        // } catch (error) {
+        //   console.error('❌ [handleCallOffer] Failed to sync state:', error);
+        // }
       }
       
       console.log('🔍 EXTRACTED VALUES:', {
@@ -923,17 +1047,23 @@ class CallService {
         isPartnerMatchingType: typeof isPartnerMatching
       });
       
-      // Check if this is a partner matching call (auto-accept)
-      if (isPartnerMatching) {
-        console.log('🤝 Partner matching call detected - auto-accepting');
-        console.log('🤝 PARTNER MATCHING FLOW ACTIVATED');
-      } else {
-        console.log('📞 Regular call detected - showing incoming call modal');
-        console.log('📞 isPartnerMatching value:', isPartnerMatching);
-      }
+      // ✅ CRITICAL FIX: Check Redux state to determine if invitation was already accepted
+      // If Redux state is CONNECTING, the invitation was already accepted via call:start
+      // So we should auto-accept this offer immediately (no peer connection needed yet)
+      const reduxState = store.getState().call.activeCall;
+      // Use string comparison since Redux CallStatus and callService CallStatus are different enum types
+      const isInvitationAlreadyAccepted = reduxState.status === 'connecting';
+      
+      console.log('🔍 [handleCallOffer] Checking if invitation already accepted:');
+      console.log('   Redux state:', reduxState.status);
+      console.log('   callService state:', this.callState.status);
+      console.log('   Has peer connection?', !!this.pc);
+      console.log('   isInvitationAlreadyAccepted:', isInvitationAlreadyAccepted);
       
       // Handle renegotiation during an active call
-      if (renegotiation === true && this.pc && this.callState.status === CallStatus.CONNECTED) {
+      // DELETED: Lifecycle check - replaced with WebRTC state check
+      // if (renegotiation === true && this.pc && this.callState.status === CallStatus.CONNECTED) {
+      if (renegotiation === true && this.pc && this.pc.connectionState === 'connected') {
         console.log('Handling renegotiation offer during active call');
         
         try {
@@ -967,7 +1097,8 @@ class CallService {
               ...this.callState,
               isVideoEnabled: true
             };
-            this.emitCallStateChange();
+            // DELETED: State mutation - callFlowService owns lifecycle
+          // this.emitCallStateChange();
           }
         } catch (error) {
           console.error('Error handling renegotiation:', error);
@@ -976,44 +1107,69 @@ class CallService {
         return;
       }
       
-      // Normal call offer handling for new calls
-      // If status is already CONNECTING (lazy-loading phase), keep it and auto-accept
-      // Otherwise, set to RINGING (legacy flow)
-      const shouldAutoAccept = this.callState.status === CallStatus.CONNECTING || isPartnerMatching;
+      // ✅ CRITICAL FIX: Auto-accept if:
+      // 1. Invitation was already accepted (Redux state is CONNECTING) - invitation → accept → call:start → offer
+      // 2. Partner matching call (auto-accept)
+      // 3. Peer connection exists and signaling is in progress (renegotiation/ongoing)
+      const shouldAutoAccept = isInvitationAlreadyAccepted || isPartnerMatching || (this.pc && this.pc.signalingState !== 'stable');
       
-      const previousStatus = this.callState.status;
-      const newStatus = shouldAutoAccept ? CallStatus.CONNECTING : CallStatus.RINGING;
+      console.log('🔍 [handleCallOffer] Auto-accept decision:');
+      console.log('   isInvitationAlreadyAccepted:', isInvitationAlreadyAccepted);
+      console.log('   isPartnerMatching:', isPartnerMatching);
+      console.log('   hasActiveSignaling:', !!(this.pc && this.pc.signalingState !== 'stable'));
+      console.log('   shouldAutoAccept:', shouldAutoAccept);
       
-      this.callState = {
-        ...this.callState.status === CallStatus.CONNECTING ? this.callState : initialCallState,
-        status: newStatus,
-        remoteUserId: callerId,
-        remoteUserName: callerName || 'Unknown Caller',
-        isVideoEnabled: isVideo || false,
-        isAudioEnabled: true,
-        sdp: sdp,
-        type: type,
-        callHistoryId: callHistoryId || this.callState.callHistoryId
-      };
-      
-      console.log('Updated call state with offer SDP data and callHistoryId:', callHistoryId || this.callState.callHistoryId);
-      if (this.callState.status === CallStatus.CONNECTING) {
-        console.log('✅ [handleCallOffer] Keeping CONNECTING status (lazy-loading phase)');
-        // Start connecting timeout if status just became CONNECTING
-        if (previousStatus !== CallStatus.CONNECTING) {
-          console.log('⏰ [handleCallOffer] Starting connecting timeout (30 seconds)');
-          this.startConnectingTimeout();
-        }
+      if (isPartnerMatching) {
+        console.log('🤝 Partner matching call detected - auto-accepting');
+        console.log('🤝 PARTNER MATCHING FLOW ACTIVATED');
+      } else if (isInvitationAlreadyAccepted) {
+        console.log('✅ [handleCallOffer] Invitation already accepted (CONNECTING state) - auto-accepting offer');
+        console.log('   This is the expected flow: invitation → accept → call:start → offer → answer');
+      } else {
+        console.log('📞 New incoming call detected - showing incoming call modal');
+        console.log('   Redux state:', reduxState.status, '(not CONNECTING, so this is a new call)');
       }
-      this.emitCallStateChange();
+      
+      // DELETED: Status assignment - callFlowService owns lifecycle
+      // const previousStatus = this.callState.status;
+      // const newStatus = shouldAutoAccept ? CallStatus.CONNECTING : CallStatus.RINGING;
+      
+      // this.callState = {
+      //   ...this.callState.status === CallStatus.CONNECTING ? this.callState : initialCallState,
+      //   status: newStatus,
+      //   remoteUserId: callerId,
+      //   remoteUserName: callerName || 'Unknown Caller',
+      //   isVideoEnabled: isVideo || false,
+      //   isAudioEnabled: true,
+      //   sdp: sdp,
+      //   type: type,
+      //   callHistoryId: callHistoryId || this.callState.callHistoryId
+      // };
+      
+      // console.log('Updated call state with offer SDP data and callHistoryId:', callHistoryId || this.callState.callHistoryId);
+      // if (this.callState.status === CallStatus.CONNECTING) {
+      //   console.log('✅ [handleCallOffer] Keeping CONNECTING status (lazy-loading phase)');
+      //   // Start connecting timeout if status just became CONNECTING
+      //   if (previousStatus !== CallStatus.CONNECTING) {
+      //     console.log('⏰ [handleCallOffer] Starting connecting timeout (30 seconds)');
+      //     this.startConnectingTimeout();
+      //   }
+      // }
+      // this.emitCallStateChange();
       
       // Auto-accept partner matching calls OR if we're in CONNECTING phase (invitation already accepted)
       if (shouldAutoAccept) {
-        if (this.callState.status === CallStatus.CONNECTING) {
-          console.log('✅ [handleCallOffer] Auto-accepting WebRTC offer IMMEDIATELY (invitation already accepted, lazy-loading)');
-          console.log('   RECEIVER: Will create answer and send to caller');
+        if (isInvitationAlreadyAccepted) {
+          console.log('✅ [handleCallOffer] ============================================');
+          console.log('✅ [handleCallOffer] Auto-accepting WebRTC offer IMMEDIATELY');
+          console.log('✅ [handleCallOffer] Invitation was already accepted (CONNECTING state)');
+          console.log('✅ [handleCallOffer] This is the expected flow after call:start');
+          console.log('✅ [handleCallOffer] RECEIVER: Will create answer and send to caller');
+          console.log('✅ [handleCallOffer] ============================================');
+        } else if (this.pc && this.pc.signalingState !== 'stable') {
+          console.log('✅ [handleCallOffer] Auto-accepting WebRTC offer (signaling in progress)');
         } else {
-        console.log('🤝 Auto-accepting partner matching call');
+          console.log('🤝 Auto-accepting partner matching call');
         }
         (this as any).wasPartnerMatchingCall = isPartnerMatching; // Mark as partner matching call only if it actually is
         
@@ -1021,18 +1177,20 @@ class CallService {
         // The invitation was already accepted, so we can proceed right away
         const acceptCallAsync = async () => {
           try {
+            // DELETED: Redux access - callService must not read Redux
             // ✅ REQUIREMENT 2: Always process offer - don't block on state checks
             // Sync state from Redux first to ensure it's correct
-            try {
-              const { store } = require('../redux/store');
-              const reduxState = store.getState().call.activeCall;
-              if (reduxState.status === CallStatus.CONNECTING) {
-                this.syncStateFromRedux(reduxState);
-                console.log('✅ [acceptCallAsync] State synced from Redux:', this.callState.status);
-              }
-            } catch (error) {
-              console.error('❌ [acceptCallAsync] Failed to sync from Redux:', error);
-            }
+            // try {
+            //   const { store } = require('../redux/store');
+            //   const reduxState = store.getState().call.activeCall;
+            //   if (reduxState.status === CallStatus.CONNECTING) {
+            //     // DELETED: Redux sync - callFlowService owns lifecycle
+            // // this.syncStateFromRedux(reduxState);
+            //     console.log('✅ [acceptCallAsync] State synced from Redux:', this.callState.status);
+            //   }
+            // } catch (error) {
+            //   console.error('❌ [acceptCallAsync] Failed to sync from Redux:', error);
+            // }
             
             // Verify we have the SDP offer
             if (!this.callState.sdp && !sdp) {
@@ -1048,8 +1206,17 @@ class CallService {
               this.callState.type = type;
             }
             
-            if (this.callState.status === CallStatus.CONNECTING) {
-              console.log('📞 [handleCallOffer] RECEIVER: Creating answer for WebRTC offer (CONNECTING phase)...');
+            // ✅ CRITICAL: Initialize WebRTC if not already done (for invitation-accepted flow)
+            // If invitation was already accepted but peer connection doesn't exist yet, create it now
+            if (!this.pc && isInvitationAlreadyAccepted) {
+              console.log('📞 [handleCallOffer] RECEIVER: Initializing WebRTC (invitation already accepted)');
+              console.log('   Peer connection will be created during acceptCall()');
+            }
+            
+            if (this.pc && this.pc.signalingState !== 'stable') {
+              console.log('📞 [handleCallOffer] RECEIVER: Creating answer for WebRTC offer (signaling phase)...');
+            } else if (isInvitationAlreadyAccepted) {
+              console.log('📞 [handleCallOffer] RECEIVER: Creating answer for offer (invitation already accepted, auto-accept)...');
             } else {
               console.log('📞 [handleCallOffer] Creating answer for offer (auto-accept)...');
             }
@@ -1068,18 +1235,21 @@ class CallService {
               callHistoryId
             });
             
-            this.emitEvent('partner-call-auto-accepted', {
-              callerId,
-              callerName,
-              isVideo: isVideo || false,
-              callHistoryId
-            });
+            // DELETED: UI lifecycle event - callFlowService owns lifecycle
+            // this.emitEvent('partner-call-auto-accepted', {
+            //   callerId,
+            //   callerName,
+            //   isVideo: isVideo || false,
+            //   callHistoryId
+            // });
             
             console.log('📤 partner-call-auto-accepted event EMITTED');
             }
           } catch (error: any) {
             console.error('❌ Error auto-accepting call:', error);
-            this.endCall();
+            // DELETED: Internal endCall trigger - replaced with webrtc-failed event
+            // this.endCall();
+            this.emitEvent('webrtc-failed', { reason: 'auto-accept-error', error: error.message });
           }
         };
         
@@ -1087,36 +1257,46 @@ class CallService {
         // Process immediately regardless of state (after syncing from Redux)
         acceptCallAsync(); // Immediate execution
       } else {
-        // Only emit incoming-call event for regular calls
-        this.emitEvent('incoming-call', data);
+        // DELETED: UI lifecycle event - callFlowService owns lifecycle
+        // this.emitEvent('incoming-call', data);
       }
 
     } catch (error) {
       console.error('Error handling call offer:', error);
-      this.endCall();
+      // DELETED: Internal endCall trigger - replaced with webrtc-failed event
+      // this.endCall();
+      this.emitEvent('webrtc-failed', { reason: 'handle-offer-error', error: (error as Error).message });
     }
   }
 
   // Accept an incoming call
   public async acceptCall(options: CallOptions = { audio: true, video: false }): Promise<void> {
     try {
-      // Allow accepting when RINGING (legacy) or CONNECTING (lazy-loading phase)
-      if (this.callState.status !== CallStatus.RINGING && this.callState.status !== CallStatus.CONNECTING) {
-        throw new Error('No incoming call to accept');
-      }
-      
-      if (this.callState.status === CallStatus.CONNECTING) {
-        console.log('✅ [acceptCall] Accepting WebRTC offer during CONNECTING phase (lazy-loading)');
-      }
-
       // Store the SDP offer we received earlier
       const offerSdp = this.callState.sdp;
       if (!offerSdp) {
         throw new Error('No offer SDP available to accept call');
       }
+      
+      // ✅ CRITICAL FIX: Allow accepting even if peer connection doesn't exist yet
+      // This is needed for invitation-accepted flow where offer arrives before peer connection is created
+      // If peer connection doesn't exist, initializeWebRTC() will create it
+      if (this.pc && this.pc.signalingState === 'stable') {
+        console.warn('⚠️ [acceptCall] Peer connection exists but is in stable state');
+        // Still allow if we have an offer SDP - we'll set remote description
+      } else if (this.pc) {
+        // Peer connection exists and is in signaling phase
+        if (this.pc.signalingState === 'have-local-offer' || this.pc.signalingState === 'have-remote-offer' || this.pc.signalingState === 'have-local-pranswer' || this.pc.signalingState === 'have-remote-pranswer') {
+          console.log('✅ [acceptCall] Accepting WebRTC offer during signaling phase');
+        }
+      } else {
+        // No peer connection yet - will be created by initializeWebRTC()
+        console.log('✅ [acceptCall] No peer connection yet - will initialize WebRTC first');
+        console.log('   This is expected for invitation-accepted flow');
+      }
 
-      // Start state sync for reliability
-      this.startStateSync();
+      // DELETED: State sync - callFlowService owns lifecycle
+      // this.startStateSync();
 
       // Reset ICE candidate counters for receiver side
       this.iceCandidateCount = 0;
@@ -1136,14 +1316,21 @@ class CallService {
 
       console.log('Setting remote description (offer) with signaling state:', this.pc.signalingState);
       
-      // Check if peer connection is already in use (should be 'stable' for a new connection)
-      if (this.pc.signalingState !== 'stable' && this.pc.signalingState !== 'have-local-offer') {
-        console.warn('⚠️ Peer connection is not in expected state:', this.pc.signalingState);
-        // If it's in an invalid state, we need to reset it
-        if (this.pc.signalingState === 'have-remote-offer' || this.pc.signalingState === 'have-local-pranswer') {
-          console.log('Peer connection already has an offer, attempting to continue...');
+      // Check if peer connection is in a valid state for accepting an offer
+      // After initializeWebRTC(), it should be 'stable' (new connection) or already have an offer
+      // If it's 'stable', we can proceed with setting remote description
+      // If it already has an offer, we can continue
+      const validStates = ['stable', 'have-remote-offer', 'have-local-pranswer', 'have-remote-pranswer'];
+      if (!validStates.includes(this.pc.signalingState)) {
+        if (this.pc.signalingState === 'have-local-offer') {
+          console.warn('⚠️ Peer connection has local offer (should have remote offer)');
+          console.warn('   This might be a renegotiation or unexpected state');
+          // Still allow - might be a special case
+        } else if (this.pc.signalingState === 'closed') {
+          throw new Error('Peer connection is closed - cannot accept call');
         } else {
-          throw new Error(`Peer connection is in invalid state for accepting call: ${this.pc.signalingState}`);
+          console.warn('⚠️ Peer connection is in unexpected state:', this.pc.signalingState);
+          console.warn('   Attempting to proceed anyway...');
         }
       }
 
@@ -1247,26 +1434,32 @@ class CallService {
       console.log('✅ [RECEIVER] Answer sent successfully via call-answer socket event');
       console.log('   Caller should receive answer and complete WebRTC connection');
 
-      // Store call start time but don't set CONNECTED yet - let WebRTC connection handler do that
-      console.log('Storing receiver call start time:', callStartTime);
-      this.callState = {
-        ...this.callState,
-        callStartTime: callStartTime,
-        callDuration: 0
-      };
+      // DELETED: State mutation - callFlowService owns lifecycle
+      // console.log('Storing receiver call start time:', callStartTime);
+      // this.callState = {
+      //   ...this.callState,
+      //   callStartTime: callStartTime,
+      //   callDuration: 0
+      // };
       
       // Don't emit state change yet - wait for WebRTC connection to establish
 
     } catch (error) {
       console.error('Error accepting call:', error);
-      this.endCall();
+      // DELETED: Internal endCall trigger - replaced with webrtc-failed event
+      // this.endCall();
+      this.emitEvent('webrtc-failed', { reason: 'accept-call-error', error: (error as Error).message });
       throw error;
     }
   }
 
   // Reject an incoming call
   public rejectCall(): void {
-    if (this.callState.status !== CallStatus.RINGING) {
+    // DELETED: Lifecycle check - WebRTC state is sufficient
+    // if (this.callState.status !== CallStatus.RINGING) {
+    //   return;
+    // }
+    if (!this.pc || this.pc.signalingState === 'stable') {
       return;
     }
 
@@ -1293,8 +1486,9 @@ class CallService {
 
       if (!accepted) {
         console.log('Call was rejected');
-        this.emitEvent('call-rejected', data);
-        this.resetCallState();
+        // DELETED: UI lifecycle event and state mutation - callFlowService owns lifecycle
+        // this.emitEvent('call-rejected', data);
+        // this.resetCallState();
         return;
       }
 
@@ -1307,16 +1501,19 @@ class CallService {
       // Store call start time for the caller when we receive an answer (only once, not during renegotiation)
       // Don't set CONNECTED status yet - let the WebRTC connection handler do that
       if (!renegotiation && callStartTime) {
-        console.log("Storing call start time for caller:", callStartTime);
-        this.callState = {
-          ...this.callState,
-          callStartTime: callStartTime,
-          callDuration: 0
-        };
+        // DELETED: State mutation - callFlowService owns lifecycle
+        // console.log("Storing call start time for caller:", callStartTime);
+        // this.callState = {
+        //   ...this.callState,
+        //   callStartTime: callStartTime,
+        //   callDuration: 0
+        // };
       }
 
       // Handle renegotiation answer (e.g., when adding video to an existing call)
-      if (renegotiation === true && this.callState.status === CallStatus.CONNECTED) {
+      // DELETED: Lifecycle check - replaced with WebRTC state check
+      // if (renegotiation === true && this.callState.status === CallStatus.CONNECTED) {
+      if (renegotiation === true && this.pc?.connectionState === 'connected') {
         console.log("Handling answer for renegotiation");
         
         try {
@@ -1345,7 +1542,8 @@ class CallService {
           
           // Update video state if needed
           if (this.callState.isVideoEnabled) {
-            this.emitCallStateChange();
+            // DELETED: State mutation - callFlowService owns lifecycle
+          // this.emitCallStateChange();
           }
         } catch (err) {
           console.error("Error setting remote description for renegotiation:", err);
@@ -1358,12 +1556,12 @@ class CallService {
             if (err.message.includes('m-lines')) {
               console.error("This appears to be an m-line order mismatch in SDP - attempting recovery");
               
-              // Try to enable video locally despite renegotiation failure
-              this.callState = {
-                ...this.callState,
-                isVideoEnabled: true
-              };
-              this.emitCallStateChange();
+              // DELETED: State mutation - callFlowService owns lifecycle
+              // this.callState = {
+              //   ...this.callState,
+              //   isVideoEnabled: true
+              // };
+              // this.emitCallStateChange();
               this.emitEvent('local-stream-updated', this.localStream);
             }
           }
@@ -1377,8 +1575,10 @@ class CallService {
       console.log("Current signaling state before processing answer:", this.pc.signalingState);
       
       // If we're already connected, this might be a duplicate answer
-      if (this.callState.status === CallStatus.CONNECTED) {
-        console.log("Already in CONNECTED state, ignoring answer message");
+      // DELETED: Lifecycle check - replaced with WebRTC state check
+      // if (this.callState.status === CallStatus.CONNECTED) {
+      if (this.pc?.connectionState === 'connected') {
+        console.log("Already in connected state, ignoring answer message");
         return;
       }
 
@@ -1466,7 +1666,9 @@ class CallService {
       console.error('Error handling call answer:', error);
       // Don't end the call for SDP errors related to stable state
       if (error && typeof error.toString === 'function' && !error.toString().includes("Failed to set remote answer sdp: Called in wrong state: stable")) {
-        this.endCall();
+        // DELETED: Internal endCall trigger - replaced with webrtc-failed event
+        // this.endCall();
+        this.emitEvent('webrtc-failed', { reason: 'handle-answer-error', error: error.message });
       } else {
         console.log("Ignoring stable state error and attempting to continue the call");
         // Connection is likely already established, just continue
@@ -1534,8 +1736,9 @@ class CallService {
         newState.callDuration = callDuration;
       }
 
-      this.callState = newState;
-      this.emitCallStateChange();
+      // DELETED: State mutation - callFlowService owns lifecycle
+      // this.callState = newState;
+      // this.emitCallStateChange();
       
       // Reset sync retry count since we got an update
       this.syncRetryCount = 0;
@@ -1547,8 +1750,10 @@ class CallService {
   // Handle ICE candidate from remote peer
   private handleIceCandidate = async (data: any) => {
     try {
-      if (!this.pc || this.callState.status === CallStatus.IDLE) {
-        console.log('Cannot handle ICE candidate: no connection or idle state');
+      // DELETED: Lifecycle check - replaced with WebRTC state check
+      // if (!this.pc || this.callState.status === CallStatus.IDLE) {
+      if (!this.pc) {
+        console.log('Cannot handle ICE candidate: no connection');
         return;
       }
 
@@ -1621,21 +1826,27 @@ class CallService {
 
   // Handle call end from remote peer
    handleCallEnd = (data?: any) => {
-    if (this.callState.status === CallStatus.IDLE) {
+    // DELETED: Lifecycle check - replaced with WebRTC state check
+    // if (this.callState.status === CallStatus.IDLE) {
+    //   return;
+    // }
+    if (!this.pc) {
       return;
     }
 
     // Capture remote user ID before ending call
     const remoteUserId = this.callState.remoteUserId;
     
-    // Emit call-ended event with userId for immediate status update
-    this.emitEvent('call-ended', { 
-      remoteEnded: true,
-      userId: remoteUserId,
-      remoteUserId: remoteUserId,
-      endedBy: data?.endedBy
-    });
-    this.endCall();
+    // DELETED: UI lifecycle event - callFlowService owns lifecycle
+    // this.emitEvent('call-ended', { 
+    //   remoteEnded: true,
+    //   userId: remoteUserId,
+    //   remoteUserId: remoteUserId,
+    //   endedBy: data?.endedBy
+    // });
+    // DELETED: Internal endCall trigger - replaced with webrtc-failed event
+    // this.endCall();
+    this.emitEvent('webrtc-failed', { reason: 'remote-peer-ended' });
   }
 
   // Start tracking call duration with local fallback
@@ -1653,108 +1864,6 @@ class CallService {
       this.durationTimer = null;
     }
 
-    // Ensure we have a valid start time
-    const now = Date.now();
-    if (!this.callState.callStartTime || this.callState.callStartTime > now) {
-      console.log('Invalid or missing start time, initializing with current time');
-      this.callState = {
-        ...this.callState,
-        callStartTime: now,
-        callDuration: 0
-      };
-      
-      // Store locally as fallback
-      try {
-        AsyncStorage.setItem('lastCallStartTime', now.toString());
-      } catch (error) {
-        console.error('Failed to save call start time to storage:', error);
-      }
-    } else {
-      // Verify stored time matches or use as fallback
-      AsyncStorage.getItem('lastCallStartTime')
-        .then(storedTime => {
-          if (storedTime) {
-            const parsedTime = parseInt(storedTime, 10);
-            if (!isNaN(parsedTime)) {
-              // If stored time is earlier, use it as the true start time
-              const currentStartTime = this.callState.callStartTime;
-              if (currentStartTime && parsedTime < currentStartTime) {
-                console.log('Using stored start time as it predates current time');
-                this.callState = {
-                  ...this.callState,
-                  callStartTime: parsedTime,
-                };
-                this.emitCallStateChange();
-              }
-            }
-          }
-        })
-        .catch(error => {
-          console.error('Error reading stored call start time:', error);
-        });
-    }
-
-    // Initialize duration immediately using the most accurate start time
-    // Initialize duration with null check
-    if (this.callState.callStartTime) {
-      const initialDuration = Math.floor((Date.now() - this.callState.callStartTime) / 1000);
-      this.callState = {
-        ...this.callState,
-        callDuration: initialDuration
-      };
-      this.emitCallStateChange();
-      console.log('Initial duration set to:', initialDuration, 'seconds');
-    }
-
-    // Start a new timer with drift compensation
-    let lastUpdate = Date.now();
-    this.durationTimer = setInterval(() => {
-      const now = Date.now();
-      const actualInterval = now - lastUpdate;
-      
-      // Compensate for timer drift
-      if (Math.abs(actualInterval - 1000) > 100) {
-        console.log('Timer drift detected:', actualInterval - 1000, 'ms');
-      }
-      
-      if (this.callState.callStartTime) {
-        const currentDuration = Math.floor((now - this.callState.callStartTime) / 1000);
-        if (currentDuration !== this.callState.callDuration) {
-          this.callState = {
-            ...this.callState,
-            callDuration: currentDuration
-          };
-          this.emitCallStateChange();
-        }
-      } else {
-        // Try to recover from AsyncStorage if we lost the start time
-        AsyncStorage.getItem('lastCallStartTime')
-          .then(storedTime => {
-            if (storedTime) {
-              const parsedTime = parseInt(storedTime, 10);
-              if (!isNaN(parsedTime)) {
-                console.log('Recovered call start time from storage');
-                this.callState = {
-                  ...this.callState,
-                  callStartTime: parsedTime,
-                  callDuration: Math.floor((now - parsedTime) / 1000)
-                };
-                this.emitCallStateChange();
-              } else {
-                this.clearDurationTimer();
-              }
-            } else {
-              this.clearDurationTimer();
-            }
-          })
-          .catch(error => {
-            console.error('Failed to recover call start time:', error);
-            this.clearDurationTimer();
-          });
-      }
-      
-      lastUpdate = now;
-    }, 1000);
   }
 
   // End the current call
@@ -1790,26 +1899,28 @@ class CallService {
     
     // Calculate final duration if there was an active call
     let finalDuration = 0;
-    if (this.callState.callStartTime && this.callState.status === CallStatus.CONNECTED) {
+    // DELETED: Lifecycle check - replaced with WebRTC state check
+    // if (this.callState.callStartTime && this.callState.status === CallStatus.CONNECTED) {
+    if (this.callState.callStartTime && this.pc?.connectionState === 'connected') {
       finalDuration = Math.floor((Date.now() - this.callState.callStartTime) / 1000);
       console.log('📞 [callService.endCall] Call lasted', finalDuration, 'seconds');
     }
     
-    // Send call end to remote user if we're in a call
-    if (this.callState.status !== CallStatus.IDLE && remoteUserId) {
-      try {
-        socketService.getSocket()?.emit('call-end', {
-          targetUserId: remoteUserId,
-          callHistoryId: callHistoryId,
-          duration: finalDuration
-        });
-        console.log('📞 [callService.endCall] Sent call-end signal to:', remoteUserId, 
-                    'with callHistoryId:', callHistoryId,
-                    'duration:', finalDuration);
-      } catch (error) {
-        console.error('📞 [callService.endCall] Error sending call-end signal:', error);
-      }
-    }
+    // DELETED: Socket lifecycle emit - callFlowService owns lifecycle
+    // if (this.callState.status !== CallStatus.IDLE && remoteUserId) {
+    //   try {
+    //     socketService.getSocket()?.emit('call-end', {
+    //       targetUserId: remoteUserId,
+    //       callHistoryId: callHistoryId,
+    //       duration: finalDuration
+    //     });
+    //     console.log('📞 [callService.endCall] Sent call-end signal to:', remoteUserId, 
+    //                 'with callHistoryId:', callHistoryId,
+    //                 'duration:', finalDuration);
+    //   } catch (error) {
+    //     console.error('📞 [callService.endCall] Error sending call-end signal:', error);
+    //   }
+    // }
 
     // Stop media streams
     if (this.localStream) {
@@ -1878,19 +1989,19 @@ class CallService {
       this.processedReadyForWebRTCCallIds.clear();
     }
 
-    // Reset state
-    this.callState = { ...initialCallState };
-    this.emitCallStateChange();
+    // DELETED: State mutation - callFlowService owns lifecycle
+    // this.callState = { ...initialCallState };
+    // this.emitCallStateChange();
     
     // Clear partner matching session if this was a partner matching call
     if ((this as any).wasPartnerMatchingCall) {
       console.log('🤝 Clearing partner matching session');
       (this as any).wasPartnerMatchingCall = false;
       
-      // Emit event to clear matched pairs on server
-      socketService.getSocket()?.emit('call-ended', {
-        wasPartnerMatching: true
-      });
+      // DELETED: Socket lifecycle emit - callFlowService owns lifecycle
+      // socketService.getSocket()?.emit('call-ended', {
+      //   wasPartnerMatching: true
+      // });
     }
   }
 
@@ -2161,7 +2272,9 @@ class CallService {
             }
 
             const sendCandidate = (retryCount = 0) => {
-              if (!this.pc || this.callState.status === CallStatus.ENDED) {
+              // DELETED: Lifecycle check - replaced with WebRTC state check
+              // if (!this.pc || this.callState.status === CallStatus.ENDED) {
+              if (!this.pc || this.pc.connectionState === 'closed' || this.pc.connectionState === 'failed') {
                 console.log('Call ended, not sending ICE candidate');
                 return;
               }
@@ -2211,7 +2324,10 @@ class CallService {
             // After ICE gathering completes, check connection state
             // Sometimes connectionState doesn't fire immediately
             setTimeout(() => {
-              if (this.pc && this.callState.status === CallStatus.RECONNECTING) {
+              // DELETED: Lifecycle check - replaced with WebRTC state check
+              // if (this.pc && this.callState.status === CallStatus.RECONNECTING) {
+              // Check connection state after ICE gathering - may have recovered from failed state
+              if (this.pc) {
                 const connState = this.pc.connectionState;
                 const iceState = this.pc.iceConnectionState;
                 
@@ -2230,7 +2346,9 @@ class CallService {
                       const finalIceState = this.pc.iceConnectionState;
                       console.log(`🔍 Final check: connectionState=${finalState}, iceConnectionState=${finalIceState}`);
                       
-                      if (finalState === 'connected' && this.callState.status === CallStatus.RECONNECTING) {
+                      // DELETED: Lifecycle check - replaced with WebRTC state check
+                      // if (finalState === 'connected' && this.callState.status === CallStatus.RECONNECTING) {
+                      if (finalState === 'connected') {
                         console.log('✅ Connection established - updating state');
                         (this.pc as any).onconnectionstatechange?.();
                       }
@@ -2258,91 +2376,54 @@ class CallService {
           });
           
           switch (connectionState) {
-            case 'connected':
+            case 'connected': {
               console.log('🟢 [WebRTC] Connection state is "connected"');
-              console.log('   ICE Connection State:', iceConnectionState);
-              
-              // Determine connection type (P2P vs TURN relay)
+            
               this.logConnectionType();
-              
-              // Update call state to CONNECTED when connection is actually established
-              // Handles CONNECTING status (lazy-loading phase after invitation acceptance)
-              if (this.callState.status === CallStatus.CALLING || 
-                  this.callState.status === CallStatus.RINGING ||
-                  this.callState.status === CallStatus.RECONNECTING ||
-                  this.callState.status === CallStatus.CONNECTING) {
-                console.log("🟢 [WebRTC] WebRTC ready → switching to connected");
-                console.log("   Previous status:", this.callState.status);
-                console.log("   New status: CONNECTED");
-                
-                // Use stored call start time or create one if not available
-                const startTime = this.callState.callStartTime || Date.now();
-                
-                this.callState = {
-                  ...this.callState,
-                  status: CallStatus.CONNECTED,
-                  callStartTime: startTime,
-                  callDuration: 0
-                };
-                
-                // Start duration tracking now that connection is established
-                console.log('Starting duration tracking on connection with start time:', startTime);
-                this.startDurationTracking();
-                
-                this.emitCallStateChange();
-                
-                // Notify about connection for timer sync
-                this.emitEvent('call-connected', {
-                  remoteUserId: this.callState.remoteUserId,
-                  timestamp: startTime
-                });
-                
-                // Stop connection state monitor since we're connected
-                this.stopConnectionStateMonitor();
-                
-                // Stop connecting timeout since we're now connected
-                this.stopConnectingTimeout();
-                
-                console.log('✅ [WebRTC] Successfully transitioned to CONNECTED state');
-              } else if (this.callState.status === CallStatus.CONNECTED) {
-                // Already connected, just log
-                console.log('✅ [WebRTC] Already in CONNECTED state (connection confirmed)');
-              } else {
-                console.warn('⚠️ [WebRTC] Connection is "connected" but status is:', this.callState.status);
-                console.warn('   This may indicate a state sync issue');
-              }
+            
+              console.log('🟢 [WebRTC] Emitting webrtc-connected event');
+            
+              this.emitEvent('webrtc-connected', {});
+            
+              this.stopConnectionStateMonitor();
+              this.stopConnectingTimeout();
+            
               break;
-
+            }
+            
             case 'disconnected':
               console.log('WebRTC connection temporarily disconnected');
               // 🔒 CONNECTED STATE LOCK: Do not downgrade CONNECTED to RECONNECTING on temporary disconnect
               // Temporary disconnects are normal during active calls (brief network hiccups)
               // Only downgrade if not already CONNECTED (connection monitor will handle recovery)
-              if (!this.isTerminalConnected()) {
-                this.callState = {
-                  ...this.callState,
-                  status: CallStatus.RECONNECTING
-                };
-                this.emitCallStateChange();
-              } else {
-                console.log('🔒 [WebRTC] CONNECTED state locked - ignoring temporary disconnect');
-                console.log('   Connection monitor will handle recovery if needed');
-              }
+              // DELETED: Status assignment - callFlowService owns lifecycle
+              // if (!this.isTerminalConnected()) {
+              //   this.callState = {
+              //     ...this.callState,
+              //     status: CallStatus.RECONNECTING
+              //   };
+              //   this.emitCallStateChange();
+              // } else {
+              //   console.log('🔒 [WebRTC] CONNECTED state locked - ignoring temporary disconnect');
+              //   console.log('   Connection monitor will handle recovery if needed');
+              // }
               break;
 
             case 'failed':
               console.log('WebRTC connection failed - attempting restart');
               // 🔒 CONNECTED STATE LOCK: Only downgrade to RECONNECTING if we were CONNECTED
               // If we're in CONNECTING (initial connection), failed means the call failed, not reconnection
-              if (this.isTerminalConnected()) {
-                // We were CONNECTED, connection failed - attempt reconnection
-                console.log('🔄 [WebRTC] CONNECTED → RECONNECTING (connection failed, attempting recovery)');
-                this.callState = {
-                  ...this.callState,
-                  status: CallStatus.RECONNECTING
-                };
-                this.emitCallStateChange();
-              } else {
+              // DELETED: Status assignment - callFlowService owns lifecycle
+              // if (this.isTerminalConnected()) {
+              //   // We were CONNECTED, connection failed - attempt reconnection
+              //   console.log('🔄 [WebRTC] CONNECTED → RECONNECTING (connection failed, attempting recovery)');
+              //   this.callState = {
+              //     ...this.callState,
+              //     status: CallStatus.RECONNECTING
+              //   };
+              //   this.emitCallStateChange();
+              // } else {
+              if (true) {
                 // Initial connection failed - this is a call failure, not reconnection
                 console.log('❌ [WebRTC] Initial connection failed - call cannot be established');
                 // Don't set RECONNECTING for initial connection failures
@@ -2357,13 +2438,17 @@ class CallService {
                     
                     setTimeout(() => {
                       if (this.pc?.connectionState !== 'connected') {
-                        console.log('Failed to reconnect after timeout - ending call');
-                        this.endCall();
+                        console.log('Failed to reconnect after timeout - reporting WebRTC failure');
+                        // DELETED: Internal endCall trigger - replaced with webrtc-failed event
+                        // this.endCall();
+                        this.emitEvent('webrtc-failed', { reason: 'reconnect-timeout' });
                       }
                     }, 8000);
                   } catch (err) {
                     console.error('Error restarting failed connection:', err);
-                    this.endCall();
+                    // DELETED: Internal endCall trigger - replaced with webrtc-failed event
+                    // this.endCall();
+                    this.emitEvent('webrtc-failed', { reason: 'restart-ice-error', error: (err as Error).message });
                   }
                 }
               }, 1000);
@@ -2371,7 +2456,9 @@ class CallService {
 
             case 'closed':
               console.log('WebRTC connection closed');
-              this.endCall();
+              // DELETED: Internal endCall trigger - replaced with webrtc-failed event
+              // this.endCall();
+              this.emitEvent('webrtc-failed', { reason: 'connection-closed' });
               break;
             
             case 'connecting':
@@ -2383,28 +2470,29 @@ class CallService {
               // RECONNECTING should only be set if we were previously CONNECTED
               // If we're in CONNECTING state (initial connection), keep it as CONNECTING
               // Only set RECONNECTING if we were already CONNECTED (reconnection scenario)
-              if (this.isTerminalConnected()) {
-                // We were CONNECTED, now reconnecting - this is a reconnection scenario
-                console.log('🔄 [WebRTC] CONNECTED → RECONNECTING (connection lost, attempting recovery)');
-                this.callState = {
-                  ...this.callState,
-                  status: CallStatus.RECONNECTING
-                };
-                this.emitCallStateChange();
-              } else if (this.callState.status === CallStatus.CONNECTING) {
-                // We're in initial CONNECTING phase - keep it as CONNECTING, don't change to RECONNECTING
-                console.log('⏳ [WebRTC] Initial connection in progress - keeping CONNECTING status');
-                console.log('   Connection monitor will detect when connection completes');
-                // Don't change status, just start monitoring
-                // The connection monitor will detect when connState becomes 'connected' and update status
-              } else {
-                // Other states (CALLING, RINGING) - can transition to RECONNECTING if needed
-                this.callState = {
-                  ...this.callState,
-                  status: CallStatus.RECONNECTING
-                };
-                this.emitCallStateChange();
-              }
+              // DELETED: Status assignments - callFlowService owns lifecycle
+              // if (this.isTerminalConnected()) {
+              //   // We were CONNECTED, now reconnecting - this is a reconnection scenario
+              //   console.log('🔄 [WebRTC] CONNECTED → RECONNECTING (connection lost, attempting recovery)');
+              //   this.callState = {
+              //     ...this.callState,
+              //     status: CallStatus.RECONNECTING
+              //   };
+              //   this.emitCallStateChange();
+              // } else if (this.callState.status === CallStatus.CONNECTING) {
+              //   // We're in initial CONNECTING phase - keep it as CONNECTING, don't change to RECONNECTING
+              //   console.log('⏳ [WebRTC] Initial connection in progress - keeping CONNECTING status');
+              //   console.log('   Connection monitor will detect when connection completes');
+              //   // Don't change status, just start monitoring
+              //   // The connection monitor will detect when connState becomes 'connected' and update status
+              // } else {
+              //   // Other states (CALLING, RINGING) - can transition to RECONNECTING if needed
+              //   this.callState = {
+              //     ...this.callState,
+              //     status: CallStatus.RECONNECTING
+              //   };
+              //   this.emitCallStateChange();
+              // }
               
               // Start connection state monitor
               this.startConnectionStateMonitor();
@@ -2521,13 +2609,13 @@ class CallService {
         }
       });
       
-      // Update call state
-      this.callState = {
-        ...this.callState,
-        isAudioEnabled: isEnabled
-      };
+      // DELETED: State mutation - callFlowService owns lifecycle
+      // this.callState = {
+      //   ...this.callState,
+      //   isAudioEnabled: isEnabled
+      // };
       
-      this.emitCallStateChange();
+      // this.emitCallStateChange();
       
       // Verify the state was updated correctly
       const verifyTracks = this.localStream.getAudioTracks();
@@ -2561,7 +2649,9 @@ class CallService {
       // If we're trying to enable video but have no video tracks
       if (videoTracks.length === 0 && !this.callState.isVideoEnabled) {
         // If we're in a call, use the upgrade flow instead of direct toggle
-        if (this.callState.status === CallStatus.CONNECTED) {
+        // DELETED: Lifecycle check - replaced with WebRTC state check
+        // if (this.callState.status === CallStatus.CONNECTED) {
+        if (this.pc?.connectionState === 'connected') {
           this.requestVideoUpgrade();
           return false; // Will be updated once accepted
         }
@@ -2579,13 +2669,14 @@ class CallService {
           console.log(`Video track ${track.id} enabled: ${isEnabled}`);
         });
         
-        this.callState = {
-          ...this.callState,
-          isVideoEnabled: isEnabled
-        };
+        // DELETED: State mutation - callFlowService owns lifecycle
+        // this.callState = {
+        //   ...this.callState,
+        //   isVideoEnabled: isEnabled
+        // };
         
-        // Notify listeners about the state change
-        this.emitCallStateChange();
+        // // Notify listeners about the state change
+        // this.emitCallStateChange();
         return isEnabled;
       }
       
@@ -2675,6 +2766,16 @@ class CallService {
    * - Never allow IDLE / CONNECTING / CALLING to override CONNECTED
    * - This prevents state instability where CONNECTED flips back to other states
    */
+  /**
+   * ✅ FIX #1: Sync state from Redux to callService
+   * This ensures callService.callState matches Redux state
+   * Critical for BOTH caller and receiver to have correct state
+   * 
+   * 🔒 CONNECTED STATE LOCK:
+   * - If callService.status === CONNECTED, ignore Redux updates unless Redux also says CONNECTED or ENDED
+   * - Never allow IDLE / CONNECTING / CALLING to override CONNECTED
+   * - This prevents state instability where CONNECTED flips back to other states
+   */
   public syncStateFromRedux(reduxState: any): void {
     console.log('🔄 [callService] Syncing state from Redux:', reduxState?.status);
     console.log('   Previous callService state:', this.callState.status);
@@ -2692,18 +2793,6 @@ class CallService {
         console.log('🔒 [callService] CONNECTED state locked - ignoring Redux update:', reduxStatus);
         console.log('   CONNECTED cannot be downgraded by Redux sync');
         console.log('   Only CONNECTED or ENDED from Redux are allowed');
-        // Still sync other fields (not status)
-        this.callState = {
-          ...this.callState,
-          remoteUserId: reduxState.remoteUserId || this.callState.remoteUserId,
-          remoteUserName: reduxState.remoteUserName || this.callState.remoteUserName,
-          isVideoEnabled: reduxState.isVideoEnabled ?? this.callState.isVideoEnabled,
-          isAudioEnabled: reduxState.isAudioEnabled ?? this.callState.isAudioEnabled,
-          callHistoryId: reduxState.callHistoryId || this.callState.callHistoryId,
-          callStartTime: reduxState.callStartTime || this.callState.callStartTime,
-          callDuration: reduxState.callDuration ?? this.callState.callDuration
-          // status remains CONNECTED
-        };
         return;
       }
     }
@@ -2777,198 +2866,193 @@ class CallService {
     }
   }
 
-  // Emit call state change event and persist state
-  private emitCallStateChange(): void {
-    this.emitEvent('call-state-changed', { ...this.callState });
-    this.persistCallState();
-  }
+  // DELETED: State persistence and lifecycle events - callFlowService owns lifecycle
+  // private emitCallStateChange(): void {
+  //   this.emitEvent('call-state-changed', { ...this.callState });
+  //   this.persistCallState();
+  // }
 
-  // Persist call state to AsyncStorage
-  private async persistCallState(): Promise<void> {
-    try {
-      const stateToStore = {
-        ...this.callState,
-        lastUpdated: Date.now()
-      };
-      await AsyncStorage.setItem('callState', JSON.stringify(stateToStore));
-      // Only log for important state changes, not every duration update
-      if (this.callState.status !== 'connected' || !this.callState.callStartTime) {
-        console.log('Call state persisted:', this.callState.status);
-      }
-    } catch (error) {
-      console.error('Failed to persist call state:', error);
-    }
-  }
+  // DELETED: State persistence - callFlowService owns lifecycle
+  // private async persistCallState(): Promise<void> {
+  //   try {
+  //     const stateToStore = {
+  //       ...this.callState,
+  //       lastUpdated: Date.now()
+  //     };
+  //     await AsyncStorage.setItem('callState', JSON.stringify(stateToStore));
+  //     // Only log for important state changes, not every duration update
+  //     if (this.callState.status !== 'connected' || !this.callState.callStartTime) {
+  //       console.log('Call state persisted:', this.callState.status);
+  //     }
+  //   } catch (error) {
+  //     console.error('Failed to persist call state:', error);
+  //   }
+  // }
 
-  // Load persisted call state from AsyncStorage
-  // FIXED: Only restore on cold app start, not during active socket connections
-  // This prevents persisted state from overriding live incoming calls
-  // 
-  // 🔒 CONNECTED STATE LOCK:
-  // - If current callService.status === CONNECTED, DO NOT restore persisted state
-  // - Log and skip restore to prevent downgrading CONNECTED state
-  private async loadPersistedCallState(): Promise<void> {
-    try {
-      // 🔒 CONNECTED STATE LOCK: Do not restore persisted state if currently CONNECTED
-      if (this.isTerminalConnected()) {
-        console.log('🔒 [loadPersistedCallState] CONNECTED state locked - skipping persisted state restore');
-        console.log('   CONNECTED cannot be downgraded by persisted state restoration');
-        console.log('   Current call remains CONNECTED, persisted state ignored');
-        return;
-      }
+  // DELETED: State persistence - callFlowService owns lifecycle
+  // private async loadPersistedCallState(): Promise<void> {
+  //   try {
+  //     // 🔒 CONNECTED STATE LOCK: Do not restore persisted state if currently CONNECTED
+  //     if (this.isTerminalConnected()) {
+  //       console.log('🔒 [loadPersistedCallState] CONNECTED state locked - skipping persisted state restore');
+  //       console.log('   CONNECTED cannot be downgraded by persisted state restoration');
+  //       console.log('   Current call remains CONNECTED, persisted state ignored');
+  //       return;
+  //     }
       
-      const storedState = await AsyncStorage.getItem('callState');
-      if (!storedState) {
-        console.log('ℹ️ [loadPersistedCallState] No persisted state found');
-        return;
-      }
+  //     const storedState = await AsyncStorage.getItem('callState');
+  //     if (!storedState) {
+  //       console.log('ℹ️ [loadPersistedCallState] No persisted state found');
+  //       return;
+  //     }
       
-      const parsedState = JSON.parse(storedState);
-      const lastUpdated = parsedState.lastUpdated || 0;
-      const now = Date.now();
-      const stateAge = now - lastUpdated;
+  //     const parsedState = JSON.parse(storedState);
+  //     const lastUpdated = parsedState.lastUpdated || 0;
+  //     const now = Date.now();
+  //     const stateAge = now - lastUpdated;
       
-      // CRITICAL FIX: Only restore if state is very recent (within 1 minute)
-      // This ensures we only restore on cold app start, not during active socket events
-      // Older persisted state likely means the app was closed and we shouldn't restore
-      const MAX_RESTORE_AGE = 60000; // 1 minute
+  //     // CRITICAL FIX: Only restore if state is very recent (within 1 minute)
+  //     // This ensures we only restore on cold app start, not during active socket events
+  //     // Older persisted state likely means the app was closed and we shouldn't restore
+  //     const MAX_RESTORE_AGE = 60000; // 1 minute
       
-      if (stateAge > MAX_RESTORE_AGE) {
-        console.log(`⚠️ [loadPersistedCallState] Persisted state too old (${Math.round(stateAge / 1000)}s), not restoring`);
-        await AsyncStorage.removeItem('callState');
-        return;
-      }
+  //     if (stateAge > MAX_RESTORE_AGE) {
+  //       console.log(`⚠️ [loadPersistedCallState] Persisted state too old (${Math.round(stateAge / 1000)}s), not restoring`);
+  //       await AsyncStorage.removeItem('callState');
+  //       return;
+  //     }
       
-      // ✅ REQUIREMENT 3: Don't restore if call or invitation is active
-      // Check both callService state and Redux state (Redux is source of truth)
-      try {
-        const { store } = require('../redux/store');
-        const reduxState = store.getState().call.activeCall;
-        const invitationState = store.getState().call.invitation;
+  //     // ✅ REQUIREMENT 3: Don't restore if call or invitation is active
+  //     // Check both callService state and Redux state (Redux is source of truth)
+  //     try {
+  //       const { store } = require('../redux/store');
+  //       const reduxState = store.getState().call.activeCall;
+  //       const invitationState = store.getState().call.invitation;
         
-        // ✅ REQUIREMENT 3: Skip restore if Redux shows active call or invitation
-        const hasActiveCall = reduxState.status === CallStatus.CONNECTING ||
-                             reduxState.status === CallStatus.CALLING ||
-                             reduxState.status === CallStatus.RINGING ||
-                             reduxState.status === CallStatus.CONNECTED;
-        const hasActiveInvitation = invitationState.status === 'inviting' || 
-                                   invitationState.status === 'incoming';
+  //       // ✅ REQUIREMENT 3: Skip restore if Redux shows active call or invitation
+  //       const hasActiveCall = reduxState.status === CallStatus.CONNECTING ||
+  //                            reduxState.status === CallStatus.CALLING ||
+  //                            reduxState.status === CallStatus.RINGING ||
+  //                            reduxState.status === CallStatus.CONNECTED;
+  //       const hasActiveInvitation = invitationState.status === 'inviting' || 
+  //                                  invitationState.status === 'incoming';
         
-        if (hasActiveCall || hasActiveInvitation) {
-          console.log(`⚠️ [loadPersistedCallState] Active call or invitation detected, not restoring persisted state`);
-          console.log(`   Redux call state: ${reduxState.status}`);
-          console.log(`   Invitation state: ${invitationState.status}`);
-          console.log(`   Persisted state will be ignored to prevent overriding active calls`);
-          await AsyncStorage.removeItem('callState');
-          return;
-        }
-      } catch (error) {
-        console.error('❌ [loadPersistedCallState] Error checking Redux state:', error);
-        // Continue with local check as fallback
-      }
+  //       if (hasActiveCall || hasActiveInvitation) {
+  //         console.log(`⚠️ [loadPersistedCallState] Active call or invitation detected, not restoring persisted state`);
+  //         console.log(`   Redux call state: ${reduxState.status}`);
+  //         console.log(`   Invitation state: ${invitationState.status}`);
+  //         console.log(`   Persisted state will be ignored to prevent overriding active calls`);
+  //         await AsyncStorage.removeItem('callState');
+  //         return;
+  //       }
+  //     } catch (error) {
+  //       console.error('❌ [loadPersistedCallState] Error checking Redux state:', error);
+  //       // Continue with local check as fallback
+  //     }
       
-      // ✅ REQUIREMENT 3: Also check local callService state (fallback)
-      // CRITICAL: Don't restore if status is CONNECTING, CALLING, RINGING, CONNECTED, etc.
-      if (this.callState.status !== CallStatus.IDLE && this.callState.status !== CallStatus.ENDED) {
-        console.log(`⚠️ [loadPersistedCallState] Call already active (status: ${this.callState.status}), not restoring persisted state`);
-        console.log(`   Current state will be preserved, persisted state ignored`);
-        await AsyncStorage.removeItem('callState');
-        return;
-      }
+  //     // ✅ REQUIREMENT 3: Also check local callService state (fallback)
+  //     // CRITICAL: Don't restore if status is CONNECTING, CALLING, RINGING, CONNECTED, etc.
+  //     if (this.callState.status !== CallStatus.IDLE && this.callState.status !== CallStatus.ENDED) {
+  //       console.log(`⚠️ [loadPersistedCallState] Call already active (status: ${this.callState.status}), not restoring persisted state`);
+  //       console.log(`   Current state will be preserved, persisted state ignored`);
+  //       await AsyncStorage.removeItem('callState');
+  //       return;
+  //     }
       
-      // Safe to restore - state is recent and we're idle (both Redux and callService)
-      delete parsedState.lastUpdated;
-      this.callState = {
-        ...parsedState,
-        // Ensure we don't restore ended calls
-        status: parsedState.status === CallStatus.ENDED ? CallStatus.IDLE : parsedState.status
-      };
-      console.log('✅ [loadPersistedCallState] Restored persisted call state:', this.callState);
-      this.emitCallStateChange();
+  //     // Safe to restore - state is recent and we're idle (both Redux and callService)
+  //     delete parsedState.lastUpdated;
+  //     this.callState = {
+  //       ...parsedState,
+  //       // Ensure we don't restore ended calls
+  //       status: parsedState.status === CallStatus.ENDED ? CallStatus.IDLE : parsedState.status
+  //     };
+  //     console.log('✅ [loadPersistedCallState] Restored persisted call state:', this.callState);
+  //     this.emitCallStateChange();
       
-      // If we restored an active call state, start sync
-      if (this.callState.status !== CallStatus.IDLE) {
-        this.startStateSync();
-      }
-    } catch (error) {
-      console.error('❌ [loadPersistedCallState] Failed to load persisted call state:', error);
-    }
-  }
+  //     // If we restored an active call state, start sync
+  //     if (this.callState.status !== CallStatus.IDLE) {
+  //       this.startStateSync();
+  //     }
+  //   } catch (error) {
+  //     console.error('❌ [loadPersistedCallState] Failed to load persisted call state:', error);
+  //   }
+  // }
 
-  // Start state synchronization
-  private startStateSync(): void {
-    if (this.syncTimer) {
-      clearInterval(this.syncTimer);
-    }
+  // DELETED: State synchronization - callFlowService owns lifecycle
+  // private startStateSync(): void {
+  //   if (this.syncTimer) {
+  //     clearInterval(this.syncTimer);
+  //   }
 
-    this.lastSyncAttempt = Date.now();
-    this.syncRetryCount = 0;
+  //   this.lastSyncAttempt = Date.now();
+  //   this.syncRetryCount = 0;
 
-    this.syncTimer = setInterval(() => {
-      this.syncCallState();
-    }, this.syncInterval);
+  //   this.syncTimer = setInterval(() => {
+  //     this.syncCallState();
+  //   }, this.syncInterval);
 
-    // Initial sync
-    this.syncCallState();
-  }
+  //   // Initial sync
+  //   this.syncCallState();
+  // }
 
-  // Stop state synchronization
-  private stopStateSync(): void {
-    if (this.syncTimer) {
-      clearInterval(this.syncTimer);
-      this.syncTimer = null;
-    }
-    this.syncRetryCount = 0;
-  }
+  // // Stop state synchronization
+  // private stopStateSync(): void {
+  //   if (this.syncTimer) {
+  //     clearInterval(this.syncTimer);
+  //     this.syncTimer = null;
+  //   }
+  //   this.syncRetryCount = 0;
+  // }
 
-  // Synchronize call state with server
-  private async syncCallState(): Promise<void> {
-    if (this.callState.status === CallStatus.IDLE || 
-        this.callState.status === CallStatus.ENDED) {
-      this.stopStateSync();
-      return;
-    }
+  // // Synchronize call state with server
+  // private async syncCallState(): Promise<void> {
+  //   if (this.callState.status === CallStatus.IDLE || 
+  //       this.callState.status === CallStatus.ENDED) {
+  //     this.stopStateSync();
+  //     return;
+  //   }
 
-    // Don't sync too frequently
-    const now = Date.now();
-    if (now - this.lastSyncAttempt < 2000) {
-      return;
-    }
+  //   // Don't sync too frequently
+  //   const now = Date.now();
+  //   if (now - this.lastSyncAttempt < 2000) {
+  //     return;
+  //   }
 
-    this.lastSyncAttempt = now;
+  //   this.lastSyncAttempt = now;
 
-    try {
-      // Send state update to remote peer through socket
-      socketService.getSocket()?.emit('call-state-sync', {
-        targetUserId: this.callState.remoteUserId,
-        callHistoryId: this.callState.callHistoryId,
-        status: this.callState.status,
-        callStartTime: this.callState.callStartTime,
-        callDuration: this.callState.callDuration,
-        isVideoEnabled: this.callState.isVideoEnabled,
-        isAudioEnabled: this.callState.isAudioEnabled,
-        timestamp: now
-      });
+  //   // DELETED: Socket lifecycle sync - callFlowService owns lifecycle
+  //   // try {
+  //   //   // Send state update to remote peer through socket
+  //   //   socketService.getSocket()?.emit('call-state-sync', {
+  //   //     targetUserId: this.callState.remoteUserId,
+  //   //     callHistoryId: this.callState.callHistoryId,
+  //   //     status: this.callState.status,
+  //   //     callStartTime: this.callState.callStartTime,
+  //   //     callDuration: this.callState.callDuration,
+  //   //     isVideoEnabled: this.callState.isVideoEnabled,
+  //   //     isAudioEnabled: this.callState.isAudioEnabled,
+  //   //     timestamp: now
+  //   //   });
 
-      // Reset retry count on successful sync
-      this.syncRetryCount = 0;
-    } catch (error) {
-      console.error('Failed to sync call state:', error);
-      this.syncRetryCount++;
+  //   //   // Reset retry count on successful sync
+  //   //   this.syncRetryCount = 0;
+  //   // } catch (error) {
+  //   //   console.error('Failed to sync call state:', error);
+  //   //   this.syncRetryCount++;
 
-      if (this.syncRetryCount >= this.MAX_SYNC_RETRIES) {
-        console.log('Max sync retries reached, falling back to local state');
-        // Keep the call alive but mark as potentially disconnected
-        if (this.callState.status === CallStatus.CONNECTED) {
-          this.callState = {
-            ...this.callState,
-            status: CallStatus.RECONNECTING
-          };
-          this.emitCallStateChange();
-        }
-      }
-    }
-  }
+  //   //   if (this.syncRetryCount >= this.MAX_SYNC_RETRIES) {
+  //   //     console.log('Max sync retries reached, falling back to local state');
+  //   //     // Keep the call alive but mark as potentially disconnected
+  //   //     if (this.callState.status === CallStatus.CONNECTED) {
+  //   //       this.callState = {
+  //   //         ...this.callState,
+  //   //         status: CallStatus.RECONNECTING
+  //   //       };
+  //   //       this.emitCallStateChange();
+  //   //     }
+  //   //   }
+  //   // }
+  // }
 
   // Handle ICE connection state changes
   private handleIceConnectionStateChange = (): void => {
@@ -2992,12 +3076,12 @@ class CallService {
         // Connection temporarily disconnected, wait for reconnection
         console.log('WebRTC ICE connection temporarily disconnected, waiting for reconnection...');
         
-        // Update call state to reconnecting
-        this.callState = {
-          ...this.callState,
-          status: CallStatus.RECONNECTING
-        };
-        this.emitCallStateChange();
+        // DELETED: Status assignment - callFlowService owns lifecycle
+        // this.callState = {
+        //   ...this.callState,
+        //   status: CallStatus.RECONNECTING
+        // };
+        // this.emitCallStateChange();
         
         // Try to reconnect after a brief delay
         setTimeout(() => {
@@ -3012,25 +3096,27 @@ class CallService {
         // Connection failed, attempt to restart ICE
         console.log('WebRTC ICE connection failed, attempting to restart...');
         
-        // Update call state to reconnecting
-        this.callState = {
-          ...this.callState,
-          status: CallStatus.RECONNECTING
-        };
-        this.emitCallStateChange();
+        // DELETED: Status assignment - callFlowService owns lifecycle
+        // this.callState = {
+        //   ...this.callState,
+        //   status: CallStatus.RECONNECTING
+        // };
+        // this.emitCallStateChange();
         
         // Try to reconnect
         if (this.pc) {
           console.log('Restarting ICE connection...');
           this.pc.restartIce?.();
           
-          // If restart fails, end the call after a timeout
+          // If restart fails, report WebRTC failure after a timeout
           setTimeout(() => {
             if (this.pc && 
                 (this.pc.iceConnectionState === 'failed' || 
                  this.pc.iceConnectionState === 'disconnected')) {
-              console.log('ICE reconnection failed, ending call');
-              this.endCall();
+              console.log('ICE reconnection failed, reporting WebRTC failure');
+              // DELETED: Internal endCall trigger - replaced with webrtc-failed event
+              // this.endCall();
+              this.emitEvent('webrtc-failed', { reason: 'ice-reconnection-failed' });
             }
           }, 10000); // Wait 10 seconds for reconnection attempt
         }
@@ -3039,7 +3125,9 @@ class CallService {
       case 'closed':
         // Connection closed
         console.log('WebRTC ICE connection closed');
-        this.endCall();
+        // DELETED: Internal endCall trigger - replaced with webrtc-failed event
+        // this.endCall();
+        this.emitEvent('webrtc-failed', { reason: 'ice-connection-closed' });
         break;
     }
   }
@@ -3052,24 +3140,24 @@ class CallService {
     const callStartTime = data?.timestamp || Date.now();
     console.log("Setting synchronized call start time to:", callStartTime);
     
-    // Update the call state with synchronized time
-    if (this.callState.status === CallStatus.CALLING || 
-        this.callState.status === CallStatus.RINGING) {
-      this.callState = {
-        ...this.callState,
-        status: CallStatus.CONNECTED,
-        callStartTime: callStartTime,
-        callDuration: 0
-      };
+    // DELETED: Status assignment - callFlowService owns lifecycle
+    // if (this.callState.status === CallStatus.CALLING || 
+    //     this.callState.status === CallStatus.RINGING) {
+    //   this.callState = {
+    //     ...this.callState,
+    //     status: CallStatus.CONNECTED,
+    //     callStartTime: callStartTime,
+    //     callDuration: 0
+    //   };
       
-      // Start or restart duration tracking with synchronized time
-      this.startDurationTracking();
+    //   // Start or restart duration tracking with synchronized time
+    //   this.startDurationTracking();
       
-      this.emitCallStateChange();
-      console.log("Call state updated with synchronized time");
-    } else {
-      console.log("Ignoring call connected event in current state:", this.callState.status);
-    }
+    //   this.emitCallStateChange();
+    //   console.log("Call state updated with synchronized time");
+    // } else {
+    //   console.log("Ignoring call connected event in current state:", this.callState.status);
+    // }
   }
 
   // Handle video upgrade request from remote peer
@@ -3163,13 +3251,14 @@ class CallService {
         track.enabled = true;
       });
       
-      this.callState = {
-        ...this.callState,
-        isVideoEnabled: true
-      };
+      // DELETED: State mutation - callFlowService owns lifecycle
+      // this.callState = {
+      //   ...this.callState,
+      //   isVideoEnabled: true
+      // };
       
-      // Notify about state change immediately
-      this.emitCallStateChange();
+      // // Notify about state change immediately
+      // this.emitCallStateChange();
       this.emitEvent('local-stream-updated', this.localStream);
       
       // Don't initiate renegotiation when accepting - let the requesting side handle it
@@ -3224,14 +3313,14 @@ class CallService {
           
           console.log(`Camera permission check completed in ${Date.now() - startTime}ms`);
           
-          // First update the UI state to show we're working on it
-          this.callState = {
-            ...this.callState,
-            isVideoEnabled: true
-          };
+          // DELETED: State mutation - callFlowService owns lifecycle
+          // this.callState = {
+          //   ...this.callState,
+          //   isVideoEnabled: true
+          // };
           
-          // Emit state change early to improve perceived performance
-          this.emitCallStateChange();
+          // // Emit state change early to improve perceived performance
+          // this.emitCallStateChange();
           
           // Set timeout for getUserMedia to avoid hanging indefinitely
           const getUserMediaPromise = mediaDevices.getUserMedia({ 
@@ -3282,7 +3371,9 @@ class CallService {
           console.log(`Total camera initialization completed in ${Date.now() - startTime}ms`);
           
           // If we're in a call, start the renegotiation process in background
-          if (this.callState.status === CallStatus.CONNECTED && this.pc) {
+          // DELETED: Lifecycle check - replaced with WebRTC state check
+          // if (this.callState.status === CallStatus.CONNECTED && this.pc) {
+          if (this.pc?.connectionState === 'connected' && this.pc) {
             // Check if we're the one who initiated the video upgrade
             const isUpgradeInitiator = this.callState.remoteUserId && 
               this.pc.signalingState === 'stable';
@@ -3313,13 +3404,14 @@ class CallService {
           console.log(`Video track ${track.id} enabled`);
         });
         
-        this.callState = {
-          ...this.callState,
-          isVideoEnabled: true
-        };
+        // DELETED: State mutation - callFlowService owns lifecycle
+        // this.callState = {
+        //   ...this.callState,
+        //   isVideoEnabled: true
+        // };
         
-        // Notify listeners about the state change
-        this.emitCallStateChange();
+        // // Notify listeners about the state change
+        // this.emitCallStateChange();
         return true;
       }
       

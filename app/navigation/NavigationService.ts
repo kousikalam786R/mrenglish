@@ -1,13 +1,22 @@
 import { createNavigationContainerRef, CommonActions } from '@react-navigation/native';
-import { RootStackParamList } from './types';
+import type { RootStackParamList } from './types';
 import { Platform } from 'react-native';
+
+// Dynamic import for StackActions to handle cases where it might not be available
+let StackActions: any = null;
+try {
+  const nativeStackModule = require('@react-navigation/native-stack');
+  StackActions = nativeStackModule.StackActions;
+} catch (error) {
+  console.warn('⚠️ [NavigationService] Could not import StackActions:', error);
+}
 
 // Create a navigation reference that can be used outside of React components
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 // Create a queue for navigation actions that need to be performed when the navigator becomes ready
 type QueuedAction = {
-  type: 'navigate' | 'reset' | 'goBack';
+  type: 'navigate' | 'reset' | 'goBack' | 'replace';
   payload?: any;
   timestamp: number;
 };
@@ -35,6 +44,50 @@ export function processQueuedActions() {
         case 'navigate':
           // @ts-ignore
           navigationRef.navigate(action.payload.name, action.payload.params);
+          break;
+        case 'replace':
+          try {
+            // Try to use StackActions.replace if available
+            if (StackActions && typeof StackActions.replace === 'function') {
+              navigationRef.dispatch(
+                StackActions.replace(action.payload.name, action.payload.params)
+              );
+            } else {
+              // Fallback: Use reset to replace current screen
+              const rootState = navigationRef.getRootState();
+              if (rootState && rootState.routes && rootState.routes.length > 0) {
+                const routesBeforeCurrent = rootState.routes.slice(0, -1);
+                const newRoutes = [
+                  ...routesBeforeCurrent,
+                  { 
+                    name: action.payload.name, 
+                    params: action.payload.params, 
+                    key: `${action.payload.name}-${Date.now()}` 
+                  } as any
+                ];
+                
+                navigationRef.dispatch(
+                  CommonActions.reset({
+                    index: newRoutes.length - 1,
+                    routes: newRoutes,
+                  })
+                );
+              } else {
+                // Final fallback: Just navigate normally
+                // @ts-ignore
+                navigationRef.navigate(action.payload.name, action.payload.params);
+              }
+            }
+          } catch (error) {
+            console.error('Navigation replace error:', error);
+            // Fallback: Just navigate normally
+            try {
+              // @ts-ignore
+              navigationRef.navigate(action.payload.name, action.payload.params);
+            } catch (navError) {
+              console.error('Fallback navigation also failed:', navError);
+            }
+          }
           break;
         case 'reset':
           navigationRef.dispatch(
@@ -92,6 +145,83 @@ export function navigate(name: keyof RootStackParamList, params?: any) {
       timestamp: Date.now()
     });
     console.log('Navigation queued:', name);
+  }
+}
+
+/**
+ * Replace the current screen with a new screen
+ * @param name - The name of the screen to replace with
+ * @param params - The params to pass to the screen
+ */
+export function replace(name: keyof RootStackParamList, params?: any) {
+  if (navigationRef.isReady() && !isNavigating) {
+    isNavigating = true;
+    try {
+      // Try to use StackActions.replace if available
+      if (StackActions && typeof StackActions.replace === 'function') {
+        console.log('✅ [NavigationService] Using StackActions.replace');
+        // @ts-ignore - This is a workaround for TypeScript not handling the types correctly
+        navigationRef.dispatch(
+          StackActions.replace(name, params)
+        );
+      } else {
+        // Fallback: Use reset to replace current screen
+        console.log('⚠️ [NavigationService] StackActions.replace not available, using reset fallback');
+        // Get current navigation state
+        const rootState = navigationRef.getRootState();
+        if (rootState && rootState.routes && rootState.routes.length > 0) {
+          // Get routes before the current one (remove last route which is CallScreen)
+          const routesBeforeCurrent = rootState.routes.slice(0, -1);
+          // Add the new screen
+          const newRoutes = [
+            ...routesBeforeCurrent,
+            { name, params, key: `${name}-${Date.now()}` } as any
+          ];
+          
+          console.log('📊 [NavigationService] Resetting navigation with routes:', newRoutes.map(r => r.name));
+          // Reset navigation stack with new routes
+          navigationRef.dispatch(
+            CommonActions.reset({
+              index: newRoutes.length - 1,
+              routes: newRoutes,
+            })
+          );
+        } else {
+          // Final fallback: Just navigate normally
+          console.warn('⚠️ [NavigationService] Could not get root state, using navigate instead');
+          // @ts-ignore
+          navigationRef.navigate(name, params);
+        }
+      }
+    } catch (error) {
+      console.error('❌ [NavigationService] Error in replace:', error);
+      // Fallback: Just navigate normally
+      try {
+        console.log('⚠️ [NavigationService] Using fallback navigate');
+        // @ts-ignore
+        navigationRef.navigate(name, params);
+      } catch (navError) {
+        console.error('❌ [NavigationService] Fallback navigation also failed:', navError);
+      }
+    }
+    
+    // Reset navigation lock after a short delay on Android
+    if (Platform.OS === 'android') {
+      setTimeout(() => {
+        isNavigating = false;
+        processQueuedActions(); // Process any actions that were queued during navigation
+      }, 100);
+    } else {
+      isNavigating = false;
+    }
+  } else {
+    // Queue replace for when the navigator becomes ready
+    queuedActions.push({
+      type: 'replace',
+      payload: { name, params },
+      timestamp: Date.now()
+    });
+    console.log('Navigation replace queued:', name);
   }
 }
 
@@ -174,6 +304,7 @@ export function openNetworkDebugger() {
 // Export default object for more intuitive imports
 export default {
   navigate,
+  replace,
   reset,
   goBack,
   navigationRef,
