@@ -298,7 +298,18 @@ class CallFlowService {
     console.log('   Listener count:', socket.listeners('call:invite:incoming').length);
     
     // call:start - Call starts after invitation acceptance (both users receive this)
-    socket.on('call:start', (data: { callId: string; callerId: string; receiverId: string; metadata?: any; callHistoryId?: string }) => {
+    socket.on('call:start', (data: { 
+      callId: string; 
+      callerId: string; 
+      receiverId: string; 
+      metadata?: any; 
+      callHistoryId?: string;
+      callType?: string;
+      callerName?: string;
+      receiverName?: string;
+      callerProfilePic?: string;
+      receiverProfilePic?: string;
+    }) => {
       console.log('🎬 [BOTH] call:start event received:', data);
       console.log('   callId:', data.callId);
       this.handleCallStart(data);
@@ -679,7 +690,8 @@ class CallFlowService {
       const remoteUserName = currentCallState.remoteUserName;
       // callHistoryId can be null/undefined, convert to undefined for navigation params
       const callHistoryId = this.currentCall?.callHistoryId || invitationState.callHistoryId || undefined;
-      const userAvatar = invitationState.remoteUserProfilePic || undefined; // Get avatar from invitation state
+      // Get avatar from call state (for match_call) or invitation state (for direct_call)
+      const userAvatar = currentCallState.remoteUserProfilePic || invitationState.remoteUserProfilePic || undefined;
       
       console.log('📊 [callFlowService] Captured call data for PostCallFlow:');
       console.log('   remoteUserId:', remoteUserId);
@@ -690,8 +702,10 @@ class CallFlowService {
 
       // ✅ CRITICAL FIX: Navigate to PostCallFlowScreen FIRST (before updating to ENDED)
       // This prevents CallScreen's useEffect from navigating back and closing PostCallFlowScreen
-      // Navigate to PostCallFlowScreen if call duration > 10 seconds
-      if (callDuration > 10 && remoteUserId && remoteUserName) {
+      // Navigate to PostCallFlowScreen if call duration > 10 seconds and we have remoteUserId
+      // For match_call, userName might be empty initially, so use fallback
+      const finalRemoteUserName = remoteUserName || 'Partner';
+      if (callDuration > 10 && remoteUserId) {
         console.log('📞 [callFlowService] ============================================');
         console.log('📞 [callFlowService] Call duration > 10 seconds - navigating to PostCallFlow');
         console.log('📞 [callFlowService] ============================================');
@@ -710,7 +724,7 @@ class CallFlowService {
             interactionId?: string;
           } = {
             userId: remoteUserId, // TypeScript knows it's not null from the if condition
-            userName: remoteUserName, // TypeScript knows it's not null from the if condition
+            userName: finalRemoteUserName, // Use fallback if empty
             callDuration: callDuration,
           };
           
@@ -753,8 +767,8 @@ class CallFlowService {
         if (callDuration <= 10) {
           console.log('   Reason: Call duration too short (', callDuration, 'seconds, need > 10)');
         }
-        if (!remoteUserId || !remoteUserName) {
-          console.log('   Reason: Missing remote user data (userId:', remoteUserId, ', userName:', remoteUserName, ')');
+        if (!remoteUserId) {
+          console.log('   Reason: Missing remote user ID:', remoteUserId);
         }
         
         // If not navigating to PostCallFlow, update status to ENDED immediately
@@ -1493,7 +1507,18 @@ class CallFlowService {
    * 
    * IDEMPOTENT: Only handles each callId once to prevent duplicate processing
    */
-  private handleCallStart(data: { callId: string; callerId: string; receiverId: string; metadata?: any; callHistoryId?: string }): void {
+  private handleCallStart(data: { 
+    callId: string; 
+    callerId: string; 
+    receiverId: string; 
+    metadata?: any; 
+    callHistoryId?: string;
+    callType?: string;
+    callerName?: string;
+    receiverName?: string;
+    callerProfilePic?: string;
+    receiverProfilePic?: string;
+  }): void {
     // ✅ TASK 1: Make call:start idempotent - ignore duplicate events
     if (this.handledCallIds.has(data.callId)) {
       console.warn('⚠️ [callFlowService] Duplicate call:start ignored for callId:', data.callId);
@@ -1517,22 +1542,53 @@ class CallFlowService {
     console.log('   Is caller?', isCaller);
     console.log('   Is receiver?', isReceiver);
     
-    // Get invitation data before resetting (contains user names)
+    // Get invitation data before resetting (contains user names for direct_call)
     const invitationState = store.getState().call.invitation;
     const remoteUserId = isCaller ? data.receiverId : data.callerId;
-    const remoteUserName = invitationState.remoteUserName || '';
+    
+    // For match_call, get names from call:start data; for direct_call, use invitation state
+    const isMatchCall = data.callType === 'match_call';
+    let remoteUserName = '';
+    let remoteUserProfilePic: string | undefined;
+    
+    if (isMatchCall) {
+      // Match call: use names from call:start data
+      remoteUserName = (isCaller ? data.receiverName : data.callerName) || '';
+      remoteUserProfilePic = (isCaller ? data.receiverProfilePic : data.callerProfilePic);
+      console.log('   [MATCH_CALL] Using names from call:start data');
+      console.log('   [MATCH_CALL] Data received:', {
+        callerName: data.callerName,
+        receiverName: data.receiverName,
+        callerProfilePic: data.callerProfilePic,
+        receiverProfilePic: data.receiverProfilePic,
+        isCaller,
+        selectedName: remoteUserName
+      });
+      
+      // If name is still empty, set a fallback (shouldn't happen but safety check)
+      if (!remoteUserName || remoteUserName.trim() === '') {
+        console.warn('⚠️ [MATCH_CALL] remoteUserName is empty, using fallback');
+        remoteUserName = 'Partner'; // Fallback name
+      }
+    } else {
+      // Direct call: use names from invitation state
+      remoteUserName = invitationState.remoteUserName || '';
+      remoteUserProfilePic = invitationState.remoteUserProfilePic;
+      console.log('   [DIRECT_CALL] Using names from invitation state');
+    }
     
     console.log('   Remote user ID:', remoteUserId);
     console.log('   Remote user name:', remoteUserName);
+    console.log('   Call type:', isMatchCall ? 'match_call' : 'direct_call');
     
     // Create call session with proper names
     this.currentCall = {
       callId: data.callId,
       callerId: data.callerId,
       receiverId: data.receiverId,
-      callType: CallType.DIRECT_CALL,
+      callType: isMatchCall ? CallType.MATCH_CALL : CallType.DIRECT_CALL,
       callState: CallState.CONNECTING,
-      callerName: isReceiver ? (invitationState.remoteUserName || undefined) : undefined, // For receiver, caller name is in invitation (convert null to undefined)
+      callerName: isReceiver ? (remoteUserName || undefined) : undefined,
       metadata: data.metadata,
       callHistoryId: data.callHistoryId
     };
@@ -1566,7 +1622,8 @@ class CallFlowService {
       isAudioEnabled: true,
       callStartTime: null,
       callDuration: 0,
-      callHistoryId: data.callHistoryId
+      callHistoryId: data.callHistoryId,
+      remoteUserProfilePic: remoteUserProfilePic
     }));
     
     console.log('✅ [BOTH] Call state updated to CONNECTING');

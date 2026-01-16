@@ -34,7 +34,7 @@ import { useUserStatusService } from '../hooks/useUserStatus';
 import { useTheme } from '../context/ThemeContext';
 import { useTranslation } from 'react-i18next';
 import { useSelector } from 'react-redux';
-import { RootState } from '../redux/store';
+import { RootState, store } from '../redux/store';
 import type { UserStatusType } from '../redux/slices/userStatusSlice';
 
 // Define user type
@@ -329,7 +329,30 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     });
     
     // First, get ready-to-talk users (sorted by rating descending)
-    const readyUsersSorted = [...readyUsers]
+    // Log readyUsers before filtering
+    console.log('🔍 [SORTED_USERS] Current readyUsers:', readyUsers.map(u => ({
+      id: u._id,
+      name: u.name,
+      readyToTalk: u.readyToTalk
+    })));
+    
+    // Get Redux statuses for all users to check for searching
+    const reduxStatuses = store.getState().userStatus.statuses;
+    const readyUsersWithSearching = [...readyUsers];
+    
+    // Also add users from main list that are searching but not in readyUsers
+    users.forEach(user => {
+      const reduxStatus = reduxStatuses[user._id];
+      const isSearching = reduxStatus?.status === 'searching';
+      const isInReadyUsers = readyUsers.some(ru => ru._id === user._id);
+      
+      if (isSearching && !isInReadyUsers) {
+        console.log(`🔍 [SORTED_USERS] Adding searching user ${user.name} (${user._id}) to readyUsers`);
+        readyUsersWithSearching.push(user);
+      }
+    });
+    
+    const readyUsersSorted = readyUsersWithSearching
       .filter((user: User) => {
         // Apply same filters to ready users
         if (filterSettings.gender !== 'all') {
@@ -358,10 +381,24 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       })
       .sort((a, b) => (b.rating || 0) - (a.rating || 0));
     
+    // Get ready user IDs to exclude them from otherOnlineUsers
+    const readyUserIds = new Set(readyUsersWithSearching.map(u => u._id));
+    
     // Then get other online users (not ready to talk, sorted by rating descending)
     // Check status service as fallback for online status
     const otherOnlineUsers = filteredUsers
       .filter((user: User) => {
+        // Exclude users that are in readyUsers list
+        if (readyUserIds.has(user._id)) {
+          return false;
+        }
+        
+        // Exclude users with status "searching" (they're in readyUsers)
+        const reduxStatusForUser = reduxStatuses[user._id];
+        if (reduxStatusForUser?.status === 'searching') {
+          return false;
+        }
+        
         const status = simpleUserStatusService.getUserStatus(user._id);
         const isOnline = status?.isOnline ?? user.isOnline;
         const isOnCall = status?.isOnCall ?? user.isOnCall;
@@ -445,6 +482,20 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     const unsubscribe = simpleUserStatusService.subscribeToStatusUpdates((allStatuses) => {
       console.log('📊 LobbyScreen: Status update received, syncing to local state');
       
+      // Log status changes, especially for 'searching'
+      const currentReduxStatuses = store.getState().userStatus.statuses;
+      console.log('📊 LobbyScreen: Current Redux statuses:', Object.keys(currentReduxStatuses).map(userId => ({
+        userId,
+        status: currentReduxStatuses[userId]?.status,
+        lastUpdated: currentReduxStatuses[userId]?.lastUpdated
+      })));
+      
+      // Check for searching users
+      const searchingUsers = Object.keys(currentReduxStatuses).filter(userId => currentReduxStatuses[userId]?.status === 'searching');
+      if (searchingUsers.length > 0) {
+        console.log('🔍 LobbyScreen: Found searching users:', searchingUsers);
+      }
+      
       setUsers(prevUsers => {
         let hasChanges = false;
         const updatedUsers = prevUsers.map((user: User) => {
@@ -470,11 +521,41 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         // Only update state if there were actual changes
         if (hasChanges) {
           // Also update ready users list based on updated status
+          // Include users with readyToTalk OR status === 'searching'
           const filteredReadyUsers = updatedUsers.filter((user: User) => {
             const status = allStatuses.get(user._id);
             const isOnline = status?.isOnline ?? user.isOnline;
-            return isOnline && user.readyToTalk && !(status?.isOnCall ?? user.isOnCall);
+            const isOnCall = status?.isOnCall ?? user.isOnCall;
+            
+            // Get Redux status to check for 'searching'
+            const reduxStatus = store.getState().userStatus.statuses[user._id];
+            const isSearching = reduxStatus?.status === 'searching';
+            
+            // Log for searching users
+            if (isSearching) {
+              console.log(`🔍 [READY_USERS] Checking searching user ${user.name} (${user._id}):`, {
+                isOnline,
+                isOnCall,
+                readyToTalk: user.readyToTalk,
+                reduxStatus: reduxStatus?.status,
+                willInclude: isOnline && !isOnCall
+              });
+            }
+            
+            // Include if: online AND (readyToTalk OR searching) AND not on_call
+            const shouldInclude = isOnline && (user.readyToTalk || isSearching) && !isOnCall;
+            return shouldInclude;
           });
+          
+          console.log(`📊 [READY_USERS] Updated ready users list:`, {
+            total: filteredReadyUsers.length,
+            userIds: filteredReadyUsers.map(u => ({ id: u._id, name: u.name })),
+            searchingCount: filteredReadyUsers.filter(u => {
+              const reduxStatus = store.getState().userStatus.statuses[u._id];
+              return reduxStatus?.status === 'searching';
+            }).length
+          });
+          
           setReadyUsers(filteredReadyUsers);
         }
         
@@ -486,6 +567,67 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       unsubscribe();
     };
   }, [statusServiceReady]);
+
+  // Get all user statuses from Redux store
+  const allReduxStatuses = useSelector((state: RootState) => state.userStatus.statuses);
+
+  // Watch Redux status changes and update readyUsers when users become 'searching'
+  useEffect(() => {
+    console.log('🔍 [REDUX_WATCH] useEffect triggered, checking readyUsers');
+    console.log('🔍 [REDUX_WATCH] Current users count:', users.length);
+    console.log('🔍 [REDUX_WATCH] Redux statuses:', Object.keys(allReduxStatuses).map(userId => ({
+      userId,
+      status: allReduxStatuses[userId]?.status
+    })));
+    
+    // Filter users to include those with readyToTalk OR status === 'searching'
+    const filteredReadyUsers = users.filter((user: User) => {
+      const status = simpleUserStatusService.getUserStatus(user._id);
+      const isOnline = status?.isOnline ?? user.isOnline;
+      const isOnCall = status?.isOnCall ?? user.isOnCall;
+      
+      // Get Redux status to check for 'searching'
+      const reduxStatus = allReduxStatuses[user._id];
+      const isSearching = reduxStatus?.status === 'searching';
+      
+      // Log searching users
+      if (isSearching) {
+        console.log(`🔍 [REDUX_WATCH] User ${user.name} (${user._id}) is searching:`, {
+          isOnline,
+          isOnCall,
+          readyToTalk: user.readyToTalk,
+          reduxStatus: reduxStatus?.status,
+          willInclude: isOnline && (user.readyToTalk || isSearching) && !isOnCall
+        });
+      }
+      
+      // Include if: online AND (readyToTalk OR searching) AND not on_call
+      return isOnline && (user.readyToTalk || isSearching) && !isOnCall;
+    });
+    
+    // Only update if the list actually changed
+    const currentReadyIds = new Set(readyUsers.map(u => u._id));
+    const newReadyIds = new Set(filteredReadyUsers.map(u => u._id));
+    const hasChanged = currentReadyIds.size !== newReadyIds.size ||
+      [...currentReadyIds].some(id => !newReadyIds.has(id));
+    
+    if (hasChanged) {
+      console.log(`📊 [REDUX_WATCH] Updating readyUsers:`, {
+        previousCount: readyUsers.length,
+        newCount: filteredReadyUsers.length,
+        previousIds: [...currentReadyIds],
+        newIds: [...newReadyIds],
+        searchingUsers: filteredReadyUsers.filter(u => {
+          const reduxStatus = allReduxStatuses[u._id];
+          return reduxStatus?.status === 'searching';
+        }).map(u => ({ id: u._id, name: u.name }))
+      });
+      setReadyUsers(filteredReadyUsers);
+    } else {
+      console.log(`📊 [REDUX_WATCH] No changes detected, keeping readyUsers as is`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users, allReduxStatuses]); // Note: Intentionally exclude readyUsers from deps to avoid loop
 
   // Check microphone permission on component mount
   useEffect(() => {
@@ -767,7 +909,17 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       );
       
       // Also update ready users list
-      setReadyUsers(updatedUsers.filter((user: User) => user.isOnline && user.readyToTalk));
+      // Include users with readyToTalk OR status === 'searching'
+      setReadyUsers(updatedUsers.filter((user: User) => {
+        if (!user.isOnline) return false;
+        if (user.isOnCall) return false;
+        
+        // Check Redux status for 'searching'
+        const reduxStatus = store.getState().userStatus.statuses[user._id];
+        const isSearching = reduxStatus?.status === 'searching';
+        
+        return user.readyToTalk || isSearching;
+      }));
       
       return updatedUsers;
     });
@@ -791,16 +943,22 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         return user;
       });
       
-      // Filter ready users: must be online AND ready to talk AND not on call
+      // Filter ready users: must be online AND (readyToTalk OR searching) AND not on call
       // Check status service as fallback for online/call status
       const filteredReadyUsers = updatedUsers.filter((user: User) => {
         const status = simpleUserStatusService.getUserStatus(user._id);
         const isOnline = status?.isOnline ?? user.isOnline;
         const isOnCall = status?.isOnCall ?? user.isOnCall;
-        const isReadyUser = isOnline && user.readyToTalk && !isOnCall;
+        
+        // Get Redux status to check for 'searching'
+        const reduxStatus = store.getState().userStatus.statuses[user._id];
+        const isSearching = reduxStatus?.status === 'searching';
+        
+        // Include if: online AND (readyToTalk OR searching) AND not on_call
+        const isReadyUser = isOnline && (user.readyToTalk || isSearching) && !isOnCall;
         if (isReadyUser) {
-          console.log(`✅ User ${user.name} is ready to talk`);
-        } else if (isOnline && user.readyToTalk && isOnCall) {
+          console.log(`✅ User ${user.name} is ready to talk ${isSearching ? '(searching)' : ''}`);
+        } else if (isOnline && (user.readyToTalk || isSearching) && isOnCall) {
           console.log(`📞 User ${user.name} is ready to talk but currently on call`);
         }
         return isReadyUser;
@@ -865,13 +1023,19 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       
       const updatedUsers = Array.from(userMap.values());
       
-      // Filter to only show users who are online AND ready to talk AND not on call
+      // Filter to only show users who are online AND (readyToTalk OR searching) AND not on call
       // Check status service as fallback for online/call status
       const filteredReadyUsers = updatedUsers.filter((user: User) => {
         const status = simpleUserStatusService.getUserStatus(user._id);
         const isOnline = status?.isOnline ?? user.isOnline;
         const isOnCall = status?.isOnCall ?? user.isOnCall;
-        return isOnline && user.readyToTalk && !isOnCall;
+        
+        // Get Redux status to check for 'searching'
+        const reduxStatus = store.getState().userStatus.statuses[user._id];
+        const isSearching = reduxStatus?.status === 'searching';
+        
+        // Include if: online AND (readyToTalk OR searching) AND not on_call
+        return isOnline && (user.readyToTalk || isSearching) && !isOnCall;
       });
       
       console.log(`📊 Total ready users after list update: ${filteredReadyUsers.length}`);
@@ -881,14 +1045,29 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     });
   };
 
+  // Get user status from Redux store (used in handleCallPress)
+  const getUserStatusFromStore = (userId: string) => {
+    const state = store.getState();
+    return state.userStatus.statuses[userId] || { status: 'offline' as const };
+  };
+
   // Handle initiating a call to a user
   const handleCallPress = async (user: User) => {
     try {
+      // Get current user status from Redux
+      const userStatusData = getUserStatusFromStore(user._id);
+
+      // Check if user is searching - show Talk Now
+      if (userStatusData.status === 'searching') {
+        await handleTalkNow(user);
+        return;
+      }
+
       // Get current user status from the service
       const userStatus = simpleUserStatusService.getUserStatus(user._id);
       
       // Check if user is on call
-      if (userStatus?.isOnCall) {
+      if (userStatus?.isOnCall || userStatusData.status === 'on_call') {
         Alert.alert(
           'User Busy', 
           'This user is currently on a call. Please try calling them later.',
@@ -898,7 +1077,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       }
       
       // Check if user is online, but still allow calling with a warning
-      if (!user.isOnline) {
+      if (!user.isOnline && userStatusData.status !== 'online') {
         Alert.alert(
           'User Offline', 
           'This user is currently offline. You can still try to call them, but they may not answer immediately.',
@@ -921,6 +1100,67 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       Alert.alert(
         'Call Failed', 
         `Failed to start call: ${error.message || 'Please try again later.'}`
+      );
+    }
+  };
+
+  // Handle Talk Now - Instant connect to searching user
+  const handleTalkNow = async (user: User) => {
+    try {
+      console.log(`⚡ [TALK NOW] Initiating instant connection to ${user.name} (${user._id})`);
+
+      // Request microphone permission
+      const hasPermission = await requestMicrophonePermission();
+      if (!hasPermission) {
+        showPermissionExplanation();
+        return;
+      }
+
+      setShowProgress(true);
+      setProgressMessage('Connecting...');
+
+      // Call Talk Now API endpoint
+      const token = await getAuthToken();
+      const response = await fetch(`${API_URL}/calls/talk-now`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          targetUserId: user._id
+        })
+      });
+
+      // Check if response is ok and content type is JSON
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('❌ Server returned non-JSON response:', text.substring(0, 200));
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'Failed to connect');
+      }
+
+      setShowProgress(false);
+
+      // Show ConnectingModal immediately
+      setShowConnecting(true);
+      setConnectingPartner(user);
+
+      // call:start will be emitted by server, which will trigger WebRTC
+      console.log('✅ [TALK NOW] API call successful, waiting for call:start event');
+    } catch (error: any) {
+      console.error('❌ [TALK NOW] Error:', error);
+      setShowProgress(false);
+      Alert.alert(
+        'Connection Failed',
+        error.message || 'Failed to connect. The user may have been matched with someone else.',
+        [{ text: 'OK' }]
       );
     }
   };
@@ -1038,11 +1278,13 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         searchTimeoutRef.current = null;
       }
       
-      // Set user as ready to talk when they click "Find a perfect partner"
-      console.log('✅ Setting user as ready to talk');
-      socketService.socketEmit('set-ready-to-talk', { status: true });
-      setCurrentUserReady(true);
-      
+      // Request microphone permission
+      const hasPermission = await requestMicrophonePermission();
+      if (!hasPermission) {
+        showPermissionExplanation();
+        return;
+      }
+
       // Pick a random emoji for the search screen
       const emojis = ['👨‍🍳', '🧑‍🎓', '👩‍🏫', '🧑‍💼', '👨‍💻', '🧑‍🔬', '👩‍🚀', '🧑‍🎨'];
       setSearchEmoji(emojis[Math.floor(Math.random() * emojis.length)]);
@@ -1051,24 +1293,41 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       setShowPartnerSearch(true);
       setFindingPartner(true);
       
-      // Ensure socket connection is active
-      const socket = socketService.getSocket();
-      if (!socket || !socket.connected) {
-        console.log('Socket not connected, reconnecting...');
-        await socketService.initialize();
-      }
-      
-      // Request a random partner with saved preferences
-      console.log('📡 Emitting find-random-partner event with preferences:', filterSettings);
-      socketService.socketEmit('find-random-partner', {
-        preferences: {
-          gender: filterSettings.gender,
-          ratingMin: filterSettings.ratingMin,
-          ratingMax: filterSettings.ratingMax,
-          levelMin: ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'][filterSettings.levelMin],
-          levelMax: ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'][filterSettings.levelMax]
+      // Call Find Perfect Partner API endpoint
+      const token = await getAuthToken();
+      const response = await fetch(`${API_URL}/calls/find-partner`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         }
       });
+
+      // Check if response is ok and content type is JSON
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('❌ Server returned non-JSON response:', text.substring(0, 200));
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'Failed to start search');
+      }
+
+      if (data.matched) {
+        // Match found immediately - call:start will be emitted by server
+        console.log('✅ [AUTO-MATCH] Match found immediately:', data.callSession);
+        setShowPartnerSearch(false);
+        setShowConnecting(true);
+        // Partner info will come from call:start event
+      } else {
+        // No match yet - user is in queue, waiting for match
+        console.log('⏳ [AUTO-MATCH] No match yet, user added to queue');
+        // Show searching UI - call:start will be emitted when match is found
+      }
       
       // Set a timeout to avoid waiting too long
       searchTimeoutRef.current = setTimeout(() => {
@@ -1094,7 +1353,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   };
 
   // Cancel partner search
-  const handleCancelSearch = () => {
+  const handleCancelSearch = async () => {
     console.log('❌ Canceling partner search');
     
     // Clear timeout
@@ -1103,16 +1362,23 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       searchTimeoutRef.current = null;
     }
     
-    // Notify server to remove from queue
-    socketService.socketEmit('cancel-partner-search', {});
+    try {
+      // Call cancel search API endpoint
+      const token = await getAuthToken();
+      await fetch(`${API_URL}/calls/cancel-search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+    } catch (error) {
+      console.error('Error canceling search:', error);
+    }
     
     // Reset UI state
     setFindingPartner(false);
     setShowPartnerSearch(false);
-    
-    // Set as not ready to talk
-    socketService.socketEmit('set-ready-to-talk', { status: false });
-    setCurrentUserReady(false);
     
     console.log('✅ Partner search cancelled successfully');
   };
@@ -1336,6 +1602,48 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       setConnectingPartner(null);
     }, [])
   );
+
+  // Handle call:start for match_call type (auto-matching and talk now)
+  useEffect(() => {
+    const handleCallStart = (data: any) => {
+      console.log('🎬 [LOBBY] call:start received:', data);
+      
+      // Only handle match_call type (auto-matching and talk now)
+      if (data.callType === 'match_call') {
+        console.log('✅ [LOBBY] Match call detected, showing ConnectingModal');
+        
+        // Close partner search screen if open
+        setShowPartnerSearch(false);
+        setFindingPartner(false);
+        
+        // Show ConnectingModal
+        setShowConnecting(true);
+        
+        // Try to get partner info from users list
+        const authState = store.getState().auth;
+        const currentUserId = (authState as any).user?._id || (authState as any).userId;
+        const partnerId = data.callerId === currentUserId ? data.receiverId : data.callerId;
+        const partner = users.find(u => u._id === partnerId);
+        
+        if (partner) {
+          setConnectingPartner(partner);
+        } else {
+          // Partner not in list, create a minimal partner object
+          setConnectingPartner({
+            _id: partnerId,
+            name: 'Partner',
+            profilePic: undefined
+          });
+        }
+      }
+    };
+
+    socketService.socketOn('call:start', handleCallStart);
+    
+    return () => {
+      socketService.socketOff('call:start', handleCallStart);
+    };
+  }, [users]);
 
   // Set up global event listeners immediately when component mounts
   useEffect(() => {
