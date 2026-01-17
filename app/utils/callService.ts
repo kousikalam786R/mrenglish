@@ -1939,6 +1939,23 @@ class CallService {
       this.localStream = null;
     }
 
+    // Clean up remote stream
+    if (this.remoteStream) {
+      try {
+        this.remoteStream.getTracks().forEach(track => {
+          try {
+            track.stop();
+            console.log('📞 [callService.endCall] Stopped remote', track.kind, 'track');
+          } catch (trackError) {
+            console.error('📞 [callService.endCall] Error stopping remote', track.kind, 'track:', trackError);
+          }
+        });
+      } catch (streamError) {
+        console.error('📞 [callService.endCall] Error stopping remote stream:', streamError);
+      }
+      this.remoteStream = null;
+    }
+
     // Close peer connection
     if (this.pc) {
       try {
@@ -1963,11 +1980,20 @@ class CallService {
       this.pc = null;
     }
 
+    // ✅ CRITICAL FIX: Clear processed call IDs to allow new calls
+    // This ensures that after a call ends, the next call can start properly
+    if (this.processedReadyForWebRTCCallIds.size > 0) {
+      console.log('🧹 [callService.endCall] Clearing processed call IDs to allow new calls');
+      console.log('   Previous processed callIds:', Array.from(this.processedReadyForWebRTCCallIds));
+      this.processedReadyForWebRTCCallIds.clear();
+    }
+
     // NOTE: Status updates are handled by backend via socket events (call:end)
     // Backend automatically emits user:status:update for both users when call ends
     // No need to request status updates here - this was causing infinite loops
     
     console.log('📞 [callService.endCall] WebRTC cleanup complete');
+    console.log('✅ [callService.endCall] All resources cleaned up - ready for next call');
     // NOTE: Do NOT mutate callState or emit state changes here
     // Redux is the single source of truth - endActiveCall thunk handles state updates
   }

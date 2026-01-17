@@ -30,6 +30,7 @@ import {
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../redux/store';
 import { CallStatus, resetCallState } from '../redux/slices/callSlice';
+import callFlowService from '../utils/callFlowService';
 
 const { width } = Dimensions.get('window');
 
@@ -53,16 +54,38 @@ const ConnectingModal: React.FC = () => {
       connectingStartTime.current = Date.now();
       console.log('🟢 [ConnectingModal] ConnectingModal mounted');
       
-      // Timeout only resets Redux UI state.
-      // Call termination and WebRTC cleanup are handled by callFlowService.
+      // Timeout: Properly end the call to notify server and reset user status
+      // This ensures both users' status is reset from "on_call" to "online"
       timeoutRef.current = setTimeout(() => {
         const elapsed = Date.now() - (connectingStartTime.current || Date.now());
         console.warn('⏰ [ConnectingModal] Connection timeout after', Math.round(elapsed / 1000), 'seconds');
-        console.warn('   Resetting call state to close modal');
+        console.warn('   Ending call to reset user status on server');
         
-        dispatch(resetCallState());
+        // Try to get callId from multiple sources (same pattern as CallScreen)
+        let callId: string | null = callState.callId || null;
         
-        console.log('✅ [ConnectingModal] Call state reset - modal should close');
+        if (!callId) {
+          const currentCall = callFlowService.getCurrentCall();
+          callId = currentCall?.callId || null;
+          console.log('   Got callId from callFlowService:', callId);
+        }
+        
+        if (callId) {
+          // Properly end the call - this will:
+          // 1. Clean up WebRTC resources
+          // 2. Emit call-end event to server
+          // 3. Server will reset both users' status from "on_call" to "online"
+          console.log('✅ [ConnectingModal] Ending call with callId:', callId);
+          callFlowService.endCall(callId, 'connection-timeout');
+        } else {
+          // Fallback: If no callId found, just reset Redux state
+          // This should be rare - usually callId should be available
+          console.warn('⚠️ [ConnectingModal] No callId found, only resetting Redux state');
+          console.warn('   Server status may not be updated - user may still show as "on_call"');
+          dispatch(resetCallState());
+        }
+        
+        console.log('✅ [ConnectingModal] Call ended - modal should close and user status reset');
       }, 30000); // 30 seconds timeout
     } else {
       // Clear timeout if modal is hidden (connection succeeded or was cancelled)

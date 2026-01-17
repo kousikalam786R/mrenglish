@@ -25,7 +25,6 @@ import { requestMicrophonePermission, showPermissionExplanation, checkMicrophone
 import ProgressDialog from '../components/ProgressDialog';
 import Icon from 'react-native-vector-icons/Ionicons';
 import IconMaterial from 'react-native-vector-icons/MaterialIcons';
-import ConnectingScreen from '../components/ConnectingScreen';
 import PartnerSearchScreen from '../components/PartnerSearchScreen';
 import FilterModal, { FilterSettings } from '../components/FilterModal';
 //import { mediaDevices } from 'react-native-webrtc';
@@ -259,8 +258,6 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
   const [findingPartner, setFindingPartner] = useState(false);
   const [showPartnerSearch, setShowPartnerSearch] = useState(false);
   const [searchEmoji, setSearchEmoji] = useState('👨‍🍳');
-  const [showConnecting, setShowConnecting] = useState(false);
-  const [connectingPartner, setConnectingPartner] = useState<User | null>(null);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [filterSettings, setFilterSettings] = useState<FilterSettings>({
     gender: 'all',
@@ -1148,11 +1145,8 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
 
       setShowProgress(false);
 
-      // Show ConnectingModal immediately
-      setShowConnecting(true);
-      setConnectingPartner(user);
-
       // call:start will be emitted by server, which will trigger WebRTC
+      // ConnectingModal will show automatically when call state becomes CONNECTING
       console.log('✅ [TALK NOW] API call successful, waiting for call:start event');
     } catch (error: any) {
       console.error('❌ [TALK NOW] Error:', error);
@@ -1197,9 +1191,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       // Initialize call service (for WebRTC, will be used after acceptance)
       //callService.initialize();
       
-      // Close any progress/connecting dialogs
-      setShowConnecting(false);
-      setConnectingPartner(null);
+      // Close any progress dialogs
       setShowProgress(false);
       
       // INVITATION-FIRST ARCHITECTURE:
@@ -1321,8 +1313,7 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         // Match found immediately - call:start will be emitted by server
         console.log('✅ [AUTO-MATCH] Match found immediately:', data.callSession);
         setShowPartnerSearch(false);
-        setShowConnecting(true);
-        // Partner info will come from call:start event
+        // ConnectingModal will show automatically when call state becomes CONNECTING
       } else {
         // No match yet - user is in queue, waiting for match
         console.log('⏳ [AUTO-MATCH] No match yet, user added to queue');
@@ -1407,15 +1398,6 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
     );
   };
 
-  // Handle cancel connecting
-  const handleCancelConnecting = () => {
-    console.log('❌ Canceling connection');
-    setShowConnecting(false);
-    setConnectingPartner(null);
-    // Set as not ready
-    socketService.socketEmit('set-ready-to-talk', { status: false });
-    setCurrentUserReady(false);
-  };
 
   // Force close search screen (for debugging)
   const forceCloseSearchScreen = () => {
@@ -1465,11 +1447,8 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       
       console.log('🤝 Matched with:', partner.name);
 
-      // Show connecting screen for BOTH users
-      setConnectingPartner(partner);
-      setShowConnecting(true);
-
-      // Both users should see the connecting screen, but only one should initiate the call
+      // Both users will see ConnectingModal automatically when call state becomes CONNECTING
+      // Only one should initiate the call
       const initializeCall = async () => {
         try {
           const currentUserId = await getCurrentUserId();
@@ -1491,8 +1470,6 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
           }
         } catch (error) {
           console.error('Error in automatic call:', error);
-          setShowConnecting(false);
-          setConnectingPartner(null);
         }
       };
 
@@ -1545,8 +1522,6 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       const hasPermission = await requestMicrophonePermission();
       if (!hasPermission) {
         showPermissionExplanation();
-        setShowConnecting(false);
-        setConnectingPartner(null);
         return;
       }
       
@@ -1557,8 +1532,6 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       //callService.initialize();
       
       // Close all search screens
-      setShowConnecting(false);
-      setConnectingPartner(null);
       setShowPartnerSearch(false);
       setFindingPartner(false);
       
@@ -1575,8 +1548,6 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       
     } catch (error) {
       console.error('❌ Error in handleAutomaticCall:', error);
-      setShowConnecting(false);
-      setConnectingPartner(null);
     }
   };
 
@@ -1598,8 +1569,6 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       // Close partner search screen when returning to lobby (e.g., after call ends)
       setShowPartnerSearch(false);
       setFindingPartner(false);
-      setShowConnecting(false);
-      setConnectingPartner(null);
     }, [])
   );
 
@@ -1610,31 +1579,13 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
       
       // Only handle match_call type (auto-matching and talk now)
       if (data.callType === 'match_call') {
-        console.log('✅ [LOBBY] Match call detected, showing ConnectingModal');
+        console.log('✅ [LOBBY] Match call detected, ConnectingModal will show automatically');
         
         // Close partner search screen if open
         setShowPartnerSearch(false);
         setFindingPartner(false);
         
-        // Show ConnectingModal
-        setShowConnecting(true);
-        
-        // Try to get partner info from users list
-        const authState = store.getState().auth;
-        const currentUserId = (authState as any).user?._id || (authState as any).userId;
-        const partnerId = data.callerId === currentUserId ? data.receiverId : data.callerId;
-        const partner = users.find(u => u._id === partnerId);
-        
-        if (partner) {
-          setConnectingPartner(partner);
-        } else {
-          // Partner not in list, create a minimal partner object
-          setConnectingPartner({
-            _id: partnerId,
-            name: 'Partner',
-            profilePic: undefined
-          });
-        }
+        // ConnectingModal will show automatically when call state becomes CONNECTING
       }
     };
 
@@ -1840,13 +1791,6 @@ const LobbyScreen = ({ navigation }: LobbyScreenProps) => {
         onCancel={handleCancelSearch}
         onSettings={handleSearchSettings}
         emoji={searchEmoji}
-      />
-      
-      {/* Connecting Screen */}
-      <ConnectingScreen
-        visible={showConnecting}
-        partnerName={connectingPartner?.name}
-        onCancel={handleCancelConnecting}
       />
       
       {/* Progress Dialog */}
